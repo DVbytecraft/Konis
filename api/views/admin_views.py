@@ -1,0 +1,351 @@
+"""
+API Admin : supervision et administration entreprise.
+"""
+
+from django.contrib.auth.models import Group
+from django.db import transaction
+from rest_framework import status
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from rest_framework.viewsets import ModelViewSet
+
+from audit.services import audit_log
+from api.permissions import IsAdminRole
+from api.serializers import (
+    AchatUsineSerializer,
+    CategorieDepenseSerializer,
+    CategorieSerializer,
+    DepenseSerializer,
+    EntrepriseSerializer,
+    FactoryCreateSerializer,
+    FactorySerializer,
+    FactoryUpdateSerializer,
+    LieuSerializer,
+    ProduitSerializer,
+    StockSerializer,
+    TicketSerializer,
+    TransfertSerializer,
+    UserSerializer,
+)
+from core.models import Entreprise, Lieu, CustomUser
+from depenses.models import CategorieDepense, Depense
+from inventaire.models import AchatUsine, Stock, Transfert
+from produits.models import Categorie, Produit
+from ventes.models import Ticket
+
+
+def _filter_by_lieu(qs, request, lieu_field="lieu"):
+    """Applique le filtre ?lieu=id sur le queryset."""
+    lieu_id = request.query_params.get("lieu")
+    if lieu_id:
+        return qs.filter(**{f"{lieu_field}": lieu_id})
+    return qs
+
+
+class EntrepriseViewSet(ModelViewSet):
+    queryset = Entreprise.objects.all()
+    serializer_class = EntrepriseSerializer
+    permission_classes = [IsAdminRole]
+
+
+class LieuViewSet(ModelViewSet):
+    queryset = Lieu.objects.all().select_related("entreprise")
+    serializer_class = LieuSerializer
+    permission_classes = [IsAdminRole]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        entreprise_id = self.request.query_params.get("entreprise")
+        if entreprise_id:
+            qs = qs.filter(entreprise_id=entreprise_id)
+        lieu_id = self.request.query_params.get("lieu")
+        if lieu_id:
+            qs = qs.filter(pk=lieu_id)
+        type_lieu = self.request.query_params.get("type_lieu")
+        if type_lieu:
+            normalized = {
+                "shop": Lieu.TYPE_MAGASIN,
+                "magasin": Lieu.TYPE_MAGASIN,
+                "factory": Lieu.TYPE_USINE,
+                "usine": Lieu.TYPE_USINE,
+            }.get(type_lieu.lower(), type_lieu.lower())
+            qs = qs.filter(type_lieu=normalized)
+        return qs
+
+
+class FactoryViewSet(ModelViewSet):
+    """Admin: création et gestion des usines + compte utilisateur usine associé."""
+
+    permission_classes = [IsAdminRole]
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
+
+    def get_queryset(self):
+        qs = Lieu.objects.filter(type_lieu=Lieu.TYPE_USINE).select_related("entreprise", "compte_boutique")
+        entreprise_id = self.request.query_params.get("entreprise")
+        if entreprise_id:
+            qs = qs.filter(entreprise_id=entreprise_id)
+        active = self.request.query_params.get("active")
+        if active in ("true", "false"):
+            qs = qs.filter(is_active=(active == "true"))
+        return qs.order_by("nom")
+
+    def get_serializer_class(self):
+        if self.action == "create":
+            return FactoryCreateSerializer
+        if self.action in ("partial_update", "update"):
+            return FactoryUpdateSerializer
+        return FactorySerializer
+
+    def list(self, request, *args, **kwargs):
+        data = FactorySerializer(self.get_queryset(), many=True).data
+        return Response(data)
+
+    def retrieve(self, request, *args, **kwargs):
+        factory = self.get_object()
+        return Response(FactorySerializer(factory).data)
+
+    def create(self, request, *args, **kwargs):
+        ser = FactoryCreateSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        entreprise = ser.validated_data.get("entreprise")
+        if entreprise is None:
+            entreprise = Entreprise.objects.order_by("id").first()
+            if entreprise is None:
+                return Response(
+                    {"detail": "Aucune entreprise disponible. Créez une entreprise d'abord."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        email = ser.validated_data["user_email"].strip().lower()
+        username_base = email.split("@")[0] if "@" in email else email
+        username = username_base
+        i = 1
+        while CustomUser.objects.filter(username=username).exists():
+            username = f"{username_base}{i}"
+            i += 1
+
+        with transaction.atomic():
+            factory = Lieu.objects.create(
+                entreprise=entreprise,
+                nom=ser.validated_data["factory_name"],
+                adresse=ser.validated_data.get("factory_address", ""),
+                type_lieu=Lieu.TYPE_USINE,
+                is_active=True,
+            )
+            user = CustomUser.objects.create_user(
+                username=username,
+                email=email,
+                password=ser.validated_data["user_password"],
+                first_name=ser.validated_data.get("user_first_name", ""),
+                last_name=ser.validated_data.get("user_last_name", ""),
+                role=CustomUser.ROLE_USINE,
+                entreprise=entreprise,
+                lieu=factory,
+                is_active=True,
+            )
+            group, _ = Group.objects.get_or_create(name="Factory")
+            user.groups.add(group)
+
+        audit_log(
+            user=request.user,
+            action="factory_created",
+            object_type="lieu",
+            object_id=factory.pk,
+            extra={"factory_id": factory.pk, "factory_user_id": user.pk},
+        )
+        return Response(FactorySerializer(factory).data, status=status.HTTP_201_CREATED)
+
+    def partial_update(self, request, *args, **kwargs):
+        factory = self.get_object()
+        try:
+            user = factory.compte_boutique
+        except CustomUser.DoesNotExist:
+            user = None
+        ser = FactoryUpdateSerializer(data=request.data, partial=True, context={"instance": factory, "user": user})
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
+
+        with transaction.atomic():
+            if "factory_name" in data:
+                factory.nom = data["factory_name"]
+            if "factory_address" in data:
+                factory.adresse = data["factory_address"]
+            if "is_active" in data:
+                factory.is_active = data["is_active"]
+            factory.save()
+
+            if user:
+                if "user_email" in data:
+                    user.email = data["user_email"].strip().lower()
+                if "user_first_name" in data:
+                    user.first_name = data["user_first_name"]
+                if "user_last_name" in data:
+                    user.last_name = data["user_last_name"]
+                if "is_active" in data:
+                    user.is_active = data["is_active"]
+                if "user_password" in data:
+                    user.set_password(data["user_password"])
+                user.save()
+
+        audit_log(
+            user=request.user,
+            action="factory_updated",
+            object_type="lieu",
+            object_id=factory.pk,
+            extra={"factory_id": factory.pk},
+        )
+        return Response(FactorySerializer(factory).data)
+
+    def destroy(self, request, *args, **kwargs):
+        factory = self.get_object()
+        factory.is_active = False
+        factory.save(update_fields=["is_active"])
+        try:
+            user = factory.compte_boutique
+        except CustomUser.DoesNotExist:
+            user = None
+        if user:
+            user.is_active = False
+            user.save(update_fields=["is_active"])
+        audit_log(
+            user=request.user,
+            action="factory_deactivated",
+            object_type="lieu",
+            object_id=factory.pk,
+            extra={"factory_id": factory.pk},
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class LocationByTypeView(APIView):
+    """GET /api/locations/by-type/?type=shop|factory."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        type_param = (request.query_params.get("type") or "").strip().lower()
+        type_map = {
+            "shop": Lieu.TYPE_MAGASIN,
+            "magasin": Lieu.TYPE_MAGASIN,
+            "factory": Lieu.TYPE_USINE,
+            "usine": Lieu.TYPE_USINE,
+        }
+        if type_param and type_param not in type_map:
+            return Response(
+                {"detail": "type doit être 'shop' ou 'factory'."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        qs = Lieu.objects.filter(is_active=True).select_related("entreprise")
+        if request.user.role != CustomUser.ROLE_ADMIN:
+            if request.user.entreprise_id is None:
+                return Response([], status=status.HTTP_200_OK)
+            qs = qs.filter(entreprise_id=request.user.entreprise_id)
+        if type_param:
+            qs = qs.filter(type_lieu=type_map[type_param])
+        entreprise_id = request.query_params.get("entreprise")
+        if entreprise_id:
+            qs = qs.filter(entreprise_id=entreprise_id)
+        # Retourner un format simplifie pour les selects
+        data = [{"id": l.id, "nom": l.nom, "type_lieu": l.type_lieu} for l in qs]
+        return Response(data)
+
+
+class UserViewSet(ModelViewSet):
+    queryset = CustomUser.objects.all().select_related("lieu", "entreprise")
+    serializer_class = UserSerializer
+    permission_classes = [IsAdminRole]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        lieu_id = self.request.query_params.get("lieu")
+        if lieu_id:
+            qs = qs.filter(lieu_id=lieu_id)
+        return qs
+
+
+class CategorieViewSet(ModelViewSet):
+    queryset = Categorie.objects.all()
+    serializer_class = CategorieSerializer
+    permission_classes = [IsAdminRole]
+
+
+class ProduitViewSet(ModelViewSet):
+    """Admin supervision: lecture seule des produits (filtrés par entreprise de l'admin)."""
+    serializer_class = ProduitSerializer
+    permission_classes = [IsAdminRole]
+    http_method_names = ["get", "head", "options"]
+
+    def get_queryset(self):
+        return Produit.objects.filter(
+            entreprise=self.request.user.entreprise
+        ).select_related("categorie")
+
+
+class StockViewSet(ModelViewSet):
+    queryset = Stock.objects.all().select_related("produit", "lieu")
+    serializer_class = StockSerializer
+    permission_classes = [IsAdminRole]
+
+    def get_queryset(self):
+        return _filter_by_lieu(super().get_queryset(), self.request)
+
+
+class TransfertViewSet(ModelViewSet):
+    queryset = Transfert.objects.all().select_related("from_lieu", "to_lieu").prefetch_related("mouvements__produit")
+    serializer_class = TransfertSerializer
+    permission_classes = [IsAdminRole]
+    http_method_names = ["get", "head", "options"]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        lieu_id = self.request.query_params.get("lieu")
+        if lieu_id:
+            qs = qs.filter(from_lieu_id=lieu_id) | qs.filter(to_lieu_id=lieu_id)
+        return qs.distinct()
+
+
+class AchatUsineViewSet(ModelViewSet):
+    queryset = AchatUsine.objects.all().select_related("lieu", "created_by")
+    serializer_class = AchatUsineSerializer
+    permission_classes = [IsAdminRole]
+    http_method_names = ["get", "head", "options"]
+
+    def get_queryset(self):
+        return _filter_by_lieu(super().get_queryset(), self.request)
+
+
+class TicketAdminViewSet(ModelViewSet):
+    """Admin : liste des tickets (lecture). Création via boutique ou admin avec lieu."""
+    queryset = Ticket.objects.all().select_related("lieu").prefetch_related("lignes__produit").order_by("-date")
+    serializer_class = TicketSerializer
+    permission_classes = [IsAdminRole]
+    http_method_names = ["get", "head", "options"]
+
+    def get_queryset(self):
+        return _filter_by_lieu(super().get_queryset(), self.request)
+
+
+class CategorieDepenseViewSet(ModelViewSet):
+    queryset = CategorieDepense.objects.all()
+    serializer_class = CategorieDepenseSerializer
+    permission_classes = [IsAdminRole]
+
+
+class DepenseViewSet(ModelViewSet):
+    queryset = Depense.objects.all().select_related("lieu", "categorie")
+    serializer_class = DepenseSerializer
+    permission_classes = [IsAdminRole]
+
+    def get_queryset(self):
+        return _filter_by_lieu(super().get_queryset(), self.request)
+
+    def perform_create(self, serializer):
+        depense = serializer.save()
+        audit_log(
+            user=self.request.user,
+            action="depense_ajoutee",
+            object_type="depense",
+            object_id=depense.pk,
+            extra={"lieu_id": depense.lieu_id, "montant": str(depense.montant)},
+        )

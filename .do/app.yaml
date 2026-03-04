@@ -1,0 +1,166 @@
+# ============================================================
+# KONIS — DigitalOcean App Platform Spec
+# Documentation : https://docs.digitalocean.com/products/app-platform/reference/app-spec/
+#
+# Architecture :
+#   - backend   : Django 5.2 + Gunicorn  (port 8000)
+#   - frontend  : Next.js 14 standalone  (port 3000)
+#   - db        : PostgreSQL managé      (DATABASE_URL injecté automatiquement)
+#   - redis     : Redis managé           (REDIS_URL injecté automatiquement)
+#
+# Premier déploiement — procédure en 2 temps :
+#   1. Déployer UNIQUEMENT le backend (commenter le bloc frontend ci-dessous).
+#      → Noter l'URL auto-générée du backend (ex: backend-konis-xxxxx.ondigitalocean.app)
+#   2. Remplacer tous les "TO_FILL_BACKEND_URL" par cette URL.
+#      Décommenter le bloc frontend, puis redéployer.
+#
+# Générer DJANGO_SECRET_KEY :
+#   python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
+#
+# Générer INTERNAL_API_SECRET :
+#   openssl rand -hex 32
+# ============================================================
+
+name: konis
+region: fra   # Frankfurt — modifier si besoin (ams, nyc, sfo, sgp, blr)
+
+# ── Services ──────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── Backend Django ──────────────────────────────────────────────────────────
+  - name: backend
+    # Dockerfile.prod à la racine du dépôt (multi-stage, non-root, healthcheck)
+    dockerfile_path: Dockerfile.prod
+    source_dir: .           # Contexte de build = racine du dépôt (. = repo root, pas /sys root)
+    http_port: 8000
+    instance_count: 1
+
+    # Taille de l'instance — adapter selon la charge :
+    #   professional-xs : 512MB RAM, 0.5 vCPU dédié  → ~12$/mois  (dev/staging)
+    #   professional-s  : 1GB   RAM, 1   vCPU dédié  → ~25$/mois  (prod légère)
+    #   professional-m  : 2GB   RAM, 2   vCPU dédié  → ~50$/mois  (prod standard)
+    instance_size_slug: professional-xs
+
+    envs:
+      # ── Django ──────────────────────────────────────────────────────────────
+      - key: DJANGO_SETTINGS_MODULE
+        value: konis.settings.prod
+        scope: RUN_AND_BUILD_TIME
+
+      # OBLIGATOIRE — générer avec la commande ci-dessus, ne jamais committer
+      - key: DJANGO_SECRET_KEY
+        type: SECRET
+        value: "TO_FILL_GENERATE_WITH_DJANGO_COMMAND"
+
+      # Après 1er déploiement : mettre le hostname généré du service backend
+      # Ex : backend-konis-xxxxx.ondigitalocean.app
+      # Si domaine custom : ajouter aussi votre-domaine.com
+      - key: DJANGO_ALLOWED_HOSTS
+        value: "TO_FILL_BACKEND_HOSTNAME.ondigitalocean.app"
+
+      # ── Base de données — injectée automatiquement depuis le composant "db" ──
+      - key: DATABASE_URL
+        value: ${db.DATABASE_URL}
+
+      # ── Redis — injectée automatiquement depuis le composant "redis" ─────────
+      - key: REDIS_URL
+        value: ${redis.REDIS_URL}
+
+      # ── CORS — après 1er déploiement frontend, mettre son URL ────────────────
+      # Pas strictement nécessaire (le navigateur passe par le proxy Next.js),
+      # mais bonne pratique de sécurité.
+      - key: CORS_ALLOWED_ORIGINS
+        value: "https://TO_FILL_FRONTEND_HOSTNAME.ondigitalocean.app"
+
+      # ── Secret partagé Next.js ↔ Django — même valeur que dans le frontend ───
+      - key: INTERNAL_API_SECRET
+        type: SECRET
+        value: "TO_FILL_GENERATE_WITH_OPENSSL"
+
+      # ── Gunicorn workers — adapter à l'instance ──────────────────────────────
+      # professional-xs (0.5 vCPU) → 2 workers
+      # professional-s  (1   vCPU) → 3 workers
+      # professional-m  (2   vCPU) → 5 workers
+      # Formule : (2 × nb_vCPU) + 1
+      - key: GUNICORN_WORKERS
+        value: "2"
+
+      - key: GUNICORN_THREADS
+        value: "2"
+
+      # ── Optionnel : Sentry error tracking ────────────────────────────────────
+      # - key: SENTRY_DSN
+      #   type: SECRET
+      #   value: "https://xxxx@sentry.io/yyyy"
+
+    health_check:
+      http_path: /api/health/
+      initial_delay_seconds: 45   # Laisse le temps aux migrations de s'exécuter
+      period_seconds: 30
+      timeout_seconds: 10
+      failure_threshold: 3
+
+
+  # ── Frontend Next.js ────────────────────────────────────────────────────────
+  # ÉTAPE 2 : décommenter après avoir noté l'URL du backend ci-dessus
+  - name: frontend
+    dockerfile_path: frontend/Dockerfile.prod   # Chemin depuis la racine du dépôt
+    source_dir: frontend                        # Contexte de build = dossier frontend/
+    http_port: 3000
+    instance_count: 1
+
+    # basic-xs : 1GB RAM, 1 vCPU partagé → ~12$/mois (Next.js standalone est léger)
+    instance_size_slug: basic-xs
+
+    envs:
+      # URL backend utilisée par le SERVEUR Next.js (proxy catch-all → Django).
+      # Sur App Platform : mettre l'URL publique HTTPS du service backend.
+      # (App Platform ne fournit pas de réseau privé Docker entre services.)
+      - key: BACKEND_URL
+        value: "https://TO_FILL_BACKEND_HOSTNAME.ondigitalocean.app"
+        scope: RUN_TIME
+
+      # URL backend côté NAVIGATEUR — uniquement pour djangoUrl() (impression tickets/factures).
+      # IMPORTANT : Next.js embarque NEXT_PUBLIC_* au BUILD TIME.
+      # Même valeur que BACKEND_URL. Si l'URL change, reconstruire l'image.
+      - key: NEXT_PUBLIC_API_URL
+        value: "https://TO_FILL_BACKEND_HOSTNAME.ondigitalocean.app"
+        scope: BUILD_TIME
+
+      # Même valeur que dans backend — OBLIGATOIRE
+      - key: INTERNAL_API_SECRET
+        type: SECRET
+        value: "TO_FILL_SAME_AS_BACKEND"
+
+    health_check:
+      http_path: /
+      initial_delay_seconds: 20
+      period_seconds: 30
+      timeout_seconds: 10
+      failure_threshold: 3
+
+
+# ── Bases de données managées ──────────────────────────────────────────────────
+
+databases:
+
+  # ── PostgreSQL ───────────────────────────────────────────────────────────────
+  - name: db
+    engine: PG
+    version: "15"
+    # Tailles disponibles :
+    #   db-s-dev-database : ~15$/mois (dev/staging — pas de backups automatiques)
+    #   db-s-1vcpu-1gb    : ~50$/mois (prod — backups quotidiens inclus)
+    #   db-s-2vcpu-4gb    : ~100$/mois
+    size: db-s-dev-database
+    num_nodes: 1          # 2 = High Availability (réplication) → prix doublé
+
+  # ── Redis ────────────────────────────────────────────────────────────────────
+  # Nécessaire pour le rate limiting DRF multi-workers.
+  # Sans Redis : chaque instance Gunicorn a son propre compteur → throttles non respectés.
+  - name: redis
+    engine: REDIS
+    version: "7"
+    size: db-s-dev-database   # ~15$/mois
+    num_nodes: 1

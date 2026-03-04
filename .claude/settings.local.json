@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(DATABASE_URL=postgres://konis_user:konis_password@localhost:5433/konis_db python manage.py:*)",
+      "Bash(DATABASE_URL=postgres://konis_user:konis_password@localhost:5433/konis_db DJANGO_SETTINGS_MODULE=konis.settings.prod DJANGO_SECRET_KEY=abcdefghijklmnopqrstuvwxyz0123456789abcdefghij01234 DJANGO_ALLOWED_HOSTS=konis.example.com python manage.py check:*)",
+      "Bash(find /c/Users/RAPHAEL/Pictures/\"konis \\(1\\)\"/konis -type f -name \"*.py\")"
+    ]
+  }
+}

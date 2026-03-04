@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=80mm, initial-scale=1.0">
+    <title>Ticket {{ ticket.numero }}</title>
+    <style>
+        /* Ticket 80mm - XPrinter / impression thermique */
+        @page {
+            size: 80mm auto;
+            margin: 2mm 4mm;
+        }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            width: 72mm;
+            max-width: 72mm;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 11px;
+            line-height: 1.3;
+            padding: 1mm 0;
+        }
+        .header {
+            text-align: center;
+            border-bottom: 1px dashed #000;
+            padding-bottom: 4px;
+            margin-bottom: 4px;
+        }
+        .ticket-num {
+            font-weight: bold;
+            font-size: 12px;
+        }
+        .lieu {
+            font-size: 10px;
+        }
+        .date {
+            font-size: 9px;
+        }
+        .ligne {
+            display: flex;
+            justify-content: space-between;
+            margin: 2px 0;
+        }
+        .lignes {
+            border-bottom: 1px dashed #000;
+            padding-bottom: 4px;
+            margin-bottom: 4px;
+        }
+        .total {
+            font-weight: bold;
+            text-align: right;
+            font-size: 12px;
+        }
+        .footer {
+            text-align: center;
+            font-size: 9px;
+            margin-top: 8px;
+        }
+        @media print {
+            body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="ticket-num">{{ ticket.numero }}</div>
+        <div class="lieu">{{ ticket.lieu.nom }}</div>
+        <div class="date">{{ ticket.date|date:"d/m/Y H:i" }}</div>
+    </div>
+    <div class="lignes">
+        {% for ligne in ticket.lignes.all %}
+        <div class="ligne">
+            <span>{{ ligne.produit.nom }} x{{ ligne.quantite }} @ {{ ligne.prix_unitaire }}</span>
+            <span>{{ ligne.total }}</span>
+        </div>
+        {% endfor %}
+    </div>
+    {% if ticket.mouture %}
+    <div class="lignes">
+        <div style="text-align:center; font-weight:bold; margin:2px 0;">─── MOUTURE ───</div>
+        <div class="ligne"><span><b>MOUTURE : OUI</b></span></div>
+        {% if ticket.prix_mouture_kg %}
+        <div class="ligne"><span>Mouture/kg</span><span>{{ ticket.prix_mouture_kg }} FCFA/kg</span></div>
+        {% endif %}
+        {% if ticket.prix_mouture_tonne %}
+        <div class="ligne"><span>Mouture/tonne</span><span>{{ ticket.prix_mouture_tonne }} FCFA/t</span></div>
+        {% endif %}
+        {% if ticket.prix_mouture_sac %}
+        <div class="ligne"><span>Mouture/sac</span><span>{{ ticket.prix_mouture_sac }} FCFA/sac</span></div>
+        {% endif %}
+        <div class="ligne"><span>Coût mouture</span><span>{{ ticket.cout_mouture }} FCFA</span></div>
+    </div>
+    {% else %}
+    <div style="font-size:9px; margin:2px 0;">MOUTURE : NON</div>
+    {% endif %}
+    <div class="total">TOTAL: {{ ticket.montant_total }} FCFA</div>
+    <div class="footer">Merci de votre visite</div>
+</body>
+</html>

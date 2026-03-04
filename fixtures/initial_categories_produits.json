@@ -1,0 +1,26 @@
+[
+  {
+    "model": "produits.categorie",
+    "pk": 1,
+    "fields": {
+      "nom": "Matieres premieres",
+      "created_at": "2025-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "produits.categorie",
+    "pk": 2,
+    "fields": {
+      "nom": "Produits finis",
+      "created_at": "2025-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "produits.categorie",
+    "pk": 3,
+    "fields": {
+      "nom": "Produits boutique manuels",
+      "created_at": "2025-01-01T00:00:00Z"
+    }
+  }
+]

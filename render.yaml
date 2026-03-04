@@ -1,0 +1,38 @@
+# Render Blueprint – KONIS Backend + PostgreSQL
+# Déployer depuis le dossier konis (backend) ou adapter "rootDir".
+# Documentation : https://render.com/docs/blueprint-spec
+
+services:
+  # Backend Django (Web Service)
+  - type: web
+    name: konis-api
+    runtime: python
+    region: frankfurt  # ou oregon
+    plan: free  # ou starter pour persistance
+
+    buildCommand: pip install -r requirements.txt && python manage.py collectstatic --noinput
+    startCommand: gunicorn konis.wsgi -b 0.0.0.0:$PORT -w 2 --timeout 120
+    releaseCommand: python manage.py migrate --noinput
+
+    envVars:
+      - key: DJANGO_SETTINGS_MODULE
+        value: konis.settings.prod
+      - key: PYTHON_VERSION
+        value: "3.12"
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: DJANGO_ALLOWED_HOSTS
+        sync: false  # à définir manuellement : .onrender.com,votredomaine.com
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false  # à définir : https://votre-app.vercel.app
+      - key: DATABASE_URL
+        fromDatabase:
+          name: konis-db
+          property: connectionString
+
+databases:
+  - name: konis-db
+    databaseName: konis
+    user: konis
+    region: frankfurt
+    plan: free  # ou starter pour backups automatiques

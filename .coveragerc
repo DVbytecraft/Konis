@@ -1,0 +1,16 @@
+[run]
+source = .
+omit =
+    */migrations/*
+    */tests/*
+    */settings/*
+    manage.py
+    konis/wsgi.py
+    konis/asgi.py
+
+[report]
+show_missing = true
+fail_under = 70
+
+[html]
+directory = htmlcov

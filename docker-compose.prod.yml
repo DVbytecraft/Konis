@@ -1,0 +1,244 @@
+# ============================================================
+# KONIS — Docker Compose de PRODUCTION (avec HTTPS Let's Encrypt)
+#
+# STRATÉGIE DE DÉPLOIEMENT — CONSTRUIRE EN LOCAL, POUSSER, PULLER SUR SERVEUR
+# ─────────────────────────────────────────────────────────────────────────────
+# NE JAMAIS builder directement sur le serveur de production.
+#
+# 1. En local (ou CI/CD) :
+#    docker build -t ghcr.io/<org>/konis-backend:v1.0 -f Dockerfile.prod .
+#    docker build -t ghcr.io/<org>/konis-frontend:v1.0 -f frontend/Dockerfile.prod ./frontend
+#    docker push ghcr.io/<org>/konis-backend:v1.0
+#    docker push ghcr.io/<org>/konis-frontend:v1.0
+#    Puis remplacer les sections build: par image: ci-dessous (TAG_BACKEND / TAG_FRONTEND).
+#
+# 2. Sur le serveur (déploiement propre) :
+#    docker login ghcr.io
+#    docker compose -f docker-compose.prod.yml --env-file .env.prod pull
+#    docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+#
+# Usage initial (première fois, acquisition du certificat SSL) :
+#   1. Copier et remplir .env.prod.example → .env.prod
+#   2. docker compose -f docker-compose.prod.yml --env-file .env.prod up -d nginx
+#   3. bash scripts/init-ssl.sh
+#   4. docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+#
+# Architecture :
+#   Internet → nginx:80/443 → frontend:3000 (Next.js)
+#                           → backend:8000  (Django/Gunicorn)
+#   redis:6379 → backend (cache partagé entre workers Gunicorn)
+#   db:5432    → backend (PostgreSQL interne uniquement)
+#
+# IMPORTANT : Toujours créer un backup avant de déployer (backup/backup.sh).
+# ============================================================
+
+services:
+
+  # ── Base de données PostgreSQL ─────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    container_name: konis_db_prod
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       ${POSTGRES_DB}
+      POSTGRES_USER:     ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGCLIENTENCODING:  UTF8
+    # Tuning PostgreSQL — serveur 4 vCPU / 8 GB RAM / SSD NVMe.
+    # shared_buffers = 25% RAM, effective_cache_size = 75% RAM.
+    # max_connections réduit : 9 workers × 2 threads = 18 connexions max
+    # simultanées (CONN_MAX_AGE=600) → max_connections=50 suffit avec marge.
+    command: >
+      postgres
+        -c shared_buffers=2GB
+        -c effective_cache_size=6GB
+        -c work_mem=16MB
+        -c maintenance_work_mem=256MB
+        -c checkpoint_completion_target=0.9
+        -c wal_buffers=16MB
+        -c random_page_cost=1.1
+        -c effective_io_concurrency=200
+        -c max_connections=50
+        -c log_min_duration_statement=500
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Répertoire de backup accessible depuis le service backup-cron
+      - postgres_backups:/backups
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    # AUCUN port exposé vers l'hôte : seul le réseau interne y accède
+    networks:
+      - konis_internal
+
+  # ── Cache Redis (partagé entre workers Gunicorn) ───────────────────────────
+  # Obligatoire : le rate limiting DRF (anti-bruteforce) utilise le cache Django.
+  # Sans Redis, chaque worker Gunicorn a son propre cache mémoire → limits non respectées.
+  redis:
+    image: redis:7-alpine
+    container_name: konis_redis_prod
+    restart: unless-stopped
+    # LRU avec 128 Mo max — suffisant pour le rate limiting et le cache applicatif.
+    # --save "" désactive la persistence Redis (données temporaires uniquement).
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru --save ""
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    # AUCUN port exposé vers l'hôte
+    networks:
+      - konis_internal
+
+  # ── Backend Django/Gunicorn ────────────────────────────────────────────────
+  # En production avec registry : remplacer build: par image: ${TAG_BACKEND}
+  # et lancer avec : docker compose pull && docker compose up -d
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+    # image: ${TAG_BACKEND:-ghcr.io/org/konis-backend:latest}  # ← décommenter après push registry
+    container_name: konis_backend_prod
+    restart: unless-stopped
+    environment:
+      DJANGO_SETTINGS_MODULE: konis.settings.prod
+      DJANGO_SECRET_KEY:      ${DJANGO_SECRET_KEY}
+      DJANGO_ALLOWED_HOSTS:   ${DJANGO_ALLOWED_HOSTS}
+      DATABASE_URL:           postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      CORS_ALLOWED_ORIGINS:   ${CORS_ALLOWED_ORIGINS}
+      # 4 vCPU → 9 workers (2×4+1), 2 threads = 18 connexions DB simultanées max
+      GUNICORN_WORKERS:       ${GUNICORN_WORKERS:-9}
+      GUNICORN_THREADS:       ${GUNICORN_THREADS:-2}
+      # Cache Redis partagé entre workers (rate limiting cross-process)
+      REDIS_URL:              redis://redis:6379/0
+      # Secret partagé Next.js ↔ Django pour les appels SSR internes
+      INTERNAL_API_SECRET:    ${INTERNAL_API_SECRET}
+      # Sentry (optionnel — laisser vide pour désactiver)
+      SENTRY_DSN:             ${SENTRY_DSN:-}
+      APP_VERSION:            ${APP_VERSION:-v1}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # Healthcheck : curl sur /api/health/ (curl installé dans Dockerfile.prod)
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    # AUCUN port exposé vers l'hôte
+    networks:
+      - konis_internal
+
+  # ── Frontend Next.js (standalone) ─────────────────────────────────────────
+  # En production avec registry : remplacer build: par image: ${TAG_FRONTEND}
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+      args:
+        # URL publique appelée par le navigateur (ex: https://konis.example.com)
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+    # image: ${TAG_FRONTEND:-ghcr.io/org/konis-frontend:latest}  # ← décommenter après push registry
+    container_name: konis_frontend_prod
+    restart: unless-stopped
+    environment:
+      NODE_ENV:                production
+      NEXT_TELEMETRY_DISABLED: 1
+      # Appels SSR Next.js → Django via réseau Docker interne (jamais via nginx)
+      # BACKEND_URL est lu par tous les Route Handlers Next.js (/api/auth/*, [...path])
+      BACKEND_URL:             http://backend:8000
+      # Secret partagé pour l'endpoint POST /api/auth/login/ (header X-Proxy)
+      INTERNAL_API_SECRET:     ${INTERNAL_API_SECRET}
+    depends_on:
+      backend:
+        condition: service_healthy
+    # AUCUN port exposé vers l'hôte
+    networks:
+      - konis_internal
+
+  # ── Nginx (reverse proxy + SSL termination) ────────────────────────────────
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: konis_nginx_prod
+    restart: unless-stopped
+    ports:
+      - "80:80"     # HTTP → redirection HTTPS + ACME challenge
+      - "443:443"   # HTTPS (SSL terminé par nginx)
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      # Template de conf nginx (envsubst remplace $DOMAIN au démarrage)
+      - ./nginx/nginx.prod.conf.template:/etc/nginx/templates/default.conf.template:ro
+      # Certificats Let's Encrypt (partagés avec certbot)
+      - certbot_certs:/etc/letsencrypt:ro
+      # Webroot pour le challenge ACME (partagé avec certbot)
+      - certbot_webroot:/var/www/certbot:ro
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - konis_internal
+
+  # ── Certbot (renouvellement automatique des certificats SSL) ───────────────
+  certbot:
+    image: certbot/certbot:latest
+    container_name: konis_certbot_prod
+    restart: unless-stopped
+    volumes:
+      - certbot_certs:/etc/letsencrypt
+      - certbot_webroot:/var/www/certbot
+    # Vérifie le renouvellement toutes les 12h (Let's Encrypt renouvelle à < 30j restants)
+    entrypoint: >
+      /bin/sh -c "trap exit TERM;
+        while :; do
+          certbot renew --webroot -w /var/www/certbot --quiet;
+          sleep 12h & wait $${!};
+        done"
+
+  # ── Backup automatique PostgreSQL ──────────────────────────────────────────
+  # Backup quotidien (pg_dump) sans exposition du port DB, sans accès au socket Docker.
+  # Dumps stockés dans /backups (volume postgres_backups), rétention 30 jours.
+  # IMPORTANT : répliquer les backups vers un stockage externe (S3, rsync, rclone).
+  backup-cron:
+    image: postgres:16-alpine
+    container_name: konis_backup_prod
+    restart: unless-stopped
+    environment:
+      PGPASSWORD:     ${POSTGRES_PASSWORD}
+      POSTGRES_USER:  ${POSTGRES_USER}
+      POSTGRES_DB:    ${POSTGRES_DB}
+      DB_HOST:        db
+      RETENTION_DAYS: ${RETENTION_DAYS:-30}
+    volumes:
+      - postgres_backups:/backups
+      # Script monté depuis l'hôte, exécutable sans privilèges root
+      - ./backup/backup-cron.sh:/backup-cron.sh:ro
+    entrypoint: ["sh", "/backup-cron.sh"]
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - konis_internal
+
+# ── Volumes persistants ────────────────────────────────────────────────────
+volumes:
+  postgres_data:
+    driver: local
+  postgres_backups:
+    driver: local
+  certbot_certs:
+    driver: local
+  certbot_webroot:
+    driver: local
+
+# ── Réseau interne isolé ──────────────────────────────────────────────────
+networks:
+  konis_internal:
+    driver: bridge
