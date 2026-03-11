@@ -159,14 +159,23 @@ class VenteBoutiqueViewSet(ModelViewSet):
         ser = VenteBoutiqueCreateSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         lignes_data = ser.validated_data["lignes"]
+
+        # Chargement des produits en 1 seule requête (évite N+1)
+        produit_ids = [
+            item["produit"] if isinstance(item["produit"], int) else item["produit"].pk
+            for item in lignes_data
+        ]
+        produits_map = {
+            p.pk: p
+            for p in Produit.objects.filter(pk__in=produit_ids, entreprise=lieu.entreprise)
+        }
         lignes = []
         for item in lignes_data:
             produit_id = item["produit"] if isinstance(item["produit"], int) else item["produit"].pk
-            try:
-                produit = Produit.objects.get(pk=produit_id, entreprise=lieu.entreprise)
-            except (Produit.DoesNotExist, TypeError):
+            produit = produits_map.get(produit_id)
+            if produit is None:
                 return Response(
-                    {"detail": f"Produit inconnu: {produit_id}"},
+                    {"detail": f"Produit inconnu ou non autorisé : {produit_id}"},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
             quantite = Decimal(str(item["quantite"]))

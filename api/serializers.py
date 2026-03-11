@@ -90,6 +90,14 @@ class UserSerializer(serializers.ModelSerializer):
         read_only_fields = ("date_joined",)
         extra_kwargs = {"password": {"write_only": True, "required": False}}
 
+    def get_fields(self):
+        fields = super().get_fields()
+        request = self.context.get("request")
+        if request and request.user and request.user.entreprise_id:
+            # Scoper le queryset lieu à l'entreprise de l'admin — évite l'IDOR cross-tenant
+            fields["lieu"].queryset = Lieu.objects.filter(entreprise_id=request.user.entreprise_id)
+        return fields
+
     def to_representation(self, instance):
         data = super().to_representation(instance)
         data["lieu"] = LieuMinimalSerializer(instance.lieu).data if instance.lieu else None

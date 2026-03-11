@@ -10,14 +10,14 @@ function setTokenCookies(res: NextResponse, access: string, refresh: string) {
   res.cookies.set(COOKIE_ACCESS, access, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
+    sameSite: "strict", // "strict" : aucun envoi cross-site, aligné sur Django (CSRF_COOKIE_SAMESITE=Strict)
     path: "/",
     maxAge: MAX_AGE_ACCESS,
   });
   res.cookies.set(COOKIE_REFRESH, refresh, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
+    sameSite: "strict",
     path: "/",
     maxAge: MAX_AGE_REFRESH,
   });

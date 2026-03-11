@@ -1,3 +1,1 @@
-from django.shortcuts import render
-
-# Create your views here.
+# Views rapports — logique dans api/views/comptable_views.py.

@@ -59,6 +59,7 @@ class Produit(models.Model):
     class Meta:
         verbose_name = "Produit"
         verbose_name_plural = "Produits"
+        ordering = ["-id"]  # Évite UnorderedObjectListWarning lors de la pagination
         constraints = [
             models.UniqueConstraint(
                 fields=["entreprise", "code"],

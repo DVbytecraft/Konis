@@ -89,6 +89,17 @@ services:
       - key: GUNICORN_THREADS
         value: "2"
 
+      # ── Superuser initial — créé au 1er démarrage via entrypoint.sh ─────────
+      # Les 3 variables doivent être renseignées pour déclencher la création.
+      # Supprimer ou vider DJANGO_SUPERUSER_PASSWORD après le 1er déploiement réussi.
+      - key: DJANGO_SUPERUSER_USERNAME
+        value: "admin"
+      - key: DJANGO_SUPERUSER_EMAIL
+        value: "admin@agrokonis.com"
+      - key: DJANGO_SUPERUSER_PASSWORD
+        type: SECRET
+        value: "TO_FILL_STRONG_PASSWORD"
+
       # ── Optionnel : Sentry error tracking ────────────────────────────────────
       # - key: SENTRY_DSN
       #   type: SECRET

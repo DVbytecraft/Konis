@@ -45,10 +45,19 @@ else:
         }
     }
 
-# CORS : origines autorisées (frontend Vercel)
+# CORS : origines autorisées (frontend DigitalOcean / domaine custom)
 CORS_ALLOWED_ORIGINS = [
     x.strip()
     for x in os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",")
+    if x.strip()
+]
+
+# CSRF_TRUSTED_ORIGINS : obligatoire depuis Django 4.0 derrière tout proxy HTTPS.
+# DigitalOcean App Platform fait passer les requêtes via son load balancer —
+# sans cette variable, Django renvoie 403 sur l'admin et les formulaires CSRF.
+CSRF_TRUSTED_ORIGINS = [
+    x.strip()
+    for x in os.environ.get("CSRF_TRUSTED_ORIGINS", "").split(",")
     if x.strip()
 ]
 
@@ -59,7 +68,8 @@ SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
 SECURE_HSTS_SECONDS = 31536000
 SECURE_HSTS_INCLUDE_SUBDOMAINS = True
-SECURE_HSTS_PRELOAD = True
+# ⚠️ SECURE_HSTS_PRELOAD délibérément absent — quasi-irréversible.
+# Activer uniquement après soumission intentionnelle à hstspreload.org.
 
 # Static files : WhiteNoise (après SecurityMiddleware)
 MIDDLEWARE = list(MIDDLEWARE)  # noqa: F405

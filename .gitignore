@@ -30,3 +30,9 @@ frontend/out/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Claude Code (outils de développement local — ne pas versionner)
+.claude/
+
+# Docker Compose overrides locaux (spécifiques à la machine du développeur)
+docker-compose.override.yml

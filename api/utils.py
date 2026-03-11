@@ -2,7 +2,20 @@
 Utilitaires partagés entre les views KONIS.
 Centralise les helpers de résolution de lieu et de filtrage par date.
 """
+from datetime import datetime
+
+from rest_framework.exceptions import ValidationError
+
 from core.models import CustomUser, Lieu
+
+
+def _parse_date(value: str, param_name: str) -> str:
+    """Valide et retourne une date YYYY-MM-DD ; lève ValidationError si invalide."""
+    try:
+        datetime.strptime(value, "%Y-%m-%d")
+        return value
+    except ValueError:
+        raise ValidationError({param_name: f"Format de date invalide : '{value}'. Attendu : YYYY-MM-DD."})
 
 
 def get_lieu_boutique(request) -> Lieu | None:
@@ -65,7 +78,7 @@ def filter_by_date(queryset, request, field: str = "date"):
     debut = request.query_params.get("date_debut") or request.query_params.get("start_date")
     fin = request.query_params.get("date_fin") or request.query_params.get("end_date")
     if debut:
-        queryset = queryset.filter(**{f"{field}__date__gte": debut})
+        queryset = queryset.filter(**{f"{field}__date__gte": _parse_date(debut, "date_debut")})
     if fin:
-        queryset = queryset.filter(**{f"{field}__date__lte": fin})
+        queryset = queryset.filter(**{f"{field}__date__lte": _parse_date(fin, "date_fin")})
     return queryset

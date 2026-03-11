@@ -263,6 +263,31 @@ class UserViewSet(ModelViewSet):
             qs = qs.filter(lieu_id=lieu_id)
         return qs
 
+    def perform_update(self, serializer):
+        old_role = serializer.instance.role
+        user = serializer.save()
+        extra = {"user_id": user.pk}
+        if old_role != user.role:
+            extra["role_before"] = old_role
+            extra["role_after"] = user.role
+        audit_log(
+            user=self.request.user,
+            action="user_updated",
+            object_type="user",
+            object_id=user.pk,
+            extra=extra,
+        )
+
+    def perform_destroy(self, instance):
+        audit_log(
+            user=self.request.user,
+            action="user_deleted",
+            object_type="user",
+            object_id=instance.pk,
+            extra={"username": instance.username, "role": instance.role},
+        )
+        instance.delete()
+
 
 class CategorieViewSet(ModelViewSet):
     queryset = Categorie.objects.all()

@@ -96,9 +96,12 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_THROTTLE_RATES": {
         "user": "600/hour",
-        "login": "10/minute",
+        "login": "10/minute",       # Par IP, non-authentifiés uniquement
+        "login_ip": "20/minute",    # Par IP, tous utilisateurs (filet de sécurité anti-brute-force)
         "ventes_create": "60/minute",
         "mouture_create": "60/minute",
+        "facture_create": "30/minute",
+        "usine_create": "30/minute",
     },
     # Pagination par défaut : 50 items/page, paramètre ?page=N
     # Les vues qui veulent TOUT retourner doivent mettre pagination_class = None explicitement.
@@ -134,5 +137,11 @@ SESSION_COOKIE_SAMESITE = "Strict"
 # Générer avec : python -c "import secrets; print(secrets.token_urlsafe(32))"
 INTERNAL_API_SECRET = os.environ.get("INTERNAL_API_SECRET", "")
 
-# Hashers mots de passe (Django default = PBKDF2, sécurisé)
-# Pas de modification nécessaire ; PASSWORD_HASHERS par défaut suffit.
+# Hashers mots de passe : Argon2 en premier (résistant aux attaques GPU/ASIC),
+# PBKDF2 en fallback pour les hashes existants.
+# Les mots de passe PBKDF2 sont automatiquement rehashés en Argon2 au prochain login.
+PASSWORD_HASHERS = [
+    "django.contrib.auth.hashers.Argon2PasswordHasher",
+    "django.contrib.auth.hashers.PBKDF2PasswordHasher",
+    "django.contrib.auth.hashers.PBKDF2SHA1PasswordHasher",
+]

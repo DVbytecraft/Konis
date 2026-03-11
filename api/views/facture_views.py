@@ -11,6 +11,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from api.serializers import FactureCreateSerializer, FactureSerializer
+from api.throttling import FactureCreateRateThrottle
 from core.models import CustomUser, Lieu
 from produits.models import Produit
 from ventes.models import Facture, LigneFacture
@@ -67,6 +68,7 @@ def _next_facture_number(lieu: Lieu) -> str:
 
 class FactureListCreateView(APIView):
     permission_classes = [IsAuthenticated]
+    throttle_classes = [FactureCreateRateThrottle]
 
     def get_queryset(self, request):
         if request.user.role not in ALLOWED_ROLES and not request.user.is_factory():

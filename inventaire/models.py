@@ -21,6 +21,7 @@ class Stock(models.Model):
     class Meta:
         verbose_name = "Stock"
         verbose_name_plural = "Stocks"
+        ordering = ["-id"]  # Évite UnorderedObjectListWarning lors de la pagination
         constraints = [
             UniqueConstraint(fields=["produit", "lieu"], name="unique_stock_produit_lieu"),
             CheckConstraint(condition=Q(quantite__gte=0), name="stock_quantite_positive"),

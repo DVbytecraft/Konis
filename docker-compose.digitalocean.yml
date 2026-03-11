@@ -1,0 +1,65 @@
+# ============================================================
+# KONIS — Docker Compose DigitalOcean App Platform
+#
+# Usage : fournir ce fichier à App Platform ou déployer sur un Droplet
+# avec une Managed DB externe (DATABASE_URL fournie par DigitalOcean).
+#
+# DO App Platform gère lui-même :
+#   - Le reverse proxy et le SSL (pas besoin de nginx ni certbot)
+#   - La Managed DB et Redis (pas de volumes locaux)
+#
+# Prérequis :
+#   cp .env.prod.example .env.prod  # remplir DATABASE_URL, REDIS_URL, etc.
+#   docker compose -f docker-compose.digitalocean.yml --env-file .env.prod up -d
+# ============================================================
+
+services:
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+    container_name: konis_backend_prod
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      DJANGO_SETTINGS_MODULE: konis.settings.prod
+      DJANGO_SECRET_KEY:         ${DJANGO_SECRET_KEY}
+      DJANGO_ALLOWED_HOSTS:      ${DJANGO_ALLOWED_HOSTS}
+      DATABASE_URL:              ${DATABASE_URL}
+      CORS_ALLOWED_ORIGINS:      ${CORS_ALLOWED_ORIGINS}
+      GUNICORN_WORKERS:          ${GUNICORN_WORKERS:-3}
+      GUNICORN_THREADS:          ${GUNICORN_THREADS:-2}
+      REDIS_URL:                 ${REDIS_URL:-}
+      INTERNAL_API_SECRET:       ${INTERNAL_API_SECRET}
+      SENTRY_DSN:                ${SENTRY_DSN:-}
+      APP_VERSION:               ${APP_VERSION:-v1}
+      DJANGO_SUPERUSER_USERNAME: ${DJANGO_SUPERUSER_USERNAME:-}
+      DJANGO_SUPERUSER_EMAIL:    ${DJANGO_SUPERUSER_EMAIL:-}
+      DJANGO_SUPERUSER_PASSWORD: ${DJANGO_SUPERUSER_PASSWORD:-}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 45s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+    container_name: konis_frontend_prod
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV:                production
+      NEXT_TELEMETRY_DISABLED: 1
+      BACKEND_URL:             http://backend:8000
+      INTERNAL_API_SECRET:     ${INTERNAL_API_SECRET}
+    depends_on:
+      backend:
+        condition: service_healthy

@@ -13,7 +13,7 @@ from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 
 from api.permissions import IsComptableRole, IsFactoryUser, IsUsineRole
-from api.throttling import MoutureCreateRateThrottle
+from api.throttling import MoutureCreateRateThrottle, UsineCreateRateThrottle
 from api.utils import filter_by_date, filter_by_lieu, get_lieu_usine
 from audit.services import audit_log
 from api.serializers import (
@@ -48,6 +48,7 @@ class AchatUsineViewSet(ModelViewSet):
     """
     serializer_class = AchatUsineSerializer
     permission_classes = [IsAuthenticated, IsFactoryUser]
+    throttle_classes = [UsineCreateRateThrottle]
     http_method_names = ["get", "post", "head", "options"]
 
     def get_queryset(self):
@@ -91,6 +92,7 @@ class LotProductionUsineViewSet(ModelViewSet):
     """
     serializer_class = LotProductionSerializer
     permission_classes = [IsAuthenticated, IsFactoryUser]
+    throttle_classes = [UsineCreateRateThrottle]
     http_method_names = ["get", "post", "head", "options"]
 
     def get_queryset(self):

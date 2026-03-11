@@ -1,6 +1,7 @@
 """
 API Auth : login (JWT en cookie httpOnly), refresh avec rotation, logout avec blacklist.
 """
+import hmac
 import json
 from django.conf import settings
 from rest_framework import status
@@ -12,7 +13,7 @@ from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from api.serializers import UserMinimalSerializer
-from api.throttling import LoginRateThrottle
+from api.throttling import LoginIPRateThrottle, LoginRateThrottle
 from audit.services import audit_log
 from core.models import CustomUser
 
@@ -70,7 +71,7 @@ def _clear_jwt_cookies(response):
 class LoginView(APIView):
     """POST /api/auth/login/ : credentials -> JWT dans cookies + user."""
     permission_classes = [AllowAny]
-    throttle_classes = [LoginRateThrottle]
+    throttle_classes = [LoginRateThrottle, LoginIPRateThrottle]
 
     def post(self, request, *args, **kwargs):
         from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
@@ -120,7 +121,8 @@ class LoginView(APIView):
         # Si appel depuis Next.js SSR (proxy interne), inclure les tokens pour que Next les place en cookies.
         # Authentifié par secret partagé INTERNAL_API_SECRET — jamais une valeur hardcodée.
         _secret = getattr(settings, "INTERNAL_API_SECRET", "")
-        if _secret and request.headers.get("X-Proxy") == _secret:
+        _proxy = request.headers.get("X-Proxy", "")
+        if _secret and _proxy and hmac.compare_digest(_proxy, _secret):
             response.data["access"] = str(access)
             response.data["refresh"] = str(refresh)
         return response

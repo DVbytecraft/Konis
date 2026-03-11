@@ -1,3 +1,1 @@
-from django.shortcuts import render
-
-# Create your views here.
+# Views inventaire — logique dans api/views/boutique_views.py et usine_views.py.

@@ -1,3 +1,1 @@
-from django.shortcuts import render
-
-# Create your views here.
+# Views produits — logique dans api/views/admin_views.py (ProduitViewSet).

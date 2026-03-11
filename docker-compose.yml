@@ -45,7 +45,7 @@ services:
       - /app/node_modules
       - /app/.next
     ports:
-      - "3000:3000"
+      - "3004:3000"  # 3000 pris par un autre projet sur cet hôte
     environment:
       - BACKEND_URL=http://backend:8000
       - NEXT_PUBLIC_API_URL=http://localhost:8000
