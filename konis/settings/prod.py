@@ -9,41 +9,42 @@ import sentry_sdk
 from .base import *  # noqa: F401, F403
 
 DEBUG = False
-ALLOWED_HOSTS = [
+
+# ALLOWED_HOSTS — deux sources cumulées :
+# 1. Variable DJANGO_ALLOWED_HOSTS (liste CSV) pour les domaines custom.
+# 2. Wildcard .ondigitalocean.app inclus par défaut pour DigitalOcean App Platform.
+#    DigitalOcean n'injecte pas DJANGO_ALLOWED_HOSTS automatiquement — sans ce défaut
+#    l'app crashe au boot avec "DisallowedHost" avant même de lire les variables.
+_extra_hosts = [
     x.strip()
     for x in os.environ.get("DJANGO_ALLOWED_HOSTS", "").split(",")
     if x.strip()
 ]
-if not ALLOWED_HOSTS:
-    raise ValueError("DJANGO_ALLOWED_HOSTS doit être défini en production (ex: konis-api.onrender.com)")
+ALLOWED_HOSTS = [".ondigitalocean.app"] + _extra_hosts
 
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY")
 if not SECRET_KEY:
     raise ValueError("DJANGO_SECRET_KEY doit être défini en production")
 
-# Base de données : DATABASE_URL (Render PostgreSQL) ou variables POSTGRES_*
+# Base de données — DATABASE_URL en priorité (DigitalOcean Managed DB / Render).
+# DigitalOcean injecte DATABASE_URL automatiquement quand une Managed DB est liée.
+# Format DO : postgresql://user:pass@host:25060/db?sslmode=require
+# ssl_require=True s'assure que Django active SSL même si ?sslmode= est absent de l'URL.
 _db_url = os.environ.get("DATABASE_URL")
-if _db_url:
-    DATABASES = {
-        "default": dj_database_url.parse(
-            _db_url,
-            conn_max_age=600,
-            conn_health_checks=True,
-        )
-    }
-else:
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.postgresql",
-            "NAME": os.environ.get("POSTGRES_DB", "konis"),
-            "USER": os.environ.get("POSTGRES_USER", "konis"),
-            "PASSWORD": os.environ.get("POSTGRES_PASSWORD", ""),
-            "HOST": os.environ.get("POSTGRES_HOST", "localhost"),
-            "PORT": os.environ.get("POSTGRES_PORT", "5432"),
-            "CONN_MAX_AGE": 600,
-            "CONN_HEALTH_CHECKS": True,
-        }
-    }
+if not _db_url:
+    raise ValueError(
+        "DATABASE_URL doit être défini en production.\n"
+        "Sur DigitalOcean : liez une Managed Database dans App Platform → elle est injectée automatiquement.\n"
+        "Format attendu : postgresql://user:password@host:port/dbname?sslmode=require"
+    )
+DATABASES = {
+    "default": dj_database_url.parse(
+        _db_url,
+        conn_max_age=600,
+        conn_health_checks=True,
+        ssl_require=True,   # Force SSL — requis par DigitalOcean Managed DB
+    )
+}
 
 # CORS : origines autorisées (frontend DigitalOcean / domaine custom)
 CORS_ALLOWED_ORIGINS = [
