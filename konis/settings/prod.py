@@ -10,17 +10,11 @@ from .base import *  # noqa: F401, F403
 
 DEBUG = False
 
-# ALLOWED_HOSTS — deux sources cumulées :
-# 1. Variable DJANGO_ALLOWED_HOSTS (liste CSV) pour les domaines custom.
-# 2. Wildcard .ondigitalocean.app inclus par défaut pour DigitalOcean App Platform.
-#    DigitalOcean n'injecte pas DJANGO_ALLOWED_HOSTS automatiquement — sans ce défaut
-#    l'app crashe au boot avec "DisallowedHost" avant même de lire les variables.
-_extra_hosts = [
-    x.strip()
-    for x in os.environ.get("DJANGO_ALLOWED_HOSTS", "").split(",")
-    if x.strip()
+ALLOWED_HOSTS = [
+    ".ondigitalocean.app",  # accepte tous les sous-domaines DO
+    "localhost",
+    "127.0.0.1",
 ]
-ALLOWED_HOSTS = [".ondigitalocean.app"] + _extra_hosts
 
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY")
 if not SECRET_KEY:
