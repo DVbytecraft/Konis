@@ -4,7 +4,7 @@
 #
 # Architecture :
 #   - konis   : Django 5.2 + Gunicorn  (port 8000)  → route /api/
-#   - konis2  : Next.js 14 standalone  (port 3000)  → route /  (tout le reste)
+#   - konis2  : Next.js 14            (port 8080)  → route /  (tout le reste)
 #   - db      : PostgreSQL managé      (DATABASE_URL injecté automatiquement)
 #   - redis   : Redis managé           (REDIS_URL injecté automatiquement)
 #
@@ -112,11 +112,11 @@ services:
       failure_threshold: 3
 
 
-  # ── Frontend Next.js standalone ──────────────────────────────────────────────
+  # ── Frontend Next.js ──────────────────────────────────────────────────────────
   - name: konis2
-    dockerfile_path: frontend/Dockerfile.prod   # chemin depuis la racine du dépôt
-    source_dir: frontend                         # contexte de build = dossier frontend/
-    http_port: 3000
+    dockerfile_path: frontend/Dockerfile
+    source_dir: frontend
+    http_port: 8080
     instance_count: 1
     instance_size_slug: basic-xs
 
