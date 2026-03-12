@@ -1,30 +1,37 @@
 #!/bin/sh
 # Entrypoint de production KONIS — backend Django/Gunicorn
-# Exécute les migrations, collecte les statics, crée le superuser si nécessaire, puis lance Gunicorn.
+# Ordre : staticfiles dir → migrations → collectstatic → superuser → Gunicorn
 set -e
 
-echo "==> [KONIS] Vérification des migrations en attente..."
-python manage.py migrate --check 2>/dev/null || true
+# ── 1. Créer STATIC_ROOT si absent ────────────────────────────────────────────
+# Django (et WhiteNoise) émettent un warning si le répertoire n'existe pas au
+# démarrage. Le créer avant collectstatic supprime ce warning.
+mkdir -p /app/staticfiles
 
+# ── 2. Migrations ─────────────────────────────────────────────────────────────
 echo "==> [KONIS] Exécution des migrations..."
 python manage.py migrate --noinput
 
+# ── 3. Fichiers statiques ──────────────────────────────────────────────────────
 echo "==> [KONIS] Collecte des fichiers statiques..."
 python manage.py collectstatic --noinput --clear
 
-# Création automatique du superuser si les 3 variables sont définies.
-# Variables requises : DJANGO_SUPERUSER_USERNAME, DJANGO_SUPERUSER_EMAIL, DJANGO_SUPERUSER_PASSWORD
-# Si le compte existe déjà, la commande échoue silencieusement (|| true).
+# ── 4. Superuser initial (optionnel) ──────────────────────────────────────────
+# Déclenché uniquement si les 3 variables sont définies.
+# || true : silencieux si l'utilisateur existe déjà.
 if [ -n "$DJANGO_SUPERUSER_USERNAME" ] && \
    [ -n "$DJANGO_SUPERUSER_EMAIL" ] && \
    [ -n "$DJANGO_SUPERUSER_PASSWORD" ]; then
-    echo "==> [KONIS] Création du superuser '$DJANGO_SUPERUSER_USERNAME' (ignoré s'il existe déjà)..."
+    echo "==> [KONIS] Création du superuser '$DJANGO_SUPERUSER_USERNAME'..."
     python manage.py createsuperuser --no-input || true
 fi
 
-echo "==> [KONIS] Démarrage de Gunicorn (config : gunicorn.conf.py)..."
-# --bind explicite pour App Platform (0.0.0.0:8000 requis — écoute sur toutes les interfaces).
-# gunicorn.conf.py définit aussi bind = "0.0.0.0:8000" — la valeur CLI prend la priorité.
+# ── 5. Gunicorn ────────────────────────────────────────────────────────────────
+# --bind 0.0.0.0:8000 : écoute sur toutes les interfaces réseau du conteneur.
+#   Requis par App Platform — sans ça, le health check et le trafic externe
+#   ne peuvent pas atteindre le process (127.0.0.1 = loopback uniquement).
+# --config gunicorn.conf.py : workers, threads, timeouts, logging (voir le fichier).
+echo "==> [KONIS] Démarrage de Gunicorn sur 0.0.0.0:8000..."
 exec gunicorn konis.wsgi:application \
      --bind 0.0.0.0:8000 \
      --config gunicorn.conf.py
