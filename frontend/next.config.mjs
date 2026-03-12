@@ -3,6 +3,13 @@ const nextConfig = {
   // Standalone output : image Docker autosuffisante (server.js inclus)
   output: "standalone",
 
+  // ── Préfixe de route DigitalOcean App Platform ────────────────────────────
+  // DO route /konis2/* vers ce service. Next.js doit savoir qu'il est servi
+  // sous ce préfixe pour générer les liens _next/static, href, redirects, etc.
+  // Sans basePath, tous les assets 404 même si le routage DO est correct.
+  // En local (Docker ou dev), basePath = '' → aucun impact.
+  basePath: process.env.NEXT_PUBLIC_BASE_PATH || "",
+
   // ── Headers de sécurité et de cache ──────────────────────────────────────
   // Appliqués sur toutes les routes Next.js (pages, layouts, assets).
   // Note : les headers Cache-Control sur les routes /api/* sont déjà gérés
