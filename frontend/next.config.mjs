@@ -1,8 +1,5 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Standalone output : image Docker autosuffisante (server.js inclus)
-  output: "standalone",
-
   // ── Préfixe de base (optionnel) ───────────────────────────────────────────
   // Par défaut vide → Next.js sert depuis "/".
   // Si NEXT_PUBLIC_BASE_PATH est défini (ex: "/konis2"), Next.js préfixe toutes
