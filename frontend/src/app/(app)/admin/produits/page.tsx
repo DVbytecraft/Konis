@@ -24,8 +24,9 @@ export default function AdminProduitsPage() {
     const load = async () => {
       try {
         setLoading(true);
-        const res = await apiFetch("/admin/produits/");
-        setProduits((res.results ?? res) as Produit[]);
+        interface Paginated<T> { results: T[] }
+        const res = await apiFetch<Paginated<Produit> | Produit[]>("/admin/produits/");
+        setProduits(Array.isArray(res) ? res : res.results);
       } catch (e) {
         setError(e instanceof Error ? e.message : "Erreur de chargement");
       } finally {

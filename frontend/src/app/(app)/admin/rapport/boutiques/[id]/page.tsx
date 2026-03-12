@@ -42,8 +42,8 @@ export default function AdminDetailBoutiquePage() {
     if (debut) qs.set("debut", debut);
     if (fin) qs.set("fin", fin);
     const q = qs.toString() ? `?${qs.toString()}` : "";
-    apiFetch(`/comptable/rapport-boutiques/${id}/${q}`)
-      .then((d) => setData(d as DetailBoutique))
+    apiFetch<DetailBoutique>(`/comptable/rapport-boutiques/${id}/${q}`)
+      .then((d) => setData(d))
       .catch((e) => setErr(e instanceof Error ? e.message : "Erreur"))
       .finally(() => setLoading(false));
   }, [id, debut, fin]);

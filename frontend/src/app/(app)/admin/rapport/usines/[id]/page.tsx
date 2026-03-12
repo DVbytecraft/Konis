@@ -34,8 +34,8 @@ export default function AdminDetailUsinePage() {
     if (debut) qs.set("debut", debut);
     if (fin) qs.set("fin", fin);
     const q = qs.toString() ? `?${qs.toString()}` : "";
-    apiFetch(`/comptable/rapport-usines/${id}/${q}`)
-      .then((d) => setData(d as DetailUsine))
+    apiFetch<DetailUsine>(`/comptable/rapport-usines/${id}/${q}`)
+      .then((d) => setData(d))
       .catch((e) => setErr(e instanceof Error ? e.message : "Erreur"))
       .finally(() => setLoading(false));
   }, [id, debut, fin]);

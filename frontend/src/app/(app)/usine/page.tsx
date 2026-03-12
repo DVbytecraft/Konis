@@ -30,12 +30,13 @@ export default function UsinePage() {
   const charger = useCallback(async () => {
     try {
       setLoading(true);
+      interface Paginated<T> { results: T[] }
       const [rapport, stocksRes] = await Promise.all([
-        apiFetch("/usine/rapports/benefices/"),
-        apiFetch("/usine/stocks-boutiques/"),
+        apiFetch<Paginated<LotRow>>("/usine/rapports/benefices/"),
+        apiFetch<Paginated<StockRow> | StockRow[]>("/usine/stocks-boutiques/"),
       ]);
       setLots(rapport.results ?? []);
-      setStocks((stocksRes.results ?? stocksRes).slice(0, 30));
+      setStocks((Array.isArray(stocksRes) ? stocksRes : stocksRes.results).slice(0, 30));
     } finally {
       setLoading(false);
     }

@@ -58,12 +58,13 @@ export default function AdminPage() {
   const charger = useCallback(async () => {
     try {
       setLoading(true);
+      interface Paginated<T> { results: T[] }
       const [ticketsRes, stocksRes] = await Promise.all([
-        apiFetch("/admin/tickets/"),
-        apiFetch("/admin/stocks/"),
+        apiFetch<Paginated<Ticket> | Ticket[]>("/admin/tickets/"),
+        apiFetch<Paginated<StockItem> | StockItem[]>("/admin/stocks/"),
       ]);
-      const tickets: Ticket[] = ticketsRes.results ?? ticketsRes;
-      const stocksList: StockItem[] = stocksRes.results ?? stocksRes;
+      const tickets: Ticket[] = Array.isArray(ticketsRes) ? ticketsRes : ticketsRes.results;
+      const stocksList: StockItem[] = Array.isArray(stocksRes) ? stocksRes : stocksRes.results;
 
       const aujourdhui = new Date().toDateString();
       const ventesJour = tickets.filter(

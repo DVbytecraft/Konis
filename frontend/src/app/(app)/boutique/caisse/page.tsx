@@ -85,24 +85,28 @@ export default function BoutiqueCaissePage() {
   const chargerDonnees = useCallback(async () => {
     try {
       setLoading(true);
+      interface Paginated<T> { results: T[] }
+      type StockEntry = { produit: number; quantite: string };
+      type ProduitEntry = { id: number; nom: string; code: string | null; unite: string };
+      type VenteEntry = { id: number; numero: string; date: string; montant_total?: number; lignes?: Array<{ quantite: number; prix_unitaire: number }> };
       const [produitsRes, stockRes, ventesRes] = await Promise.all([
-        apiFetch("/boutique/produits/"),
-        apiFetch("/boutique/stock/"),
-        apiFetch("/boutique/ventes/").catch(() => []),
+        apiFetch<Paginated<ProduitEntry> | ProduitEntry[]>("/boutique/produits/"),
+        apiFetch<Paginated<StockEntry> | StockEntry[]>("/boutique/stock/"),
+        apiFetch<Paginated<VenteEntry> | VenteEntry[]>("/boutique/ventes/").catch(() => [] as VenteEntry[]),
       ]);
       const stockByProduit: Record<number, number> = {};
-      (stockRes.results || stockRes).forEach((s: { produit: number; quantite: string }) => {
+      const stockArray = Array.isArray(stockRes) ? stockRes : stockRes.results;
+      stockArray.forEach((s) => {
         stockByProduit[s.produit] = parseFloat(s.quantite);
       });
-      const liste = (produitsRes.results || produitsRes).map(
-        (p: { id: number; nom: string; code: string | null; unite: string }) => ({
-          ...p,
-          quantite_dispo: stockByProduit[p.id] ?? 0,
-        })
-      );
+      const produitArray = Array.isArray(produitsRes) ? produitsRes : produitsRes.results;
+      const liste = produitArray.map((p) => ({
+        ...p,
+        quantite_dispo: stockByProduit[p.id] ?? 0,
+      }));
       setProduits(liste);
 
-      const ventesList = ventesRes.results ?? (Array.isArray(ventesRes) ? ventesRes : []);
+      const ventesList = Array.isArray(ventesRes) ? ventesRes : ventesRes.results;
       const aujourdhui = new Date().toDateString();
       const duJour = ventesList
         .filter((t: { date: string }) => new Date(t.date).toDateString() === aujourdhui)
@@ -224,7 +228,7 @@ export default function BoutiqueCaissePage() {
     isPayingRef.current = true;
     setPaiementEnCours(true);
     try {
-      const ticket = await apiFetch("/boutique/ventes/", {
+      const ticket = await apiFetch<TicketReponse>("/boutique/ventes/", {
         method: "POST",
         body: JSON.stringify({
           lignes: panier.map((l) => ({

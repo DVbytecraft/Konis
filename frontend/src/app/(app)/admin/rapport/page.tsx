@@ -80,18 +80,19 @@ export default function AdminRapportPage() {
     setLoading(true);
     const qs = buildQs();
     try {
+      interface Paginated<T> { results: T[] }
       const [b, u, t, a, bl] = await Promise.all([
-        apiFetch(`/comptable/rapport-boutiques/${qs}`),
-        apiFetch(`/comptable/rapport-usines/${qs}`),
-        apiFetch(`/comptable/ventes/${qs}`),
-        apiFetch(`/comptable/achats-usine/${qs}`),
-        apiFetch(`/comptable/bilan/${qs}`),
+        apiFetch<BoutiqueRapport[]>(`/comptable/rapport-boutiques/${qs}`),
+        apiFetch<UsineRapport[]>(`/comptable/rapport-usines/${qs}`),
+        apiFetch<Paginated<Ticket> | Ticket[]>(`/comptable/ventes/${qs}`),
+        apiFetch<Paginated<Achat> | Achat[]>(`/comptable/achats-usine/${qs}`),
+        apiFetch<BilanData>(`/comptable/bilan/${qs}`),
       ]);
-      setBoutiques(b as BoutiqueRapport[]);
-      setUsines(u as UsineRapport[]);
-      setTickets((t as { results?: Ticket[] }).results ?? (t as Ticket[]));
-      setAchats((a as { results?: Achat[] }).results ?? (a as Achat[]));
-      setBilan(bl as BilanData);
+      setBoutiques(b);
+      setUsines(u);
+      setTickets(Array.isArray(t) ? t : t.results);
+      setAchats(Array.isArray(a) ? a : a.results);
+      setBilan(bl);
     } catch { /* silencieux */ }
     finally { setLoading(false); }
   }, [buildQs]);

@@ -42,6 +42,17 @@ interface FormState {
 
 type ValidationErrorResponse = Record<string, unknown>;
 
+/** Réponse paginée DRF standard. */
+interface Paginated<T> {
+  results: T[];
+  count?: number;
+}
+
+/** Normalise une réponse DRF en tableau — supporte paginé ou tableau direct. */
+function toList<T>(data: Paginated<T> | T[]): T[] {
+  return Array.isArray(data) ? data : data.results;
+}
+
 export default function AdminMagasinsPage() {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
@@ -64,11 +75,11 @@ export default function AdminMagasinsPage() {
       try {
         setLoading(true);
         const [ents, lieuxRes] = await Promise.all([
-          apiFetch("/admin/entreprises/"),
-          apiFetch("/admin/lieux/"),
+          apiFetch<Paginated<Entreprise> | Entreprise[]>("/admin/entreprises/"),
+          apiFetch<Paginated<Lieu> | Lieu[]>("/admin/lieux/"),
         ]);
-        const entsList: Entreprise[] = ents.results ?? ents;
-        const lieuxList: Lieu[] = lieuxRes.results ?? lieuxRes;
+        const entsList = toList(ents);
+        const lieuxList = toList(lieuxRes);
 
         setEntreprises(entsList);
         setLieux(lieuxList);
@@ -131,7 +142,7 @@ export default function AdminMagasinsPage() {
         entreprise: form.entrepriseId,
       };
 
-      const created = await apiFetch("/admin/lieux/", {
+      const created = await apiFetch<Lieu>("/admin/lieux/", {
         method: "POST",
         body: JSON.stringify(payload),
       });
@@ -180,7 +191,7 @@ export default function AdminMagasinsPage() {
     if (!window.confirm(`Voulez-vous ${action} le lieu "${lieu.nom}" ?`)) return;
     try {
       setError(null);
-      const updated = await apiFetch(`/admin/lieux/${lieu.id}/`, {
+      const updated = await apiFetch<Lieu>(`/admin/lieux/${lieu.id}/`, {
         method: "PATCH",
         body: JSON.stringify({ is_active: !isActive }),
       });
@@ -197,7 +208,7 @@ export default function AdminMagasinsPage() {
     if (!window.confirm(`Voulez-vous ${action} "${lieu.nom}" ?`)) return;
     try {
       setError(null);
-      const updated = await apiFetch(`/admin/lieux/${lieu.id}/`, {
+      const updated = await apiFetch<Lieu>(`/admin/lieux/${lieu.id}/`, {
         method: "PATCH",
         body: JSON.stringify({ mouture_enabled: !moutureActif }),
       });

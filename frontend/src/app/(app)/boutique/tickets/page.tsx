@@ -75,8 +75,9 @@ export default function BoutiqueTicketsPage() {
     setErreur("");
     try {
       const params = new URLSearchParams({ debut: d, fin: f });
-      const res = await apiFetch(`/boutique/ventes/?${params}`);
-      const liste: Ticket[] = res.results ?? (Array.isArray(res) ? res : []);
+      interface Paginated<T> { results: T[] }
+      const res = await apiFetch<Paginated<Ticket> | Ticket[]>(`/boutique/ventes/?${params}`);
+      const liste: Ticket[] = Array.isArray(res) ? res : res.results;
       setTickets(liste);
     } catch (e) {
       setErreur(e instanceof Error ? e.message : "Erreur chargement tickets");

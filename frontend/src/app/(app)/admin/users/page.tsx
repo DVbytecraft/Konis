@@ -59,6 +59,11 @@ interface EditForm {
   lieuId: number | "";
 }
 
+interface Paginated<T> { results: T[]; count?: number }
+function toList<T>(data: Paginated<T> | T[]): T[] {
+  return Array.isArray(data) ? data : data.results;
+}
+
 export default function AdminUsersPage() {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
@@ -99,18 +104,13 @@ export default function AdminUsersPage() {
       try {
         setLoading(true);
         const [ents, lieuxRes, usersRes] = await Promise.all([
-          apiFetch("/admin/entreprises/"),
-          apiFetch("/admin/lieux/"),
-          apiFetch("/admin/users/"),
+          apiFetch<Paginated<Entreprise> | Entreprise[]>("/admin/entreprises/"),
+          apiFetch<Paginated<Lieu> | Lieu[]>("/admin/lieux/"),
+          apiFetch<Paginated<User> | User[]>("/admin/users/"),
         ]);
-        const entsList: Entreprise[] = ents.results ?? ents;
-        const lieuxList: Lieu[] = (lieuxRes.results ?? lieuxRes).map((l: { id: number; nom: string; type_lieu: string; entreprise: number }) => ({
-          id: l.id,
-          nom: l.nom,
-          type_lieu: l.type_lieu,
-          entreprise: l.entreprise,
-        }));
-        const usersList: User[] = usersRes.results ?? usersRes;
+        const entsList = toList(ents);
+        const lieuxList = toList(lieuxRes);
+        const usersList = toList(usersRes);
 
         setEntreprises(entsList);
         setLieux(lieuxList);
@@ -138,8 +138,8 @@ export default function AdminUsersPage() {
       }
       if (form.role === "boutique" || form.role === "usine") {
         const type = form.role === "boutique" ? "shop" : "factory";
-        const res = await apiFetch(`/locations/by-type/?type=${type}&entreprise=${form.entrepriseId}`);
-        const list: Lieu[] = res.results ?? res;
+        const res = await apiFetch<Paginated<Lieu> | Lieu[]>(`/locations/by-type/?type=${type}&entreprise=${form.entrepriseId}`);
+        const list = toList(res);
         setLieuxFiltres(list);
         return;
       }
@@ -194,8 +194,8 @@ export default function AdminUsersPage() {
       try {
         const type = u.role === "boutique" ? "shop" : "factory";
         const ent = entreprises.find((e) => e.id);
-        const res = await apiFetch(`/locations/by-type/?type=${type}${ent ? `&entreprise=${ent.id}` : ""}`);
-        setEditLieux(res.results ?? res);
+        const res = await apiFetch<Paginated<Lieu> | Lieu[]>(`/locations/by-type/?type=${type}${ent ? `&entreprise=${ent.id}` : ""}`);
+        setEditLieux(toList(res));
       } catch {
         setEditLieux(lieux);
       }
@@ -209,8 +209,8 @@ export default function AdminUsersPage() {
     if (role === "boutique" || role === "usine") {
       try {
         const type = role === "boutique" ? "shop" : "factory";
-        const res = await apiFetch(`/locations/by-type/?type=${type}`);
-        setEditLieux(res.results ?? res);
+        const res = await apiFetch<Paginated<Lieu> | Lieu[]>(`/locations/by-type/?type=${type}`);
+        setEditLieux(toList(res));
       } catch {
         setEditLieux(lieux);
       }
@@ -231,7 +231,7 @@ export default function AdminUsersPage() {
       } else if (editForm.role !== "boutique" && editForm.role !== "usine") {
         payload.lieu = null;
       }
-      const updated = await apiFetch(`/admin/users/${editUser.id}/`, {
+      const updated = await apiFetch<User>(`/admin/users/${editUser.id}/`, {
         method: "PATCH",
         body: JSON.stringify(payload),
       });
@@ -279,7 +279,7 @@ export default function AdminUsersPage() {
         payload.lieu = form.lieuId;
       }
 
-      const created = await apiFetch("/admin/users/", {
+      const created = await apiFetch<User>("/admin/users/", {
         method: "POST",
         body: JSON.stringify(payload),
       });

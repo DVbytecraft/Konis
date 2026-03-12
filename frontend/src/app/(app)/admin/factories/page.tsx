@@ -62,8 +62,8 @@ export default function AdminFactoriesPage() {
   const [mdpError, setMdpError] = useState<string | null>(null);
 
   const loadFactories = async () => {
-    const data = await apiFetch("/admin/factories/");
-    setFactories(data as Factory[]);
+    const data = await apiFetch<Factory[]>("/admin/factories/");
+    setFactories(data);
   };
 
   useEffect(() => {
@@ -102,7 +102,7 @@ export default function AdminFactoriesPage() {
     }
     try {
       setSubmitting(true);
-      await apiFetch("/admin/factories/", {
+      await apiFetch<Factory>("/admin/factories/", {
         method: "POST",
         body: JSON.stringify({
           factory_name: form.factory_name.trim(),
@@ -126,7 +126,7 @@ export default function AdminFactoriesPage() {
   const toggleFactory = async (factory: Factory) => {
     try {
       setError(null);
-      await apiFetch(`/admin/factories/${factory.id}/`, {
+      await apiFetch<Factory>(`/admin/factories/${factory.id}/`, {
         method: "PATCH",
         body: JSON.stringify({ is_active: !factory.is_active }),
       });
@@ -156,7 +156,7 @@ export default function AdminFactoriesPage() {
     setMdpSubmitting(true);
     setMdpError(null);
     try {
-      await apiFetch(`/admin/factories/${mdpFactory.id}/`, {
+      await apiFetch<Factory>(`/admin/factories/${mdpFactory.id}/`, {
         method: "PATCH",
         body: JSON.stringify({ user_password: nouveauMdp.trim() }),
       });
