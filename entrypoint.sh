@@ -23,6 +23,8 @@ if [ -n "$DJANGO_SUPERUSER_USERNAME" ] && \
 fi
 
 echo "==> [KONIS] Démarrage de Gunicorn (config : gunicorn.conf.py)..."
+# --bind explicite pour App Platform (0.0.0.0:8000 requis — écoute sur toutes les interfaces).
+# gunicorn.conf.py définit aussi bind = "0.0.0.0:8000" — la valeur CLI prend la priorité.
 exec gunicorn konis.wsgi:application \
      --bind 0.0.0.0:8000 \
      --config gunicorn.conf.py

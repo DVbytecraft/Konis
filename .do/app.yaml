@@ -3,33 +3,39 @@
 # Documentation : https://docs.digitalocean.com/products/app-platform/reference/app-spec/
 #
 # Architecture :
-#   - konis   : Django 5.2 + Gunicorn  (port 8000)  → route /
-#   - konis2  : Next.js 14 standalone  (port 3000)  → route /konis2
+#   - konis   : Django 5.2 + Gunicorn  (port 8000)  → route /api/
+#   - konis2  : Next.js 14 standalone  (port 3000)  → route /  (tout le reste)
 #   - db      : PostgreSQL managé      (DATABASE_URL injecté automatiquement)
 #   - redis   : Redis managé           (REDIS_URL injecté automatiquement)
 #
-# Générer DJANGO_SECRET_KEY :
-#   python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
-# Générer INTERNAL_API_SECRET :
-#   openssl rand -hex 32
+# Flux de données :
+#   Browser → /api/* → DO LB → konis (Django)   : auth, tickets, API métier
+#   Browser → /*     → DO LB → konis2 (Next.js) : UI, assets statiques
+#   Next.js (SSR)    → BACKEND_URL               : appels serveur → Django
+#
+# Secrets à générer :
+#   DJANGO_SECRET_KEY   : python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
+#   INTERNAL_API_SECRET : openssl rand -hex 32
 # ============================================================
 
 name: konis
 region: fra
 
 # ── Routage HTTP (ingress) ─────────────────────────────────────────────────────
-# L'ordre est important : la règle la plus spécifique (/konis2) doit être en premier.
-# DO ne strip pas le préfixe — Next.js reçoit /konis2/... → basePath requis côté Next.js.
+# Ordre : règle la plus spécifique en premier.
+# /api/* → backend Django (auth, API, admin, health, tickets)
+# /*     → frontend Next.js (UI, pages, assets statiques)
+# DO ne strip pas le préfixe → Django reçoit /api/... tel quel.
 
 ingress:
   rules:
     - component:
-        name: konis2
+        name: konis
       match:
         path:
-          prefix: /konis2
+          prefix: /api
     - component:
-        name: konis
+        name: konis2
       match:
         path:
           prefix: /
@@ -55,26 +61,25 @@ services:
         type: SECRET
         value: "TO_FILL_GENERATE_WITH_DJANGO_COMMAND"
 
-      # Hostname DO de l'app — visible dans App Platform → Settings → Domains
-      # Ex : konis-idi4i.ondigitalocean.app
+      # Hostname public de l'app (App Platform → Settings → Domains)
       - key: DJANGO_ALLOWED_HOSTS
         value: "konis-idi4i.ondigitalocean.app"
 
-      # DATABASE_URL injecté automatiquement depuis le composant "db" ci-dessous
+      # DATABASE_URL injecté automatiquement par le composant "db" ci-dessous
       - key: DATABASE_URL
         value: ${db.DATABASE_URL}
 
-      # REDIS_URL injecté automatiquement depuis le composant "redis" ci-dessous
+      # REDIS_URL injecté automatiquement par le composant "redis" ci-dessous
       - key: REDIS_URL
         value: ${redis.REDIS_URL}
 
-      # Frontend et backend sont sur le même domaine → CORS same-origin.
-      # On le met quand même pour la bonne pratique.
+      # Same-origin (frontend et backend sur même domaine) → CORS non requis,
+      # mais gardé pour la bonne pratique et les appels cross-origin éventuels.
       - key: CORS_ALLOWED_ORIGINS
         value: "https://konis-idi4i.ondigitalocean.app"
 
       # Obligatoire Django 4.0+ derrière proxy HTTPS (DO load balancer).
-      # Sans cette variable → 403 sur l'admin et toute requête POST.
+      # Sans cette variable → 403 sur toute requête POST/PUT/DELETE.
       - key: CSRF_TRUSTED_ORIGINS
         value: "https://konis-idi4i.ondigitalocean.app"
 
@@ -82,13 +87,15 @@ services:
         type: SECRET
         value: "TO_FILL_GENERATE_WITH_OPENSSL"
 
-      # Gunicorn workers — professional-xs (0.5 vCPU) → 2 workers
+      # Workers — professional-xs (0.5 vCPU) → 2 workers
+      # Formule : (2 × nb_vCPU) + 1
       - key: GUNICORN_WORKERS
         value: "2"
       - key: GUNICORN_THREADS
         value: "2"
 
-      # Superuser initial — supprime DJANGO_SUPERUSER_PASSWORD après le 1er déploiement
+      # Superuser créé au 1er démarrage par entrypoint.sh.
+      # Supprimer DJANGO_SUPERUSER_PASSWORD après le 1er déploiement réussi.
       - key: DJANGO_SUPERUSER_USERNAME
         value: "admin"
       - key: DJANGO_SUPERUSER_EMAIL
@@ -99,7 +106,7 @@ services:
 
     health_check:
       http_path: /api/health/
-      initial_delay_seconds: 45
+      initial_delay_seconds: 45   # Laisse le temps aux migrations de s'exécuter
       period_seconds: 30
       timeout_seconds: 10
       failure_threshold: 3
@@ -114,32 +121,25 @@ services:
     instance_size_slug: basic-xs
 
     envs:
-      # NEXT_PUBLIC_BASE_PATH : préfixe de route DO → baked au BUILD TIME dans les assets.
-      # Doit correspondre exactement au préfixe défini dans ingress.rules ci-dessus.
-      # Utilisé par next.config.mjs : basePath: process.env.NEXT_PUBLIC_BASE_PATH || ""
-      - key: NEXT_PUBLIC_BASE_PATH
-        value: "/konis2"
-        scope: BUILD_TIME
-
-      # URL du backend — utilisée côté NAVIGATEUR (appels API directs, impression tickets).
-      # NEXT_PUBLIC_* est embarqué au build — reconstruire si l'URL change.
+      # URL backend côté NAVIGATEUR — les appels /api/* vont sur le même domaine.
+      # NEXT_PUBLIC_* est baked au build — reconstruire si l'URL change.
       - key: NEXT_PUBLIC_API_URL
         value: "https://konis-idi4i.ondigitalocean.app"
         scope: BUILD_TIME
 
-      # URL du backend — utilisée côté SERVEUR Next.js (proxy /api/* → Django).
+      # URL backend côté SERVEUR Next.js (SSR, route handlers server-side).
       - key: BACKEND_URL
         value: "https://konis-idi4i.ondigitalocean.app"
         scope: RUN_TIME
 
-      # Même valeur que dans le backend — obligatoire pour le proxy de login
+      # Même valeur que dans le backend — obligatoire pour le proxy de login SSR
       - key: INTERNAL_API_SECRET
         type: SECRET
         value: "TO_FILL_SAME_AS_BACKEND"
 
-    # Health check sur le préfixe complet (Next.js répond à /konis2 grâce au basePath)
+    # Frontend sert depuis "/" → health check sur la racine
     health_check:
-      http_path: /konis2
+      http_path: /
       initial_delay_seconds: 20
       period_seconds: 30
       timeout_seconds: 10
@@ -153,7 +153,7 @@ databases:
   - name: db
     engine: PG
     version: "15"
-    # db-s-dev-database : ~15$/mois (dev/staging — pas de backups automatiques)
+    # db-s-dev-database : ~15$/mois (staging — pas de backups automatiques)
     # db-s-1vcpu-1gb    : ~50$/mois (prod — backups quotidiens inclus)
     size: db-s-dev-database
     num_nodes: 1
