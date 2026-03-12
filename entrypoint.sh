@@ -1,22 +1,19 @@
 #!/bin/sh
 # Entrypoint de production KONIS — backend Django/Gunicorn
-# Ordre : staticfiles dir → migrations → collectstatic → superuser → Gunicorn
+# Ordre : staticfiles dir → migrations → superuser → Gunicorn
 set -e
 
-# ── 1. Créer STATIC_ROOT si absent ────────────────────────────────────────────
-# Django (et WhiteNoise) émettent un warning si le répertoire n'existe pas au
-# démarrage. Le créer avant collectstatic supprime ce warning.
+# ── 1. Garantir STATIC_ROOT ───────────────────────────────────────────────────
+# Les fichiers statiques sont déjà collectés au BUILD (Dockerfile.prod).
+# mkdir -p est un filet de sécurité uniquement — ne re-exécute PAS collectstatic
+# pour éviter de vider le répertoire avec --clear avant que Gunicorn démarre.
 mkdir -p /app/staticfiles
 
 # ── 2. Migrations ─────────────────────────────────────────────────────────────
 echo "==> [KONIS] Exécution des migrations..."
 python manage.py migrate --noinput
 
-# ── 3. Fichiers statiques ──────────────────────────────────────────────────────
-echo "==> [KONIS] Collecte des fichiers statiques..."
-python manage.py collectstatic --noinput --clear
-
-# ── 4. Superuser initial (optionnel) ──────────────────────────────────────────
+# ── 3. Superuser initial (optionnel) ──────────────────────────────────────────
 # Déclenché uniquement si les 3 variables sont définies.
 # || true : silencieux si l'utilisateur existe déjà.
 if [ -n "$DJANGO_SUPERUSER_USERNAME" ] && \
@@ -26,7 +23,7 @@ if [ -n "$DJANGO_SUPERUSER_USERNAME" ] && \
     python manage.py createsuperuser --no-input || true
 fi
 
-# ── 5. Gunicorn ────────────────────────────────────────────────────────────────
+# ── 4. Gunicorn ────────────────────────────────────────────────────────────────
 # --bind 0.0.0.0:8000 : écoute sur toutes les interfaces réseau du conteneur.
 #   Requis par App Platform — sans ça, le health check et le trafic externe
 #   ne peuvent pas atteindre le process (127.0.0.1 = loopback uniquement).
