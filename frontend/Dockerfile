@@ -7,12 +7,15 @@ RUN npm install
 
 COPY . .
 
+# ⚠️ Ajouter cette ligne avant le build
+ARG NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+
 RUN npm run build
 
-# ⚠️ Important : définir ARG avant ENV
+# ⚠️ Port
 ARG PORT=8080
 ENV PORT=$PORT
-
 EXPOSE $PORT
 
 CMD ["npm","start"]
