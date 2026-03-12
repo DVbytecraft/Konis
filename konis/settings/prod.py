@@ -11,9 +11,9 @@ from .base import *  # noqa: F401, F403
 DEBUG = False
 
 ALLOWED_HOSTS = [
-    ".ondigitalocean.app",  # accepte tous les sous-domaines DO
-    "localhost",
-    "127.0.0.1",
+    host.strip()
+    for host in os.environ.get("DJANGO_ALLOWED_HOSTS", ".ondigitalocean.app,localhost,127.0.0.1").split(",")
+    if host.strip()
 ]
 
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY")
