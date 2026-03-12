@@ -23,4 +23,6 @@ if [ -n "$DJANGO_SUPERUSER_USERNAME" ] && \
 fi
 
 echo "==> [KONIS] Démarrage de Gunicorn (config : gunicorn.conf.py)..."
-exec gunicorn konis.wsgi --config gunicorn.conf.py
+exec gunicorn konis.wsgi:application \
+     --bind 0.0.0.0:8000 \
+     --config gunicorn.conf.py
