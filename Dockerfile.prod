@@ -39,6 +39,15 @@ COPY . .
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
+# Pré-collecter les fichiers statiques au build
+# collectstatic n'a pas besoin d'une vraie DB (aucune requête SQL exécutée).
+# DATABASE_URL fictif : passé uniquement pour satisfaire la validation prod.py.
+RUN mkdir -p /app/staticfiles && \
+    DJANGO_SETTINGS_MODULE=konis.settings.prod \
+    DJANGO_SECRET_KEY=build-dummy-not-for-production \
+    DATABASE_URL=postgresql://build:build@localhost/build \
+    python manage.py collectstatic --noinput --clear
+
 # Utilisateur non-root pour la sécurité
 RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
 RUN chown -R appuser:appgroup /app
