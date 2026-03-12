@@ -3,13 +3,13 @@ Point d'entrée du package settings.
 
 Charge automatiquement prod.py ou dev.py selon DJANGO_SETTINGS_MODULE :
   - konis.settings.prod  → settings production (DigitalOcean, Render, VPS…)
-  - konis.settings       → même chose si DJANGO_SETTINGS_MODULE pointe ici
-  - tout autre valeur    → dev.py (localhost, Docker local)
+  - konis.settings       → dev.py  (manage.py local sans variable explicite)
+  - absent               → dev.py
 
-Pourquoi ce fichier existe :
-  wsgi.py fait os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'konis.settings').
-  Sans ce switch, quand DO ne définit pas la variable, Django charge ce fichier
-  et tombe sur dev.py → ALLOWED_HOSTS = localhost → DisallowedHost en prod.
+wsgi.py et asgi.py ont pour défaut 'konis.settings.prod', ce qui garantit
+que DigitalOcean charge prod.py même si DJANGO_SETTINGS_MODULE n'est pas
+défini manuellement dans les variables d'environnement App Platform.
+manage.py garde 'konis.settings' comme défaut → dev.py en local.
 """
 import os
 

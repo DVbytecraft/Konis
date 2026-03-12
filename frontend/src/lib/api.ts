@@ -10,9 +10,13 @@
  */
 
 function getApiBase(): string {
-  if (typeof window !== "undefined") return "";
-  // Côté serveur (SSR/Route handlers) : préférer BACKEND_URL (réseau Docker interne)
-  // plutôt que NEXT_PUBLIC_API_URL qui pointe vers l'hôte public.
+  if (typeof window !== "undefined") {
+    // Côté navigateur : préfixer avec basePath pour que le fetch passe par les route
+    // handlers Next.js (/konis2/api/...) et non directement vers Django via DO LB.
+    // Sans ce préfixe, DO route /api/... vers le backend → X-Proxy absent → auth échoue.
+    return process.env.NEXT_PUBLIC_BASE_PATH || "";
+  }
+  // Côté serveur (SSR/Route handlers) : préférer BACKEND_URL (réseau interne).
   return process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 }
 
@@ -120,7 +124,9 @@ export async function apiFetch<T = unknown>(path: string, options: RequestInit =
       return apiFetch<T>(path, options, false);
     }
     if (typeof window !== "undefined") {
-      window.location.href = "/login";
+      // window.location ne connaît pas le basePath Next.js — le préfixer manuellement.
+      const base = process.env.NEXT_PUBLIC_BASE_PATH || "";
+      window.location.href = `${base}/login`;
     }
   }
 
