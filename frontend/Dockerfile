@@ -18,4 +18,4 @@ ARG PORT=8080
 ENV PORT=$PORT
 EXPOSE $PORT
 
-CMD ["npm","start"]
+CMD ["npm","start","--","-H","0.0.0.0"]
