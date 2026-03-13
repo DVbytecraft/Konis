@@ -24,11 +24,12 @@ if [ -n "$DJANGO_SUPERUSER_USERNAME" ] && \
 fi
 
 # ── 4. Gunicorn ────────────────────────────────────────────────────────────────
-# --bind 0.0.0.0:8000 : écoute sur toutes les interfaces réseau du conteneur.
-#   Requis par App Platform — sans ça, le health check et le trafic externe
-#   ne peuvent pas atteindre le process (127.0.0.1 = loopback uniquement).
+# --bind 0.0.0.0:${PORT:-8000} : respecte le PORT injecté par DigitalOcean App Platform.
+#   DO injecte PORT selon http_port dans app.yaml — hardcoder 8000 cause un 502
+#   si DO attend un port différent. Fallback 8000 pour docker-compose local.
 # --config gunicorn.conf.py : workers, threads, timeouts, logging (voir le fichier).
-echo "==> [KONIS] Démarrage de Gunicorn sur 0.0.0.0:8000..."
+_PORT="${PORT:-8000}"
+echo "==> [KONIS] Démarrage de Gunicorn sur 0.0.0.0:${_PORT}..."
 exec gunicorn konis.wsgi:application \
-     --bind 0.0.0.0:8000 \
+     --bind "0.0.0.0:${_PORT}" \
      --config gunicorn.conf.py
