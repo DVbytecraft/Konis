@@ -3,8 +3,8 @@
 # Documentation : https://docs.digitalocean.com/products/app-platform/reference/app-spec/
 #
 # Architecture :
-#   - konis   : Django 5.2 + Gunicorn  (port 8000)  → route /api/
-#   - konis2  : Next.js 14            (port 8080)  → route /  (tout le reste)
+#   - konis   : Django 5.2 + Gunicorn  (port 8000)  → konis-idi4i.ondigitalocean.app
+#   - konis2  : Next.js 14            (port 8080)  → urchin-app-tb4ul.ondigitalocean.app
 #   - db      : PostgreSQL managé      (DATABASE_URL injecté automatiquement)
 #   - redis   : Redis managé           (REDIS_URL injecté automatiquement)
 #
@@ -63,7 +63,7 @@ services:
 
       # Hostname public de l'app (App Platform → Settings → Domains)
       - key: DJANGO_ALLOWED_HOSTS
-        value: "urchin-app-tb4ul.ondigitalocean.app"
+        value: "konis-idi4i.ondigitalocean.app"
 
       # DATABASE_URL injecté automatiquement par le composant "db" ci-dessous
       - key: DATABASE_URL
@@ -124,12 +124,12 @@ services:
       # URL backend côté NAVIGATEUR — les appels /api/* vont sur le même domaine.
       # NEXT_PUBLIC_* est baked au build — reconstruire si l'URL change.
       - key: NEXT_PUBLIC_API_URL
-        value: "https://urchin-app-tb4ul.ondigitalocean.app"
+        value: "https://konis-idi4i.ondigitalocean.app"
         scope: BUILD_TIME
 
       # URL backend côté SERVEUR Next.js (SSR, route handlers server-side).
       - key: BACKEND_URL
-        value: "https://urchin-app-tb4ul.ondigitalocean.app"
+        value: "https://konis-idi4i.ondigitalocean.app"
         scope: RUN_TIME
 
       # Même valeur que dans le backend — obligatoire pour le proxy de login SSR
