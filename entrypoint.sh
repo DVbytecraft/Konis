@@ -21,12 +21,19 @@ if [ -n "$DJANGO_SUPERUSER_USERNAME" ] && \
    [ -n "$DJANGO_SUPERUSER_PASSWORD" ]; then
     echo "==> [KONIS] Création du superuser '$DJANGO_SUPERUSER_USERNAME'..."
     python manage.py createsuperuser --no-input || true
-    # Forcer role='admin' sur le superuser — createsuperuser peut laisser role='' ou 'boutique'
+    # Forcer role='admin' + lier à l'Entreprise initiale
+    # createsuperuser peut laisser role='' ou 'boutique', et ne lie pas l'entreprise
     python manage.py shell -c "
 from django.contrib.auth import get_user_model
+from core.models import Entreprise
 User = get_user_model()
-updated = User.objects.filter(is_superuser=True).exclude(role='admin').update(role='admin')
-print(f'==> [KONIS] {updated} superuser(s) mis a jour avec role=admin')
+nom = '${KONIS_ENTREPRISE_NOM:-KONIS}'
+e, created = Entreprise.objects.get_or_create(nom=nom)
+if created:
+    print(f'==> [KONIS] Entreprise creee : {nom}')
+updated = User.objects.filter(is_superuser=True).exclude(role='admin').update(role='admin', entreprise=e)
+User.objects.filter(is_superuser=True, entreprise__isnull=True).update(entreprise=e)
+print(f'==> [KONIS] Superuser(s) mis a jour : role=admin, entreprise={nom}')
 " || true
 fi
 
