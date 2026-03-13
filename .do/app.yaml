@@ -63,7 +63,7 @@ services:
 
       # Hostname public de l'app (App Platform → Settings → Domains)
       - key: DJANGO_ALLOWED_HOSTS
-        value: "konis-idi4i.ondigitalocean.app"
+        value: "urchin-app-tb4ul.ondigitalocean.app"
 
       # DATABASE_URL injecté automatiquement par le composant "db" ci-dessous
       - key: DATABASE_URL
@@ -76,12 +76,12 @@ services:
       # Same-origin (frontend et backend sur même domaine) → CORS non requis,
       # mais gardé pour la bonne pratique et les appels cross-origin éventuels.
       - key: CORS_ALLOWED_ORIGINS
-        value: "https://konis-idi4i.ondigitalocean.app"
+        value: "https://urchin-app-tb4ul.ondigitalocean.app"
 
       # Obligatoire Django 4.0+ derrière proxy HTTPS (DO load balancer).
       # Sans cette variable → 403 sur toute requête POST/PUT/DELETE.
       - key: CSRF_TRUSTED_ORIGINS
-        value: "https://konis-idi4i.ondigitalocean.app"
+        value: "https://urchin-app-tb4ul.ondigitalocean.app"
 
       - key: INTERNAL_API_SECRET
         type: SECRET
@@ -124,12 +124,12 @@ services:
       # URL backend côté NAVIGATEUR — les appels /api/* vont sur le même domaine.
       # NEXT_PUBLIC_* est baked au build — reconstruire si l'URL change.
       - key: NEXT_PUBLIC_API_URL
-        value: "https://konis-idi4i.ondigitalocean.app"
+        value: "https://urchin-app-tb4ul.ondigitalocean.app"
         scope: BUILD_TIME
 
       # URL backend côté SERVEUR Next.js (SSR, route handlers server-side).
       - key: BACKEND_URL
-        value: "https://konis-idi4i.ondigitalocean.app"
+        value: "https://urchin-app-tb4ul.ondigitalocean.app"
         scope: RUN_TIME
 
       # Même valeur que dans le backend — obligatoire pour le proxy de login SSR
