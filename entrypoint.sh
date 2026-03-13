@@ -21,6 +21,12 @@ if [ -n "$DJANGO_SUPERUSER_USERNAME" ] && \
    [ -n "$DJANGO_SUPERUSER_PASSWORD" ]; then
     echo "==> [KONIS] Création du superuser '$DJANGO_SUPERUSER_USERNAME'..."
     python manage.py createsuperuser --no-input || true
+    # Forcer role='admin' sur le superuser — createsuperuser ne renseigne pas ce champ
+    python manage.py shell -c "
+from django.contrib.auth import get_user_model
+User = get_user_model()
+User.objects.filter(is_superuser=True, role='').update(role='admin')
+" || true
 fi
 
 # ── 4. Gunicorn ────────────────────────────────────────────────────────────────
