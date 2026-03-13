@@ -3,7 +3,7 @@
 # Documentation : https://docs.digitalocean.com/products/app-platform/reference/app-spec/
 #
 # Architecture :
-#   - konis   : Django 5.2 + Gunicorn  (port 8000)  → konis-idi4i.ondigitalocean.app
+#   - konis   : Django 5.2 + Gunicorn  (port 8080)  → konis-idi4i.ondigitalocean.app
 #   - konis2  : Next.js 14            (port 8080)  → urchin-app-tb4ul.ondigitalocean.app
 #   - db      : PostgreSQL managé      (DATABASE_URL injecté automatiquement)
 #   - redis   : Redis managé           (REDIS_URL injecté automatiquement)
@@ -48,7 +48,7 @@ services:
   - name: konis
     dockerfile_path: Dockerfile.prod
     source_dir: .
-    http_port: 8000
+    http_port: 8080
     instance_count: 1
     instance_size_slug: professional-xs
 
