@@ -34,8 +34,7 @@ if not _db_url:
 DATABASES = {
     "default": dj_database_url.parse(
         _db_url,
-        conn_max_age=600,
-        conn_health_checks=True,
+        conn_max_age=0,     # Pas de connexions persistantes — évite l'épuisement du pool sur db-s-dev-database (~22 connexions max)
         ssl_require=True,   # Force SSL — requis par DigitalOcean Managed DB
     )
 }
