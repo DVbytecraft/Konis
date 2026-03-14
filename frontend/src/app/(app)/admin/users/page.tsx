@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/contexts/auth-context";
 import { apiFetch } from "@/lib/api";
 import {
@@ -17,16 +17,11 @@ import { Pencil, Trash2, X } from "lucide-react";
 
 type Role = "admin" | "comptable" | "usine" | "boutique";
 
-interface Entreprise {
-  id: number;
-  nom: string;
-}
-
 interface Lieu {
   id: number;
   nom: string;
   type_lieu: string;
-  entreprise: number;
+  is_active?: boolean;
 }
 
 interface User {
@@ -49,7 +44,6 @@ interface FormState {
   last_name: string;
   email: string;
   role: Role;
-  entrepriseId: number | "";
   lieuId: number | "";
 }
 
@@ -70,18 +64,16 @@ export default function AdminUsersPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const buildTag = "2026-03-14-A";
 
-  const [entreprises, setEntreprises] = useState<Entreprise[]>([]);
-  const [lieux, setLieux] = useState<Lieu[]>([]);
-  const [lieuxFiltres, setLieuxFiltres] = useState<Lieu[]>([]);
+  const [magasins, setMagasins] = useState<Lieu[]>([]);
+  const [usines, setUsines] = useState<Lieu[]>([]);
   const [users, setUsers] = useState<User[]>([]);
 
-  // Edit modal state
   const [editUser, setEditUser] = useState<User | null>(null);
   const [editForm, setEditForm] = useState<EditForm>({ password: "", role: "boutique", lieuId: "" });
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
-  const [editLieux, setEditLieux] = useState<Lieu[]>([]);
 
   const [form, setForm] = useState<FormState>({
     username: "",
@@ -90,36 +82,32 @@ export default function AdminUsersPage() {
     last_name: "",
     email: "",
     role: "boutique",
-    entrepriseId: "",
     lieuId: "",
   });
-
-  const lieuxForSelectedEntreprise = useMemo(() => {
-    if (!form.entrepriseId) return lieuxFiltres;
-    return lieuxFiltres.filter((l) => l.entreprise === form.entrepriseId);
-  }, [lieuxFiltres, form.entrepriseId]);
 
   useEffect(() => {
     const charger = async () => {
       try {
         setLoading(true);
-        const [ents, lieuxRes, usersRes] = await Promise.all([
-          apiFetch<Paginated<Entreprise> | Entreprise[]>("/admin/entreprises/"),
-          apiFetch<Paginated<Lieu> | Lieu[]>("/admin/lieux/"),
+        const entrepriseParam = user?.entreprise ? `&entreprise=${user.entreprise}` : "";
+        const [magRes, usiRes, usersRes] = await Promise.all([
+          apiFetch<Paginated<Lieu> | Lieu[]>(`/admin/lieux/?type_lieu=magasin${entrepriseParam}`),
+          apiFetch<Paginated<Lieu> | Lieu[]>(`/admin/lieux/?type_lieu=usine${entrepriseParam}`),
           apiFetch<Paginated<User> | User[]>("/admin/users/"),
         ]);
-        const entsList = toList(ents);
-        const lieuxList = toList(lieuxRes);
-        const usersList = toList(usersRes);
-
-        setEntreprises(entsList);
-        setLieux(lieuxList);
-        setLieuxFiltres(lieuxList);
-        setUsers(usersList);
-
-        if (!form.entrepriseId && entsList.length > 0) {
-          setForm((prev) => ({ ...prev, entrepriseId: entsList[0].id }));
+        let magasinsList = toList(magRes);
+        let usinesList = toList(usiRes);
+        if (magasinsList.length === 0) {
+          const fallbackMag = await apiFetch<Lieu[]>("/locations/by-type/?type=shop");
+          magasinsList = Array.isArray(fallbackMag) ? fallbackMag : [];
         }
+        if (usinesList.length === 0) {
+          const fallbackU = await apiFetch<Lieu[]>("/locations/by-type/?type=factory");
+          usinesList = Array.isArray(fallbackU) ? fallbackU : [];
+        }
+        setMagasins(magasinsList);
+        setUsines(usinesList);
+        setUsers(toList(usersRes));
       } catch (e) {
         setError(e instanceof Error ? e.message : "Erreur de chargement");
       } finally {
@@ -127,26 +115,10 @@ export default function AdminUsersPage() {
       }
     };
     charger();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [user?.entreprise]);
 
-  useEffect(() => {
-    const chargerLieuxFiltres = async () => {
-      if (!form.entrepriseId) {
-        setLieuxFiltres(lieux);
-        return;
-      }
-      if (form.role === "boutique" || form.role === "usine") {
-        const type = form.role === "boutique" ? "shop" : "factory";
-        const res = await apiFetch<Paginated<Lieu> | Lieu[]>(`/locations/by-type/?type=${type}&entreprise=${form.entrepriseId}`);
-        const list = toList(res);
-        setLieuxFiltres(list);
-        return;
-      }
-      setLieuxFiltres(lieux.filter((l) => l.entreprise === form.entrepriseId));
-    };
-    chargerLieuxFiltres().catch(() => setLieuxFiltres([]));
-  }, [form.entrepriseId, form.role, lieux]);
+  const lieux = form.role === "boutique" ? magasins : form.role === "usine" ? usines : [];
+  const editLieux = editForm.role === "boutique" ? magasins : editForm.role === "usine" ? usines : [];
 
   const handleChange =
     (field: keyof FormState) =>
@@ -154,22 +126,14 @@ export default function AdminUsersPage() {
       const value = e.target.value;
       setForm((prev) => ({
         ...prev,
-        [field]:
-          field === "entrepriseId" || field === "lieuId"
-            ? ((value ? Number(value) : "") as never)
-            : (value as never),
+        [field]: field === "lieuId" ? (value ? Number(value) : "") : value,
       }));
       setError(null);
       setSuccess(null);
     };
 
   const handleRoleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const value = e.target.value as Role;
-    setForm((prev) => ({
-      ...prev,
-      role: value,
-      lieuId: value === "boutique" || value === "usine" ? prev.lieuId : "",
-    }));
+    setForm((prev) => ({ ...prev, role: e.target.value as Role, lieuId: "" }));
     setError(null);
     setSuccess(null);
   };
@@ -185,39 +149,11 @@ export default function AdminUsersPage() {
     }
   }, []);
 
-  const openEditModal = useCallback(async (u: User) => {
+  const openEditModal = useCallback((u: User) => {
     setEditUser(u);
     setEditForm({ password: "", role: u.role, lieuId: u.lieu?.id ?? "" });
     setEditError(null);
-    // Load lieux filtered by role + entreprise
-    if (u.role === "boutique" || u.role === "usine") {
-      try {
-        const type = u.role === "boutique" ? "shop" : "factory";
-        const ent = entreprises.find((e) => e.id);
-        const res = await apiFetch<Paginated<Lieu> | Lieu[]>(`/locations/by-type/?type=${type}${ent ? `&entreprise=${ent.id}` : ""}`);
-        setEditLieux(toList(res));
-      } catch {
-        setEditLieux(lieux);
-      }
-    } else {
-      setEditLieux([]);
-    }
-  }, [entreprises, lieux]);
-
-  const handleEditRoleChange = useCallback(async (role: Role) => {
-    setEditForm((prev) => ({ ...prev, role, lieuId: "" }));
-    if (role === "boutique" || role === "usine") {
-      try {
-        const type = role === "boutique" ? "shop" : "factory";
-        const res = await apiFetch<Paginated<Lieu> | Lieu[]>(`/locations/by-type/?type=${type}`);
-        setEditLieux(toList(res));
-      } catch {
-        setEditLieux(lieux);
-      }
-    } else {
-      setEditLieux([]);
-    }
-  }, [lieux]);
+  }, []);
 
   const handleEditSubmit = useCallback(async () => {
     if (!editUser) return;
@@ -254,10 +190,6 @@ export default function AdminUsersPage() {
       setError("Identifiant et mot de passe sont obligatoires.");
       return;
     }
-    if (!form.entrepriseId) {
-      setError("Veuillez sélectionner une entreprise.");
-      return;
-    }
     if ((form.role === "boutique" || form.role === "usine") && !form.lieuId) {
       setError("Veuillez sélectionner un lieu pour ce rôle.");
       return;
@@ -272,7 +204,6 @@ export default function AdminUsersPage() {
         last_name: form.last_name || "",
         email: form.email || "",
         role: form.role,
-        entreprise: form.entrepriseId,
         is_active: true,
       };
       if ((form.role === "boutique" || form.role === "usine") && form.lieuId) {
@@ -293,6 +224,7 @@ export default function AdminUsersPage() {
         first_name: "",
         last_name: "",
         email: "",
+        lieuId: "",
       }));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erreur lors de la création.");
@@ -319,6 +251,7 @@ export default function AdminUsersPage() {
         <p className="mt-1 text-sm text-muted-foreground">
           Création et gestion des comptes (admin, comptable, usine, boutiques).
         </p>
+        <p className="mt-1 text-xs text-muted-foreground">Build: {buildTag}</p>
       </div>
 
       <Card>
@@ -359,25 +292,14 @@ export default function AdminUsersPage() {
                 <option value="boutique">Boutique</option>
               </select>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="entreprise">Entreprise</Label>
-              <select id="entreprise" value={form.entrepriseId || ""} onChange={handleChange("entrepriseId")} className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm">
-                <option value="">Sélectionner…</option>
-                {entreprises.map((e) => (
-                  <option key={e.id} value={e.id}>
-                    {e.nom}
-                  </option>
-                ))}
-              </select>
-            </div>
             {(form.role === "boutique" || form.role === "usine") && (
               <div className="space-y-2">
                 <Label htmlFor="lieu">{form.role === "boutique" ? "Boutique" : "Usine"}</Label>
                 <select id="lieu" value={form.lieuId || ""} onChange={handleChange("lieuId")} className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm">
                   <option value="">Sélectionner…</option>
-                  {lieuxForSelectedEntreprise.map((l) => (
+                  {lieux.map((l) => (
                     <option key={l.id} value={l.id}>
-                      {l.nom}
+                      {l.is_active === false ? `${l.nom} (inactif)` : l.nom}
                     </option>
                   ))}
                 </select>
@@ -422,15 +344,13 @@ export default function AdminUsersPage() {
                   {users.map((u) => (
                     <tr key={u.id} className="border-b hover:bg-muted/20">
                       <td className="py-1.5 px-1 font-mono">{u.username}</td>
-                      <td className="py-1.5 px-1">
-                        {u.first_name} {u.last_name}
-                      </td>
+                      <td className="py-1.5 px-1">{u.first_name} {u.last_name}</td>
                       <td className="py-1.5 px-1">
                         <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                           u.role === "admin"
                             ? "bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300"
                             : u.role === "comptable"
-                            ? "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300"
+                            ? "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300"
                             : u.role === "usine"
                             ? "bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300"
                             : "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300"
@@ -446,23 +366,11 @@ export default function AdminUsersPage() {
                       </td>
                       <td className="py-1.5 px-1">
                         <div className="flex items-center gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                            title="Modifier"
-                            onClick={() => openEditModal(u)}
-                          >
+                          <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" title="Modifier" onClick={() => openEditModal(u)}>
                             <Pencil className="h-3.5 w-3.5" />
                           </Button>
                           {u.id !== user?.id && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7 text-destructive hover:text-destructive"
-                              title="Supprimer"
-                              onClick={() => handleDelete(u)}
-                            >
+                            <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" title="Supprimer" onClick={() => handleDelete(u)}>
                               <Trash2 className="h-3.5 w-3.5" />
                             </Button>
                           )}
@@ -477,12 +385,8 @@ export default function AdminUsersPage() {
         </CardContent>
       </Card>
 
-      {/* Modal modification utilisateur */}
       {editUser && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-          onClick={() => setEditUser(null)}
-        >
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setEditUser(null)}>
           <Card className="w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
             <CardHeader className="flex flex-row items-center justify-between pb-3">
               <CardTitle className="text-base">Modifier — {editUser.username}</CardTitle>
@@ -492,9 +396,7 @@ export default function AdminUsersPage() {
             </CardHeader>
             <CardContent className="space-y-3">
               {editError && (
-                <p className="text-sm text-destructive bg-destructive/10 px-3 py-2 rounded">
-                  {editError}
-                </p>
+                <p className="text-sm text-destructive bg-destructive/10 px-3 py-2 rounded">{editError}</p>
               )}
               <div className="space-y-1.5">
                 <Label>Nouveau mot de passe</Label>
@@ -510,7 +412,7 @@ export default function AdminUsersPage() {
                 <Label>Rôle</Label>
                 <select
                   value={editForm.role}
-                  onChange={(e) => handleEditRoleChange(e.target.value as Role)}
+                  onChange={(e) => setEditForm((prev) => ({ ...prev, role: e.target.value as Role, lieuId: "" }))}
                   className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
                 >
                   <option value="admin">Admin</option>
@@ -529,17 +431,15 @@ export default function AdminUsersPage() {
                   >
                     <option value="">Sélectionner…</option>
                     {editLieux.map((l) => (
-                      <option key={l.id} value={l.id}>{l.nom}</option>
+                      <option key={l.id} value={l.id}>
+                        {l.is_active === false ? `${l.nom} (inactif)` : l.nom}
+                      </option>
                     ))}
                   </select>
                 </div>
               )}
               <div className="flex gap-2 pt-1">
-                <Button
-                  className="flex-1 bg-green-600 hover:bg-green-700 text-white h-9"
-                  onClick={handleEditSubmit}
-                  disabled={editSubmitting}
-                >
+                <Button className="flex-1 bg-green-600 hover:bg-green-700 text-white h-9" onClick={handleEditSubmit} disabled={editSubmitting}>
                   {editSubmitting ? "Enregistrement…" : "Enregistrer"}
                 </Button>
                 <Button variant="outline" className="h-9" onClick={() => setEditUser(null)}>

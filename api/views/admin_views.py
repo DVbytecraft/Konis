@@ -3,6 +3,7 @@ API Admin : supervision et administration entreprise.
 """
 
 from django.contrib.auth.models import Group
+from django.core.cache import cache
 from django.db import transaction
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
@@ -43,10 +44,40 @@ def _filter_by_lieu(qs, request, lieu_field="lieu"):
     return qs
 
 
+def _ensure_user_entreprise(user: CustomUser) -> Entreprise:
+    """
+    Assure qu'un utilisateur admin est rattaché à une entreprise.
+    Si aucune entreprise n'existe encore, en crée une par défaut.
+    """
+    if user.entreprise_id:
+        return user.entreprise
+    entreprise = Entreprise.objects.order_by("id").first()
+    if entreprise is None:
+        entreprise = Entreprise.objects.create(nom="Entreprise principale")
+    user.entreprise = entreprise
+    user.save(update_fields=["entreprise"])
+    return entreprise
+
+
+def _bump_locations_cache_version() -> None:
+    """Bump cache version to invalidate locations-by-type cache."""
+    key = "locations_by_type_version"
+    try:
+        cache.incr(key)
+    except ValueError:
+        cache.set(key, 1, timeout=None)
+
+
 class EntrepriseViewSet(ModelViewSet):
     queryset = Entreprise.objects.all()
     serializer_class = EntrepriseSerializer
     permission_classes = [IsAdminRole]
+
+    def get_queryset(self):
+        qs = super().get_queryset().order_by("id")
+        if self.request.user.entreprise_id:
+            qs = qs.filter(pk=self.request.user.entreprise_id)
+        return qs
 
 
 class LieuViewSet(ModelViewSet):
@@ -54,8 +85,23 @@ class LieuViewSet(ModelViewSet):
     serializer_class = LieuSerializer
     permission_classes = [IsAdminRole]
 
+    def perform_create(self, serializer):
+        entreprise = _ensure_user_entreprise(self.request.user)
+        serializer.save(entreprise=entreprise)
+        _bump_locations_cache_version()
+
+    def perform_update(self, serializer):
+        serializer.save()
+        _bump_locations_cache_version()
+
+    def perform_destroy(self, instance):
+        instance.delete()
+        _bump_locations_cache_version()
+
     def get_queryset(self):
-        qs = super().get_queryset()
+        qs = super().get_queryset().order_by("id")
+        if self.request.user.entreprise_id:
+            qs = qs.filter(entreprise_id=self.request.user.entreprise_id)
         entreprise_id = self.request.query_params.get("entreprise")
         if entreprise_id:
             qs = qs.filter(entreprise_id=entreprise_id)
@@ -82,6 +128,8 @@ class FactoryViewSet(ModelViewSet):
 
     def get_queryset(self):
         qs = Lieu.objects.filter(type_lieu=Lieu.TYPE_USINE).select_related("entreprise", "compte_boutique")
+        if self.request.user.entreprise_id:
+            qs = qs.filter(entreprise_id=self.request.user.entreprise_id)
         entreprise_id = self.request.query_params.get("entreprise")
         if entreprise_id:
             qs = qs.filter(entreprise_id=entreprise_id)
@@ -110,12 +158,7 @@ class FactoryViewSet(ModelViewSet):
         ser.is_valid(raise_exception=True)
         entreprise = ser.validated_data.get("entreprise")
         if entreprise is None:
-            entreprise = Entreprise.objects.order_by("id").first()
-            if entreprise is None:
-                return Response(
-                    {"detail": "Aucune entreprise disponible. Créez une entreprise d'abord."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
+            entreprise = _ensure_user_entreprise(request.user)
 
         email = ser.validated_data["user_email"].strip().lower()
         username_base = email.split("@")[0] if "@" in email else email
@@ -146,6 +189,7 @@ class FactoryViewSet(ModelViewSet):
             )
             group, _ = Group.objects.get_or_create(name="Factory")
             user.groups.add(group)
+        _bump_locations_cache_version()
 
         audit_log(
             user=request.user,
@@ -187,6 +231,7 @@ class FactoryViewSet(ModelViewSet):
                 if "user_password" in data:
                     user.set_password(data["user_password"])
                 user.save()
+        _bump_locations_cache_version()
 
         audit_log(
             user=request.user,
@@ -208,6 +253,7 @@ class FactoryViewSet(ModelViewSet):
         if user:
             user.is_active = False
             user.save(update_fields=["is_active"])
+        _bump_locations_cache_version()
         audit_log(
             user=request.user,
             action="factory_deactivated",
@@ -228,6 +274,7 @@ class LocationByTypeView(APIView):
         type_map = {
             "shop": Lieu.TYPE_MAGASIN,
             "magasin": Lieu.TYPE_MAGASIN,
+            "boutique": Lieu.TYPE_MAGASIN,
             "factory": Lieu.TYPE_USINE,
             "usine": Lieu.TYPE_USINE,
         }
@@ -236,18 +283,43 @@ class LocationByTypeView(APIView):
                 {"detail": "type doit être 'shop' ou 'factory'."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        qs = Lieu.objects.filter(is_active=True).select_related("entreprise")
-        if request.user.role != CustomUser.ROLE_ADMIN:
-            if request.user.entreprise_id is None:
-                return Response([], status=status.HTTP_200_OK)
-            qs = qs.filter(entreprise_id=request.user.entreprise_id)
+        include_inactive = (request.query_params.get("include_inactive") or "").strip().lower() in ("1", "true", "yes")
+        entreprise_id = request.query_params.get("entreprise")
+        ent_scope = request.user.entreprise_id
+        effective_ent = int(entreprise_id) if entreprise_id and str(entreprise_id).isdigit() else ent_scope
+        version = cache.get("locations_by_type_version") or 1
+        cache_key = f"locations_by_type:v{version}:ent:{effective_ent or 'none'}:type:{type_param or 'all'}:inactive:{include_inactive}"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return Response(cached)
+
+        qs = Lieu.objects.all().select_related("entreprise")
+        if request.user.role != CustomUser.ROLE_ADMIN and request.user.entreprise_id is None:
+            return Response([], status=status.HTTP_200_OK)
+        if effective_ent:
+            qs = qs.filter(entreprise_id=effective_ent)
+        if not include_inactive:
+            qs = qs.filter(is_active=True)
         if type_param:
             qs = qs.filter(type_lieu=type_map[type_param])
-        entreprise_id = request.query_params.get("entreprise")
-        if entreprise_id:
-            qs = qs.filter(entreprise_id=entreprise_id)
+
         # Retourner un format simplifie pour les selects
-        data = [{"id": l.id, "nom": l.nom, "type_lieu": l.type_lieu} for l in qs]
+        data = []
+        for l in qs:
+            if l.type_lieu == Lieu.TYPE_MAGASIN:
+                type_lieu = "shop"
+                type_lieu_raw = "magasin"
+            else:
+                type_lieu = "factory"
+                type_lieu_raw = "usine"
+            data.append({
+                "id": l.id,
+                "nom": l.nom,
+                "name": l.nom,
+                "type_lieu": type_lieu,
+                "type_lieu_raw": type_lieu_raw,
+            })
+        cache.set(cache_key, data, timeout=60)
         return Response(data)
 
 
@@ -257,11 +329,17 @@ class UserViewSet(ModelViewSet):
     permission_classes = [IsAdminRole]
 
     def get_queryset(self):
-        qs = super().get_queryset()
+        qs = super().get_queryset().order_by("id")
+        if self.request.user.entreprise_id:
+            qs = qs.filter(entreprise_id=self.request.user.entreprise_id)
         lieu_id = self.request.query_params.get("lieu")
         if lieu_id:
             qs = qs.filter(lieu_id=lieu_id)
         return qs
+
+    def perform_create(self, serializer):
+        entreprise = _ensure_user_entreprise(self.request.user)
+        serializer.save(entreprise=entreprise)
 
     def perform_update(self, serializer):
         old_role = serializer.instance.role
@@ -313,7 +391,10 @@ class StockViewSet(ModelViewSet):
     permission_classes = [IsAdminRole]
 
     def get_queryset(self):
-        return _filter_by_lieu(super().get_queryset(), self.request)
+        qs = super().get_queryset()
+        if self.request.user.entreprise_id:
+            qs = qs.filter(lieu__entreprise_id=self.request.user.entreprise_id)
+        return _filter_by_lieu(qs, self.request)
 
 
 class TransfertViewSet(ModelViewSet):
@@ -324,6 +405,8 @@ class TransfertViewSet(ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
+        if self.request.user.entreprise_id:
+            qs = qs.filter(from_lieu__entreprise_id=self.request.user.entreprise_id)
         lieu_id = self.request.query_params.get("lieu")
         if lieu_id:
             qs = qs.filter(from_lieu_id=lieu_id) | qs.filter(to_lieu_id=lieu_id)
@@ -337,7 +420,10 @@ class AchatUsineViewSet(ModelViewSet):
     http_method_names = ["get", "head", "options"]
 
     def get_queryset(self):
-        return _filter_by_lieu(super().get_queryset(), self.request)
+        qs = super().get_queryset()
+        if self.request.user.entreprise_id:
+            qs = qs.filter(lieu__entreprise_id=self.request.user.entreprise_id)
+        return _filter_by_lieu(qs, self.request)
 
 
 class TicketAdminViewSet(ModelViewSet):
@@ -348,7 +434,10 @@ class TicketAdminViewSet(ModelViewSet):
     http_method_names = ["get", "head", "options"]
 
     def get_queryset(self):
-        return _filter_by_lieu(super().get_queryset(), self.request)
+        qs = super().get_queryset()
+        if self.request.user.entreprise_id:
+            qs = qs.filter(lieu__entreprise_id=self.request.user.entreprise_id)
+        return _filter_by_lieu(qs, self.request)
 
 
 class CategorieDepenseViewSet(ModelViewSet):
@@ -363,7 +452,10 @@ class DepenseViewSet(ModelViewSet):
     permission_classes = [IsAdminRole]
 
     def get_queryset(self):
-        return _filter_by_lieu(super().get_queryset(), self.request)
+        qs = super().get_queryset()
+        if self.request.user.entreprise_id:
+            qs = qs.filter(lieu__entreprise_id=self.request.user.entreprise_id)
+        return _filter_by_lieu(qs, self.request)
 
     def perform_create(self, serializer):
         depense = serializer.save()

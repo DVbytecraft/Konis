@@ -18,7 +18,29 @@
 #   INTERNAL_API_SECRET : openssl rand -hex 32
 # ============================================================
 
-name: konis
+name: konisUtilisateurs
+Création et gestion des comptes (admin, comptable, usine, boutiques).
+
+Créer un utilisateur
+Pour un compte boutique/usine, rattacher l'utilisateur à un lieu du bon type.
+
+Identifiant
+Edemkouete
+Mot de passe
+•••••••••••
+Prénom
+KODJO RAPHAEL
+Nom
+DANTODJI
+Email
+dantodjir@gmail.com
+Rôle
+Boutique
+Entreprise
+KONIS
+Boutique
+Sélectionner…
+Veuillez sélectionner un lieu pour ce rôle.
 region: fra
 
 # ── Routage HTTP (ingress) ─────────────────────────────────────────────────────

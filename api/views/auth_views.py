@@ -15,7 +15,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from api.serializers import UserMinimalSerializer
 from api.throttling import LoginIPRateThrottle, LoginRateThrottle
 from audit.services import audit_log
-from core.models import CustomUser
+from core.models import CustomUser, Entreprise
 
 
 def _get_request_data(request):
@@ -35,6 +35,21 @@ def _serialize_user(user: CustomUser) -> dict:
     data["is_factory"] = user.is_factory()
     data["role_normalized"] = "factory" if user.is_factory() else data.get("role")
     return data
+
+
+def _ensure_user_entreprise(user: CustomUser) -> Entreprise:
+    """
+    Assure qu'un utilisateur est rattaché à une entreprise existante.
+    Si aucune entreprise n'existe encore, en crée une par défaut.
+    """
+    if user.entreprise_id:
+        return user.entreprise
+    entreprise = Entreprise.objects.order_by("id").first()
+    if entreprise is None:
+        entreprise = Entreprise.objects.create(nom="Entreprise principale")
+    user.entreprise = entreprise
+    user.save(update_fields=["entreprise"])
+    return entreprise
 
 
 def _set_jwt_cookies(response, access_token, refresh_token=None):
@@ -108,6 +123,7 @@ class LoginView(APIView):
         refresh = serializer.validated_data["refresh"]
         user_id = AccessToken(access).get("user_id")
         user = CustomUser.objects.get(pk=user_id)
+        _ensure_user_entreprise(user)
         
         response = Response({
             "user": _serialize_user(user),
@@ -190,4 +206,5 @@ class MeView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        _ensure_user_entreprise(request.user)
         return Response(_serialize_user(request.user))

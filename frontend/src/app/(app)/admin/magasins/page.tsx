@@ -15,11 +15,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Wheat } from "lucide-react";
 
-interface Entreprise {
-  id: number;
-  nom: string;
-}
-
 interface Lieu {
   id: number;
   nom: string;
@@ -37,7 +32,6 @@ interface FormState {
   nom: string;
   code: string;
   type_lieu: "magasin" | "usine";
-  entrepriseId: number | "";
 }
 
 type ValidationErrorResponse = Record<string, unknown>;
@@ -60,34 +54,20 @@ export default function AdminMagasinsPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  const [entreprises, setEntreprises] = useState<Entreprise[]>([]);
   const [lieux, setLieux] = useState<Lieu[]>([]);
 
   const [form, setForm] = useState<FormState>({
     nom: "",
     code: "",
     type_lieu: "magasin",
-    entrepriseId: "",
   });
 
   useEffect(() => {
     const charger = async () => {
       try {
         setLoading(true);
-        const [ents, lieuxRes] = await Promise.all([
-          apiFetch<Paginated<Entreprise> | Entreprise[]>("/admin/entreprises/"),
-          apiFetch<Paginated<Lieu> | Lieu[]>("/admin/lieux/"),
-        ]);
-        const entsList = toList(ents);
-        const lieuxList = toList(lieuxRes);
-
-        setEntreprises(entsList);
-        setLieux(lieuxList);
-
-        // Pré-sélectionner la première entreprise si aucune sélection
-        if (!form.entrepriseId && entsList.length > 0) {
-          setForm((prev) => ({ ...prev, entrepriseId: entsList[0].id }));
-        }
+        const lieuxRes = await apiFetch<Paginated<Lieu> | Lieu[]>("/admin/lieux/");
+        setLieux(toList(lieuxRes));
       } catch (e) {
         setError(e instanceof Error ? e.message : "Erreur de chargement");
       } finally {
@@ -95,7 +75,6 @@ export default function AdminMagasinsPage() {
       }
     };
     charger();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleChange =
@@ -123,23 +102,13 @@ export default function AdminMagasinsPage() {
       setError("Le nom du lieu est obligatoire.");
       return;
     }
-    if (!form.entrepriseId) {
-      setError("Veuillez sélectionner une entreprise.");
-      return;
-    }
 
     try {
       setSubmitting(true);
-      const payload: {
-        nom: string;
-        code: string;
-        type_lieu: FormState["type_lieu"];
-        entreprise: number | "";
-      } = {
+      const payload = {
         nom: form.nom.trim(),
         code: (form.code || "").trim(),
         type_lieu: form.type_lieu,
-        entreprise: form.entrepriseId,
       };
 
       const created = await apiFetch<Lieu>("/admin/lieux/", {
@@ -286,24 +255,6 @@ export default function AdminMagasinsPage() {
                 <option value="usine">Usine</option>
               </select>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="entreprise">Entreprise</Label>
-              <select
-                id="entreprise"
-                value={form.entrepriseId || ""}
-                onChange={handleChange("entrepriseId")}
-                className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-                required
-              >
-                <option value="">Sélectionner…</option>
-                {entreprises.map((e) => (
-                  <option key={e.id} value={e.id}>
-                    {e.nom}
-                  </option>
-                ))}
-              </select>
-            </div>
-
             <div className="sm:col-span-2 flex flex-col gap-2">
               {error && (
                 <p className="text-sm text-destructive">{error}</p>
