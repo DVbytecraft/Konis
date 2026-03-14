@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 const BACKEND_URL = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const COOKIE_ACCESS = "access_token";
+const JSON_CT = "application/json; charset=utf-8";
 
 const AUTH_PREFIXES = ["auth/login", "auth/me", "auth/logout", "auth/refresh"];
 
@@ -10,14 +11,19 @@ function isAuthPath(path: string[]) {
   return AUTH_PREFIXES.some((prefix) => p === prefix || p.startsWith(prefix + "/"));
 }
 
+function jsonResponse(data: unknown, status: number) {
+  return new NextResponse(JSON.stringify(data), {
+    status,
+    headers: { "Content-Type": JSON_CT },
+  });
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ path: string[] }> }
 ) {
   const { path } = await params;
-  if (isAuthPath(path)) {
-    return NextResponse.json({ detail: "Not found" }, { status: 404 });
-  }
+  if (isAuthPath(path)) return jsonResponse({ detail: "Not found" }, 404);
   return proxy(request, path, "GET");
 }
 
@@ -26,7 +32,7 @@ export async function POST(
   { params }: { params: Promise<{ path: string[] }> }
 ) {
   const { path } = await params;
-  if (isAuthPath(path)) return NextResponse.json({ detail: "Not found" }, { status: 404 });
+  if (isAuthPath(path)) return jsonResponse({ detail: "Not found" }, 404);
   return proxy(request, path, "POST");
 }
 
@@ -35,7 +41,7 @@ export async function PUT(
   { params }: { params: Promise<{ path: string[] }> }
 ) {
   const { path } = await params;
-  if (isAuthPath(path)) return NextResponse.json({ detail: "Not found" }, { status: 404 });
+  if (isAuthPath(path)) return jsonResponse({ detail: "Not found" }, 404);
   return proxy(request, path, "PUT");
 }
 
@@ -44,7 +50,7 @@ export async function PATCH(
   { params }: { params: Promise<{ path: string[] }> }
 ) {
   const { path } = await params;
-  if (isAuthPath(path)) return NextResponse.json({ detail: "Not found" }, { status: 404 });
+  if (isAuthPath(path)) return jsonResponse({ detail: "Not found" }, 404);
   return proxy(request, path, "PATCH");
 }
 
@@ -53,7 +59,7 @@ export async function DELETE(
   { params }: { params: Promise<{ path: string[] }> }
 ) {
   const { path } = await params;
-  if (isAuthPath(path)) return NextResponse.json({ detail: "Not found" }, { status: 404 });
+  if (isAuthPath(path)) return jsonResponse({ detail: "Not found" }, 404);
   return proxy(request, path, "DELETE");
 }
 
@@ -62,29 +68,29 @@ async function proxy(
   path: string[],
   method: string
 ) {
-  if (path.length === 0) {
-    return NextResponse.json({ detail: "Not found" }, { status: 404 });
-  }
+  if (path.length === 0) return jsonResponse({ detail: "Not found" }, 404);
+
   const access = request.cookies.get(COOKIE_ACCESS)?.value;
-  if (!access) {
-    return NextResponse.json({ detail: "Non authentifié." }, { status: 401 });
-  }
+  if (!access) return jsonResponse({ detail: "Non authentifié." }, 401);
+
   const pathStr = path.filter(Boolean).join("/");
   const url = new URL(request.url);
   const query = url.searchParams.toString();
   const basePath = pathStr ? `${pathStr}/` : "";
   const backendUrl = `${BACKEND_URL}/api/${basePath}${query ? `?${query}` : ""}`;
-  const headers: Record<string, string> = {};
-  if (access) headers.Authorization = `Bearer ${access}`;
+
+  const headers: Record<string, string> = { Authorization: `Bearer ${access}` };
   if (request.headers.get("content-type")) {
     headers["Content-Type"] = request.headers.get("content-type")!;
   }
+
   let body: string | undefined;
   try {
     body = await request.text();
   } catch {
     // no body
   }
+
   try {
     const backendRes = await fetch(backendUrl, {
       method,
@@ -94,8 +100,11 @@ async function proxy(
     const contentType = backendRes.headers.get("content-type") ?? "application/octet-stream";
     const isJson = contentType.includes("application/json");
     if (isJson) {
-      const data = await backendRes.json().catch(() => ({}));
-      return NextResponse.json(data, { status: backendRes.status });
+      const text = await backendRes.text();
+      return new NextResponse(text, {
+        status: backendRes.status,
+        headers: { "Content-Type": JSON_CT },
+      });
     }
     // Streamer le contenu brut (PDF, binaire, HTML…) avec le bon Content-Type
     const blob = await backendRes.arrayBuffer();
@@ -104,9 +113,6 @@ async function proxy(
       headers: { "Content-Type": contentType },
     });
   } catch {
-    return NextResponse.json(
-      { detail: "Service backend indisponible." },
-      { status: 503 }
-    );
+    return jsonResponse({ detail: "Service backend indisponible." }, 503);
   }
 }

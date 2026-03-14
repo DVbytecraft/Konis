@@ -111,6 +111,8 @@ REST_FRAMEWORK = {
     # Les vues qui veulent TOUT retourner doivent mettre pagination_class = None explicitement.
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 50,
+    # Envoyer les caractères accentués tels quels (é, à, è…) au lieu de \u00e9
+    "UNICODE_JSON": True,
 }
 
 # JWT : expiration courte access (10 min), rotation refresh, blacklist au logout
