@@ -9,6 +9,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "django-insecure-dev-fallback-change-in-prod")
 
+# Single-entreprise mode (KONIS): force une seule entreprise dans tout le système.
+SINGLE_ENTREPRISE = os.environ.get("SINGLE_ENTREPRISE", "1").lower() in ("1", "true", "yes", "y")
+DEFAULT_ENTREPRISE_NAME = os.environ.get("DEFAULT_ENTREPRISE_NAME", "ENTREPRISE-DEFAULT")
+
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",

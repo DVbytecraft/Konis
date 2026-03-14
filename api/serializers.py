@@ -541,6 +541,13 @@ class DepenseSerializer(serializers.ModelSerializer):
         return value
 
 
+    def validate_lieu(self, value):
+        request = self.context.get("request")
+        if request and getattr(request, "user", None) and request.user.entreprise_id:
+            if value.entreprise_id != request.user.entreprise_id:
+                raise serializers.ValidationError("Lieu hors de votre entreprise.")
+        return value
+
 # ---- Usine ----
 
 class LotProductionSerializer(serializers.ModelSerializer):

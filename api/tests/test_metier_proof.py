@@ -21,7 +21,10 @@ class TestsMetierProof(TestCase):
 
     @classmethod
     def setUpTestData(cls):
-        entreprise = Entreprise.objects.create(nom="KONIS")
+        entreprise = Entreprise.get_primary()
+        if entreprise.nom != "KONIS":
+            entreprise.nom = "KONIS"
+            entreprise.save(update_fields=["nom"])
         cls.usine = Lieu.objects.create(entreprise=entreprise, nom="Usine", type_lieu=Lieu.TYPE_USINE)
         cls.b1 = Lieu.objects.create(entreprise=entreprise, nom="Boutique 1", type_lieu=Lieu.TYPE_MAGASIN)
         cls.b2 = Lieu.objects.create(entreprise=entreprise, nom="Boutique 2", type_lieu=Lieu.TYPE_MAGASIN)

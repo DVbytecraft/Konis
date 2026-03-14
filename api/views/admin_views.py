@@ -2,6 +2,7 @@
 API Admin : supervision et administration entreprise.
 """
 
+from django.conf import settings
 from django.contrib.auth.models import Group
 from django.core.cache import cache
 from django.db import transaction
@@ -49,14 +50,29 @@ def _ensure_user_entreprise(user: CustomUser) -> Entreprise:
     Assure qu'un utilisateur admin est rattaché à une entreprise.
     Si aucune entreprise n'existe encore, en crée une par défaut.
     """
+    if getattr(settings, "SINGLE_ENTREPRISE", False):
+        entreprise = Entreprise.get_primary()
+        if user.entreprise_id != entreprise.id:
+            user.entreprise = entreprise
+            user.save(update_fields=["entreprise"])
+        return entreprise
     if user.entreprise_id:
         return user.entreprise
-    entreprise = Entreprise.objects.order_by("id").first()
-    if entreprise is None:
-        entreprise = Entreprise.objects.create(nom="Entreprise principale")
+    entreprise = Entreprise.get_primary()
     user.entreprise = entreprise
     user.save(update_fields=["entreprise"])
     return entreprise
+
+
+def _get_effective_entreprise_id(request) -> int | None:
+    if getattr(settings, "SINGLE_ENTREPRISE", False):
+        return Entreprise.get_primary().id
+    if request.user and request.user.entreprise_id:
+        return request.user.entreprise_id
+    entreprise_id = request.query_params.get("entreprise")
+    if entreprise_id and str(entreprise_id).isdigit():
+        return int(entreprise_id)
+    return None
 
 
 def _bump_locations_cache_version() -> None:
@@ -75,9 +91,26 @@ class EntrepriseViewSet(ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset().order_by("id")
-        if self.request.user.entreprise_id:
-            qs = qs.filter(pk=self.request.user.entreprise_id)
+        effective_id = _get_effective_entreprise_id(self.request)
+        if effective_id:
+            qs = qs.filter(pk=effective_id)
         return qs
+
+    def create(self, request, *args, **kwargs):
+        if getattr(settings, "SINGLE_ENTREPRISE", False):
+            return Response(
+                {"detail": "Creation d'entreprise desactivee en mode mono-entreprise."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return super().create(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        if getattr(settings, "SINGLE_ENTREPRISE", False):
+            return Response(
+                {"detail": "Suppression d'entreprise desactivee en mode mono-entreprise."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return super().destroy(request, *args, **kwargs)
 
 
 class LieuViewSet(ModelViewSet):
@@ -100,11 +133,9 @@ class LieuViewSet(ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset().order_by("id")
-        if self.request.user.entreprise_id:
-            qs = qs.filter(entreprise_id=self.request.user.entreprise_id)
-        entreprise_id = self.request.query_params.get("entreprise")
-        if entreprise_id:
-            qs = qs.filter(entreprise_id=entreprise_id)
+        effective_id = _get_effective_entreprise_id(self.request)
+        if effective_id:
+            qs = qs.filter(entreprise_id=effective_id)
         lieu_id = self.request.query_params.get("lieu")
         if lieu_id:
             qs = qs.filter(pk=lieu_id)
@@ -128,11 +159,9 @@ class FactoryViewSet(ModelViewSet):
 
     def get_queryset(self):
         qs = Lieu.objects.filter(type_lieu=Lieu.TYPE_USINE).select_related("entreprise", "compte_boutique")
-        if self.request.user.entreprise_id:
-            qs = qs.filter(entreprise_id=self.request.user.entreprise_id)
-        entreprise_id = self.request.query_params.get("entreprise")
-        if entreprise_id:
-            qs = qs.filter(entreprise_id=entreprise_id)
+        effective_id = _get_effective_entreprise_id(self.request)
+        if effective_id:
+            qs = qs.filter(entreprise_id=effective_id)
         active = self.request.query_params.get("active")
         if active in ("true", "false"):
             qs = qs.filter(is_active=(active == "true"))
@@ -157,7 +186,7 @@ class FactoryViewSet(ModelViewSet):
         ser = FactoryCreateSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         entreprise = ser.validated_data.get("entreprise")
-        if entreprise is None:
+        if getattr(settings, "SINGLE_ENTREPRISE", False) or entreprise is None:
             entreprise = _ensure_user_entreprise(request.user)
 
         email = ser.validated_data["user_email"].strip().lower()
@@ -284,9 +313,7 @@ class LocationByTypeView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         include_inactive = (request.query_params.get("include_inactive") or "").strip().lower() in ("1", "true", "yes")
-        entreprise_id = request.query_params.get("entreprise")
-        ent_scope = request.user.entreprise_id
-        effective_ent = int(entreprise_id) if entreprise_id and str(entreprise_id).isdigit() else ent_scope
+        effective_ent = _get_effective_entreprise_id(request)
         version = cache.get("locations_by_type_version") or 1
         cache_key = f"locations_by_type:v{version}:ent:{effective_ent or 'none'}:type:{type_param or 'all'}:inactive:{include_inactive}"
         cached = cache.get(cache_key)
@@ -294,7 +321,7 @@ class LocationByTypeView(APIView):
             return Response(cached)
 
         qs = Lieu.objects.all().select_related("entreprise")
-        if request.user.role != CustomUser.ROLE_ADMIN and request.user.entreprise_id is None:
+        if request.user.role != CustomUser.ROLE_ADMIN and effective_ent is None:
             return Response([], status=status.HTTP_200_OK)
         if effective_ent:
             qs = qs.filter(entreprise_id=effective_ent)
@@ -331,8 +358,9 @@ class UserViewSet(ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset().order_by("id")
-        if self.request.user.entreprise_id:
-            qs = qs.filter(entreprise_id=self.request.user.entreprise_id)
+        effective_id = _get_effective_entreprise_id(self.request)
+        if effective_id:
+            qs = qs.filter(entreprise_id=effective_id)
         lieu_id = self.request.query_params.get("lieu")
         if lieu_id:
             qs = qs.filter(lieu_id=lieu_id)
@@ -381,9 +409,10 @@ class ProduitViewSet(ModelViewSet):
     http_method_names = ["get", "head", "options"]
 
     def get_queryset(self):
-        return Produit.objects.filter(
-            entreprise=self.request.user.entreprise
-        ).select_related("categorie")
+        effective_id = _get_effective_entreprise_id(self.request)
+        if effective_id is None:
+            return Produit.objects.none()
+        return Produit.objects.filter(entreprise_id=effective_id).select_related("categorie")
 
 
 class StockViewSet(ModelViewSet):
@@ -393,8 +422,9 @@ class StockViewSet(ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
-        if self.request.user.entreprise_id:
-            qs = qs.filter(lieu__entreprise_id=self.request.user.entreprise_id)
+        effective_id = _get_effective_entreprise_id(self.request)
+        if effective_id:
+            qs = qs.filter(lieu__entreprise_id=effective_id)
         return _filter_by_lieu(qs, self.request)
 
 
@@ -406,8 +436,9 @@ class TransfertViewSet(ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
-        if self.request.user.entreprise_id:
-            qs = qs.filter(from_lieu__entreprise_id=self.request.user.entreprise_id)
+        effective_id = _get_effective_entreprise_id(self.request)
+        if effective_id:
+            qs = qs.filter(from_lieu__entreprise_id=effective_id)
         lieu_id = self.request.query_params.get("lieu")
         if lieu_id:
             qs = qs.filter(from_lieu_id=lieu_id) | qs.filter(to_lieu_id=lieu_id)
@@ -422,8 +453,9 @@ class AchatUsineViewSet(ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
-        if self.request.user.entreprise_id:
-            qs = qs.filter(lieu__entreprise_id=self.request.user.entreprise_id)
+        effective_id = _get_effective_entreprise_id(self.request)
+        if effective_id:
+            qs = qs.filter(lieu__entreprise_id=effective_id)
         return _filter_by_lieu(qs, self.request)
 
 
@@ -436,8 +468,9 @@ class TicketAdminViewSet(ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
-        if self.request.user.entreprise_id:
-            qs = qs.filter(lieu__entreprise_id=self.request.user.entreprise_id)
+        effective_id = _get_effective_entreprise_id(self.request)
+        if effective_id:
+            qs = qs.filter(lieu__entreprise_id=effective_id)
         return _filter_by_lieu(qs, self.request)
 
 
@@ -454,8 +487,9 @@ class DepenseViewSet(ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
-        if self.request.user.entreprise_id:
-            qs = qs.filter(lieu__entreprise_id=self.request.user.entreprise_id)
+        effective_id = _get_effective_entreprise_id(self.request)
+        if effective_id:
+            qs = qs.filter(lieu__entreprise_id=effective_id)
         return _filter_by_lieu(qs, self.request)
 
     def perform_create(self, serializer):

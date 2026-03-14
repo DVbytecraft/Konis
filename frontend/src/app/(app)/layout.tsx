@@ -19,9 +19,11 @@ const navByRole: Record<string, { href: string; label: string; icon: React.Compo
     { href: "/admin/rapport", label: "Rapport", icon: BarChart3 },
     { href: "/factures", label: "Factures", icon: Receipt },
     { href: "/comptable", label: "Vue comptable", icon: Calculator },
+    { href: "/comptable/depenses", label: "Dépenses", icon: ClipboardList },
   ],
   comptable: [
     { href: "/comptable", label: "Tableau de bord", icon: LayoutDashboard },
+    { href: "/comptable/depenses", label: "Dépenses", icon: ClipboardList },
     { href: "/factures", label: "Factures", icon: Receipt },
   ],
   usine: [

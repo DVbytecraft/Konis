@@ -64,7 +64,7 @@ export default function AdminUsersPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const buildTag = "2026-03-14-A";
+  const buildTag = "2026-03-14-B";
 
   const [magasins, setMagasins] = useState<Lieu[]>([]);
   const [usines, setUsines] = useState<Lieu[]>([]);

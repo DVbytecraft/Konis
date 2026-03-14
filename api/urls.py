@@ -26,6 +26,7 @@ from api.views.comptable_views import (
     StockComptableViewSet,
     TransfertComptableViewSet,
     TicketComptableViewSet,
+    CategorieDepenseComptableViewSet,
     DepenseComptableViewSet,
     AchatUsineComptableViewSet,
     RapportBoutiquesView,
@@ -86,6 +87,7 @@ router_comptable = DefaultRouter()
 router_comptable.register("stocks", StockComptableViewSet, basename="comptable-stocks")
 router_comptable.register("transferts", TransfertComptableViewSet, basename="comptable-transferts")
 router_comptable.register("ventes", TicketComptableViewSet, basename="comptable-ventes")
+router_comptable.register("categories-depense", CategorieDepenseComptableViewSet, basename="comptable-categories-depense")
 router_comptable.register("depenses", DepenseComptableViewSet, basename="comptable-depenses")
 router_comptable.register("achats-usine", AchatUsineComptableViewSet, basename="comptable-achats-usine")
 

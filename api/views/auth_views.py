@@ -42,11 +42,15 @@ def _ensure_user_entreprise(user: CustomUser) -> Entreprise:
     Assure qu'un utilisateur est rattaché à une entreprise existante.
     Si aucune entreprise n'existe encore, en crée une par défaut.
     """
+    if getattr(settings, "SINGLE_ENTREPRISE", False):
+        entreprise = Entreprise.get_primary()
+        if user.entreprise_id != entreprise.id:
+            user.entreprise = entreprise
+            user.save(update_fields=["entreprise"])
+        return entreprise
     if user.entreprise_id:
         return user.entreprise
-    entreprise = Entreprise.objects.order_by("id").first()
-    if entreprise is None:
-        entreprise = Entreprise.objects.create(nom="Entreprise principale")
+    entreprise = Entreprise.get_primary()
     user.entreprise = entreprise
     user.save(update_fields=["entreprise"])
     return entreprise

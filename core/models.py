@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 
@@ -40,6 +41,15 @@ class Entreprise(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    @classmethod
+    def get_primary(cls):
+        ent = cls.objects.order_by("id").first()
+        if ent is None:
+            ent = cls.objects.create(
+                nom=getattr(settings, "DEFAULT_ENTREPRISE_NAME", "ENTREPRISE-DEFAULT")
+            )
+        return ent
+
     def __str__(self):
         return self.nom
 
@@ -71,6 +81,13 @@ class Lieu(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    def save(self, *args, **kwargs):
+        if getattr(settings, "SINGLE_ENTREPRISE", False):
+            primary = Entreprise.get_primary()
+            if self.entreprise_id != primary.id:
+                self.entreprise = primary
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.nom} ({self.get_type_lieu_display()})"
@@ -113,6 +130,13 @@ class CustomUser(AbstractUser):
     def is_factory(self) -> bool:
         """True si l'utilisateur est rattaché à une usine."""
         return bool(self.lieu_id and self.lieu and self.lieu.type_lieu == Lieu.TYPE_USINE)
+
+    def save(self, *args, **kwargs):
+        if getattr(settings, "SINGLE_ENTREPRISE", False):
+            primary = Entreprise.get_primary()
+            if self.entreprise_id != primary.id:
+                self.entreprise = primary
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.username} ({self.get_role_display()})"

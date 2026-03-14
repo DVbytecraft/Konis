@@ -14,18 +14,20 @@ from django.db.models import Count, DecimalField, ExpressionWrapper, F, Q, Sum
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework.viewsets import ReadOnlyModelViewSet
+from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 
 from api.permissions import IsComptableRole
 from api.serializers import (
     AchatUsineSerializer,
+    CategorieDepenseSerializer,
     DepenseSerializer,
     StockSerializer,
     TicketSerializer,
     TransfertSerializer,
 )
 from core.models import Lieu
-from depenses.models import Depense
+from audit.services import audit_log
+from depenses.models import CategorieDepense, Depense
 from inventaire.models import AchatUsine, Stock, Transfert
 from usine.models import TransfertCession, TransfertInterUsine
 from ventes.models import LigneVente, Ticket
@@ -94,16 +96,56 @@ class TicketComptableViewSet(ReadOnlyModelViewSet):
         return qs
 
 
-class DepenseComptableViewSet(ReadOnlyModelViewSet):
+class DepenseComptableViewSet(ModelViewSet):
     queryset = Depense.objects.all().select_related("lieu", "categorie").order_by("-date")
     serializer_class = DepenseSerializer
     permission_classes = [IsComptableRole]
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
 
     def get_queryset(self):
         qs = super().get_queryset().filter(lieu__entreprise=self.request.user.entreprise)
         qs = _filter_by_lieu(qs, self.request)
         qs = _filter_by_date(qs, self.request)
+        categorie_id = self.request.query_params.get("categorie")
+        if categorie_id:
+            qs = qs.filter(categorie_id=categorie_id)
         return qs
+
+    def perform_create(self, serializer):
+        depense = serializer.save()
+        audit_log(
+            user=self.request.user,
+            action="depense_ajoutee",
+            object_type="depense",
+            object_id=depense.pk,
+            extra={"lieu_id": depense.lieu_id, "montant": str(depense.montant), "source": "comptable"},
+        )
+
+    def perform_update(self, serializer):
+        depense = serializer.save()
+        audit_log(
+            user=self.request.user,
+            action="depense_modifiee",
+            object_type="depense",
+            object_id=depense.pk,
+            extra={"lieu_id": depense.lieu_id, "montant": str(depense.montant), "source": "comptable"},
+        )
+
+    def perform_destroy(self, instance):
+        audit_log(
+            user=self.request.user,
+            action="depense_supprimee",
+            object_type="depense",
+            object_id=instance.pk,
+            extra={"lieu_id": instance.lieu_id, "montant": str(instance.montant), "source": "comptable"},
+        )
+        instance.delete()
+
+
+class CategorieDepenseComptableViewSet(ReadOnlyModelViewSet):
+    queryset = CategorieDepense.objects.all().order_by("nom")
+    serializer_class = CategorieDepenseSerializer
+    permission_classes = [IsComptableRole]
 
 
 class AchatUsineComptableViewSet(ReadOnlyModelViewSet):

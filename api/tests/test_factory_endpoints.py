@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from django.conf import settings
 from rest_framework import status
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -13,8 +14,14 @@ from usine.models import LotProduction
 class FactoryEndpointsTests(APITestCase):
     @classmethod
     def setUpTestData(cls):
-        entreprise = Entreprise.objects.create(nom="KONIS")
-        entreprise_b = Entreprise.objects.create(nom="KONIS-B")
+        entreprise = Entreprise.get_primary()
+        if entreprise.nom != "KONIS":
+            entreprise.nom = "KONIS"
+            entreprise.save(update_fields=["nom"])
+        if getattr(settings, "SINGLE_ENTREPRISE", False):
+            entreprise_b = entreprise
+        else:
+            entreprise_b = Entreprise.objects.create(nom="KONIS-B")
         cls.usine = Lieu.objects.create(entreprise=entreprise, nom="Usine", type_lieu=Lieu.TYPE_USINE)
         cls.shop = Lieu.objects.create(entreprise=entreprise, nom="Boutique A", type_lieu=Lieu.TYPE_MAGASIN)
         cls.usine_b = Lieu.objects.create(entreprise=entreprise_b, nom="Usine B", type_lieu=Lieu.TYPE_USINE)
@@ -122,7 +129,10 @@ class FactoryEndpointsTests(APITestCase):
         self.assertEqual(rs.status_code, status.HTTP_200_OK)
         body = rs.json()
         items = body.get("results", body) if isinstance(body, dict) else body
-        self.assertTrue(all(item["lieu"] != self.shop_b.id for item in items))
+        if getattr(settings, "SINGLE_ENTREPRISE", False):
+            self.assertTrue(any(item["lieu"] == self.shop_b.id for item in items))
+        else:
+            self.assertTrue(all(item["lieu"] != self.shop_b.id for item in items))
 
         rd = self.client.get("/api/factory/dashboard/", **self._auth(self.usine_user))
         self.assertEqual(rd.status_code, status.HTTP_200_OK)
@@ -199,6 +209,8 @@ class FactoryEndpointsTests(APITestCase):
         self.assertTrue(any(item["produit_nom"] == "Son de ble" for item in items))
 
     def test_factory_cannot_transfer_to_shop_of_other_entreprise(self):
+        if getattr(settings, "SINGLE_ENTREPRISE", False):
+            self.skipTest("Mono-entreprise: pas de transfert inter-entreprises.")
         lot = LotProduction.objects.create(
             nom_lot="anitche-cross-shop",
             lieu_usine=self.usine,
@@ -219,6 +231,8 @@ class FactoryEndpointsTests(APITestCase):
         self.assertIn("inter-entreprises", str(r.json()).lower())
 
     def test_factory_cannot_transfer_to_factory_of_other_entreprise(self):
+        if getattr(settings, "SINGLE_ENTREPRISE", False):
+            self.skipTest("Mono-entreprise: pas de transfert inter-entreprises.")
         lot = LotProduction.objects.create(
             nom_lot="anitche-cross-factory",
             lieu_usine=self.usine,
