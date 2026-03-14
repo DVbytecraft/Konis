@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/contexts/auth-context";
-import { apiFetch, djangoUrl } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
+import { openTicketPrintWindow } from "@/lib/print";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -324,8 +325,21 @@ export default function BoutiqueCaissePage() {
   ]);
 
   const lancerImpression = useCallback(() => {
-    window.print();
-  }, []);
+    if (!ticketImprimer) return;
+    openTicketPrintWindow({
+      numero: ticketImprimer.numero,
+      date: new Date(ticketImprimer.date).toLocaleString("fr-FR"),
+      lieu_nom: ticketImprimer.lieu_nom,
+      lignes: ticketImprimer.lignes,
+      montant_total: Number(ticketImprimer.montant_total),
+      mouture: ticketImprimer.mouture,
+      cout_mouture: Number(ticketImprimer.cout_mouture ?? 0),
+      prix_mouture_kg: ticketImprimer.prix_mouture_kg ?? null,
+      prix_mouture_tonne: ticketImprimer.prix_mouture_tonne ?? null,
+      prix_mouture_sac: ticketImprimer.prix_mouture_sac ?? null,
+      produit_apporte: ticketImprimer.produit_apporte,
+    });
+  }, [ticketImprimer]);
 
   if (user?.role !== "boutique") {
     return (
@@ -377,16 +391,31 @@ export default function BoutiqueCaissePage() {
             <Button variant="default" className="w-full" onClick={lancerImpression}>
               Imprimer ticket thermique 80mm
             </Button>
-            <a
-              href={djangoUrl(`/ventes/ticket/${ticketImprimer.id}/print/`)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex"
+            <Button
+              variant="outline"
+              type="button"
+              className="w-full"
+              onClick={() =>
+                openTicketPrintWindow(
+                  {
+                    numero: ticketImprimer.numero,
+                    date: new Date(ticketImprimer.date).toLocaleString("fr-FR"),
+                    lieu_nom: ticketImprimer.lieu_nom,
+                    lignes: lignesTicket,
+                    montant_total: Number(totalGen),
+                    mouture: ticketImprimer.mouture,
+                    cout_mouture: Number(ticketImprimer.cout_mouture ?? 0),
+                    prix_mouture_kg: ticketImprimer.prix_mouture_kg ?? null,
+                    prix_mouture_tonne: ticketImprimer.prix_mouture_tonne ?? null,
+                    prix_mouture_sac: ticketImprimer.prix_mouture_sac ?? null,
+                    produit_apporte: ticketImprimer.produit_apporte,
+                  },
+                  { autoPrint: false }
+                )
+              }
             >
-              <Button variant="outline" type="button" className="w-full">
-                Ouvrir page impression (Ctrl+P pour imprimer)
-              </Button>
-            </a>
+              Ouvrir aperçu d&apos;impression
+            </Button>
             <Button
               className="w-full"
               onClick={() => {

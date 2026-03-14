@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { useAuth } from "@/contexts/auth-context";
 import { useFetch } from "@/hooks/use-fetch";
 import { apiFetch } from "@/lib/api";
+import { openTicketPrintWindow } from "@/lib/print";
 
 type Unite = "kg" | "tonne" | "sac";
 type Numeric = number | string;
@@ -79,6 +80,21 @@ export function MoutureConsole({
   const [selectedTicket, setSelectedTicket] = useState<TicketMouture | null>(null);
   const quantiteRef = useRef<HTMLInputElement>(null);
   const submitLockRef = useRef(false);
+  const imprimerTicket = useCallback((ticket: TicketMouture) => {
+    openTicketPrintWindow({
+      numero: ticket.numero,
+      date: new Date(ticket.date).toLocaleString("fr-FR"),
+      lieu_nom: ticket.lieu_nom,
+      lignes: [],
+      montant_total: toNumber(ticket.montant_total),
+      mouture: true,
+      cout_mouture: toNumber(ticket.cout_mouture),
+      prix_mouture_kg: ticket.prix_mouture_kg != null ? toNumber(ticket.prix_mouture_kg) : null,
+      prix_mouture_tonne: ticket.prix_mouture_tonne != null ? toNumber(ticket.prix_mouture_tonne) : null,
+      prix_mouture_sac: ticket.prix_mouture_sac != null ? toNumber(ticket.prix_mouture_sac) : null,
+      produit_apporte: ticket.produit_apporte,
+    });
+  }, []);
 
   const historyUrl = user?.role ? `${historyPath}?page=1&page_size=20` : null;
   const { data, loading, error: historyError, refetch, cancel } =
@@ -356,7 +372,7 @@ export function MoutureConsole({
               <span className="font-semibold">{toNumber(createdTicket.montant_total).toFixed(2)} FCFA</span>
             </p>
             <div className="flex gap-2">
-              <Button className="gap-2" onClick={() => window.print()}>
+              <Button className="gap-2" onClick={() => imprimerTicket(createdTicket)}>
                 <Printer className="h-4 w-4" />
                 Imprimer
               </Button>

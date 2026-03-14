@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { openTicketPrintWindow } from "@/lib/print";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -67,7 +68,22 @@ export default function BoutiqueTicketsPage() {
   const [ticketReimpression, setTicketReimpression] = useState<Ticket | null>(null);
   const [reimpLoading, setReimpLoading] = useState(false);
   const [reimpErreur, setReimpErreur] = useState("");
-  const printRef = useRef<HTMLDivElement>(null);
+  const imprimerTicket = useCallback((ticket: Ticket, copie: boolean = false) => {
+    openTicketPrintWindow({
+      numero: ticket.numero,
+      date: new Date(ticket.date).toLocaleString("fr-FR"),
+      lieu_nom: ticket.lieu_nom,
+      lignes: ticket.lignes,
+      montant_total: Number(ticket.montant_total),
+      mouture: ticket.mouture,
+      cout_mouture: Number(ticket.cout_mouture ?? 0),
+      prix_mouture_kg: ticket.prix_mouture_kg ?? null,
+      prix_mouture_tonne: ticket.prix_mouture_tonne ?? null,
+      prix_mouture_sac: ticket.prix_mouture_sac ?? null,
+      produit_apporte: ticket.produit_apporte,
+      copie,
+    });
+  }, []);
 
   const charger = useCallback(async (d: string, f: string) => {
     if (!d || !f) return;
@@ -474,25 +490,23 @@ export default function BoutiqueTicketsPage() {
               </Button>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div ref={printRef}>
-                <Ticket58mm
-                  lieuNom={ticketReimpression.lieu_nom}
-                  numero={ticketReimpression.numero}
-                  date={new Date(ticketReimpression.date).toLocaleString("fr-FR")}
-                  lignes={ticketReimpression.lignes}
-                  totalGeneral={Number(ticketReimpression.montant_total)}
-                  mouture={ticketReimpression.mouture}
-                  coutMouture={Number(ticketReimpression.cout_mouture)}
-                  prixMoutureKg={ticketReimpression.prix_mouture_kg ?? undefined}
-                  prixMoutureTonne={ticketReimpression.prix_mouture_tonne ?? undefined}
-                  prixMoutureSac={ticketReimpression.prix_mouture_sac ?? undefined}
-                  produitApporte={ticketReimpression.produit_apporte}
-                  copie={true}
-                />
-              </div>
+              <Ticket58mm
+                lieuNom={ticketReimpression.lieu_nom}
+                numero={ticketReimpression.numero}
+                date={new Date(ticketReimpression.date).toLocaleString("fr-FR")}
+                lignes={ticketReimpression.lignes}
+                totalGeneral={Number(ticketReimpression.montant_total)}
+                mouture={ticketReimpression.mouture}
+                coutMouture={Number(ticketReimpression.cout_mouture)}
+                prixMoutureKg={ticketReimpression.prix_mouture_kg ?? undefined}
+                prixMoutureTonne={ticketReimpression.prix_mouture_tonne ?? undefined}
+                prixMoutureSac={ticketReimpression.prix_mouture_sac ?? undefined}
+                produitApporte={ticketReimpression.produit_apporte}
+                copie={true}
+              />
               <Button
                 className="w-full gap-2 bg-green-600 hover:bg-green-700 text-white"
-                onClick={() => window.print()}
+                onClick={() => imprimerTicket(ticketReimpression, true)}
               >
                 <Printer className="h-4 w-4" />
                 Imprimer
