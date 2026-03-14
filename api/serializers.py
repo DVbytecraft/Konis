@@ -51,6 +51,9 @@ class LieuSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         )
+        extra_kwargs = {
+            "entreprise": {"required": False, "allow_null": True},
+        }
 
     def validate_code(self, value):
         if value is None:
