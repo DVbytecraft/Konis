@@ -255,24 +255,28 @@ export default function FacturesPage() {
   }, [fetchInvoicePdfBlob]);
 
   const printInvoice = useCallback(async (factureId: number) => {
-    const blob = await fetchInvoicePdfBlob(factureId, false);
-    const pdfUrl = URL.createObjectURL(blob);
-    const popup = window.open(pdfUrl, "_blank");
-    if (!popup) {
-      window.open(pdfUrl, "_blank");
-      return;
-    }
-    const interval = window.setInterval(() => {
-      try {
-        if (popup.document && popup.document.readyState === "complete") {
-          popup.focus();
-          popup.print();
-          window.clearInterval(interval);
-        }
-      } catch {
-        // Ignore cross-origin access errors while the PDF loads.
+    try {
+      const blob = await fetchInvoicePdfBlob(factureId, false);
+      const pdfUrl = URL.createObjectURL(blob);
+      const popup = window.open(pdfUrl, "_blank");
+      if (!popup) {
+        window.open(pdfUrl, "_blank");
+        return;
       }
-    }, 300);
+      const interval = window.setInterval(() => {
+        try {
+          if (popup.document && popup.document.readyState === "complete") {
+            popup.focus();
+            popup.print();
+            window.clearInterval(interval);
+          }
+        } catch {
+          // Ignore cross-origin access errors while the PDF loads.
+        }
+      }, 300);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Erreur lors de l'impression du PDF.");
+    }
   }, [fetchInvoicePdfBlob]);
 
   return (

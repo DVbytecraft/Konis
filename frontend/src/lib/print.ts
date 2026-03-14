@@ -50,8 +50,9 @@ function formatNumber(value: number | null | undefined): string {
 }
 
 function buildTicketHtml(ticket: TicketPrintData): string {
-  const lignesHtml = ticket.lignes.length
-    ? ticket.lignes
+  const lignes = ticket.lignes ?? [];
+  const lignesHtml = lignes.length
+    ? lignes
         .map((ligne) => {
           const total = ligne.total ?? ligne.quantite * ligne.prix_unitaire;
           const libelle = `${ligne.produit_nom} x${ligne.quantite} @ ${formatNumber(
