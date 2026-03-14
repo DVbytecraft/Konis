@@ -6,6 +6,7 @@ from django.utils import timezone
 
 from django.db import transaction
 from rest_framework import status
+from django.http import HttpResponse
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -164,3 +165,42 @@ class FactureDetailView(APIView):
         if not facture:
             return Response({"detail": "Facture introuvable."}, status=status.HTTP_404_NOT_FOUND)
         return Response(FactureSerializer(facture).data)
+
+
+class FacturePdfView(APIView):
+    """GET /api/factures/<id>/pdf/ : PDF facture (auth obligatoire)."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk: int):
+        qs = Facture.objects.prefetch_related("lignes__produit").select_related("lieu", "lieu__entreprise", "created_by")
+        facture = qs.filter(pk=pk).first()
+        if not facture:
+            return Response({"detail": "Facture introuvable."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Autorisations par lieu/entreprise
+        if request.user.role == CustomUser.ROLE_ADMIN:
+            allowed = True
+        elif request.user.role == CustomUser.ROLE_COMPTABLE:
+            allowed = bool(request.user.entreprise_id and facture.lieu.entreprise_id == request.user.entreprise_id)
+        else:
+            allowed = bool(request.user.lieu_id and facture.lieu_id == request.user.lieu_id)
+        if not allowed:
+            return Response({"detail": "Facture introuvable."}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            from ventes.pdf import build_facture_pdf
+        except Exception:
+            return Response(
+                {"detail": "Moteur PDF indisponible. Installez les dependances serveur (reportlab)."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        pdf = build_facture_pdf(facture)
+        filename = f"facture-{facture.numero}.pdf"
+        download = request.query_params.get("download") == "1"
+        content_disposition = "attachment" if download else "inline"
+
+        response = HttpResponse(pdf, content_type="application/pdf")
+        response["Content-Disposition"] = f'{content_disposition}; filename="{filename}"'
+        response["Cache-Control"] = "no-store"
+        return response

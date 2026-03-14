@@ -51,7 +51,7 @@ from api.views.usine_views import (
     TransfertCessionUsineViewSet,
     TransfertInterUsineViewSet,
 )
-from api.views.facture_views import FactureListCreateView, FactureDetailView
+from api.views.facture_views import FactureListCreateView, FactureDetailView, FacturePdfView
 
 # Auth : pas de router
 auth_urlpatterns = [
@@ -126,4 +126,5 @@ urlpatterns = [
     path("comptable/bilan/", BilanView.as_view(), name="comptable-bilan"),
     path("factures/", FactureListCreateView.as_view(), name="factures-list-create"),
     path("factures/<int:pk>/", FactureDetailView.as_view(), name="factures-detail"),
+    path("factures/<int:pk>/pdf/", FacturePdfView.as_view(), name="factures-pdf"),
 ]

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/contexts/auth-context";
-import { apiFetch, djangoUrl } from "@/lib/api";
+import { apiFetch, apiUrl } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -224,13 +224,39 @@ export default function FacturesPage() {
     }
   };
 
-  const openInvoicePdf = useCallback((factureId: number, download = false) => {
+  const fetchInvoicePdfBlob = useCallback(async (factureId: number, download = false) => {
     const suffix = download ? "?download=1" : "";
-    return djangoUrl(`/ventes/facture/${factureId}/pdf/${suffix}`);
+    const url = apiUrl(`/factures/${factureId}/pdf/${suffix}`);
+    let res = await fetch(url, { credentials: "include" });
+    if (res.status === 401) {
+      try {
+        await apiFetch("/auth/refresh", { method: "POST" }, false);
+      } catch {
+        // Ignore refresh errors; second attempt will surface failure.
+      }
+      res = await fetch(url, { credentials: "include" });
+    }
+    if (!res.ok) {
+      throw new Error(`Erreur ${res.status} lors du chargement du PDF`);
+    }
+    return res.blob();
   }, []);
 
-  const printInvoice = useCallback((factureId: number) => {
-    const pdfUrl = openInvoicePdf(factureId, false);
+  const downloadInvoice = useCallback(async (factureId: number) => {
+    const blob = await fetchInvoicePdfBlob(factureId, true);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `facture-${factureId}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }, [fetchInvoicePdfBlob]);
+
+  const printInvoice = useCallback(async (factureId: number) => {
+    const blob = await fetchInvoicePdfBlob(factureId, false);
+    const pdfUrl = URL.createObjectURL(blob);
     const popup = window.open("", "_blank");
     if (!popup) {
       window.open(pdfUrl, "_blank");
@@ -252,7 +278,7 @@ export default function FacturesPage() {
   </body>
 </html>`);
     popup.document.close();
-  }, [openInvoicePdf]);
+  }, [fetchInvoicePdfBlob]);
 
   return (
     <div className="space-y-6 min-w-0">
@@ -378,9 +404,7 @@ export default function FacturesPage() {
                       <Button size="sm" type="button" onClick={() => printInvoice(f.id)}>
                         Imprimer facture
                       </Button>
-                      <a href={openInvoicePdf(f.id, true)} target="_blank" rel="noopener noreferrer">
-                        <Button size="sm" type="button" variant="outline">PDF</Button>
-                      </a>
+                      <Button size="sm" type="button" variant="outline" onClick={() => downloadInvoice(f.id)}>PDF</Button>
                     </div>
                   </td>
                 </tr>
@@ -433,9 +457,7 @@ export default function FacturesPage() {
 
           <div className="print:hidden absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2">
             <Button type="button" onClick={() => printInvoice(selected.id)}>Imprimer A4</Button>
-            <a href={openInvoicePdf(selected.id, true)} target="_blank" rel="noopener noreferrer">
-              <Button type="button" variant="outline">Télécharger PDF</Button>
-            </a>
+            <Button type="button" variant="outline" onClick={() => downloadInvoice(selected.id)}>Télécharger PDF</Button>
             <Button type="button" variant="outline" onClick={() => setSelected(null)}>Fermer</Button>
           </div>
         </div>
