@@ -13,7 +13,6 @@ const poppins = Poppins({
 export const metadata: Metadata = {
   title: "KONIS – Gestion provenderie",
   description: "Application de gestion KONIS",
-  charset: "utf-8",
 };
 
 export default function RootLayout({
