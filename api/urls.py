@@ -5,7 +5,7 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 
 from api.views.auth_views import LoginView, RefreshView, LogoutView, MeView
-from api.views.health_views import HealthView
+from api.views.health_views import HealthView, HealthCheckView
 from api.views.boutique_views import StockBoutiqueViewSet, ProduitBoutiqueViewSet, VenteBoutiqueViewSet, MoutureSeuleView, TicketReprintView
 from api.views.admin_views import (
     EntrepriseViewSet,
@@ -101,6 +101,7 @@ router_usine.register("transferts-inter-usines", TransfertInterUsineViewSet, bas
 
 urlpatterns = [
     path("health/", HealthView.as_view(), name="health"),
+    path("health/check/", HealthCheckView.as_view(), name="health-check"),
     path("auth/", include((auth_urlpatterns, "auth"))),
     path("locations/by-type/", LocationByTypeView.as_view(), name="locations-by-type"),
     path("boutique/mouture-seule/", MoutureSeuleView.as_view(), name="boutique-mouture-seule"),
