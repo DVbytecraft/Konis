@@ -91,10 +91,18 @@ async function proxy(
       headers,
       body: body || undefined,
     });
-    const contentType = backendRes.headers.get("content-type");
-    const isJson = contentType?.includes("application/json");
-    const data = isJson ? await backendRes.json().catch(() => ({})) : {};
-    return NextResponse.json(data, { status: backendRes.status });
+    const contentType = backendRes.headers.get("content-type") ?? "application/octet-stream";
+    const isJson = contentType.includes("application/json");
+    if (isJson) {
+      const data = await backendRes.json().catch(() => ({}));
+      return NextResponse.json(data, { status: backendRes.status });
+    }
+    // Streamer le contenu brut (PDF, binaire, HTML…) avec le bon Content-Type
+    const blob = await backendRes.arrayBuffer();
+    return new NextResponse(blob, {
+      status: backendRes.status,
+      headers: { "Content-Type": contentType },
+    });
   } catch {
     return NextResponse.json(
       { detail: "Service backend indisponible." },
