@@ -20,10 +20,11 @@ export const userSchema = z.object({
       id: z.number(),
       nom: z.string(),
       type_lieu: z.string(),
-      mouture_enabled: z.boolean(),
+      mouture_enabled: z.boolean().optional(),
     })
+    .nullable()
     .optional(),
-  entreprise: z.number().optional(),
+  entreprise: z.number().nullable().optional(),
 });
 
 export type User = z.infer<typeof userSchema>;
