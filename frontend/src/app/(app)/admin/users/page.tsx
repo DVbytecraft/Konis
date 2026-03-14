@@ -98,12 +98,12 @@ export default function AdminUsersPage() {
         let magasinsList = toList(magRes);
         let usinesList = toList(usiRes);
         if (magasinsList.length === 0) {
-          const fallbackMag = await apiFetch<Lieu[]>("/locations/by-type/?type=shop");
-          magasinsList = Array.isArray(fallbackMag) ? fallbackMag : [];
+          const fallbackMag = await apiFetch<Paginated<Lieu> | Lieu[]>("/locations/by-type/?type=shop");
+          magasinsList = toList(fallbackMag);
         }
         if (usinesList.length === 0) {
-          const fallbackU = await apiFetch<Lieu[]>("/locations/by-type/?type=factory");
-          usinesList = Array.isArray(fallbackU) ? fallbackU : [];
+          const fallbackU = await apiFetch<Paginated<Lieu> | Lieu[]>("/locations/by-type/?type=factory");
+          usinesList = toList(fallbackU);
         }
         setMagasins(magasinsList);
         setUsines(usinesList);

@@ -9,6 +9,11 @@ import { Input } from "@/components/ui/input";
 
 type ProductOption = { id: number; name: string; code: string; unit: string };
 type FactoryOption = { id: number; nom: string };
+type LocationPayload =
+  | FactoryOption[]
+  | { results?: FactoryOption[]; items?: FactoryOption[]; data?: FactoryOption[] }
+  | null
+  | undefined;
 
 const UNITE_POIDS = [
   { value: "kg", label: "Kilogrammes" },
@@ -39,8 +44,11 @@ export default function FactoryProductionNewPage() {
 
   const loadFactories = async () => {
     try {
-      const res = await apiFetch("/locations/by-type/?type=factory");
-      setFactories(res as FactoryOption[]);
+      const res = (await apiFetch("/locations/by-type/?type=factory")) as LocationPayload;
+      const list = Array.isArray(res)
+        ? res
+        : (res?.results ?? res?.items ?? res?.data ?? []);
+      setFactories(list);
     } catch {
       setFactories([]);
     }

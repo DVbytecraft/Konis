@@ -32,6 +32,16 @@ interface LieuItem {
   type_lieu: string;
 }
 
+type LieuPayload =
+  | LieuItem[]
+  | {
+      results?: LieuItem[];
+      items?: LieuItem[];
+      data?: LieuItem[];
+    }
+  | null
+  | undefined;
+
 interface FactureLine {
   id: number;
   produit?: number | null;
@@ -95,6 +105,15 @@ export default function FacturesPage() {
     return [];
   }, []);
 
+  const toLieuArray = useCallback((payload: LieuPayload): LieuItem[] => {
+    if (Array.isArray(payload)) return payload;
+    if (!payload || typeof payload !== "object") return [];
+    if (Array.isArray(payload.results)) return payload.results;
+    if (Array.isArray(payload.items)) return payload.items;
+    if (Array.isArray(payload.data)) return payload.data;
+    return [];
+  }, []);
+
   const normalizedProducts = useMemo(
     () =>
       toProductArray(products as ProductPayload).map((p) => ({
@@ -125,8 +144,8 @@ export default function FacturesPage() {
 
       let cursor = 0;
       if (canChooseLieu) {
-        const lieuxRes = rest[cursor++] as LieuItem[];
-        setLieux(lieuxRes ?? []);
+        const lieuxRes = rest[cursor++] as LieuPayload;
+        setLieux(toLieuArray(lieuxRes));
       }
 
       if (user?.role === "factory" || user?.role === "usine") {
@@ -148,7 +167,7 @@ export default function FacturesPage() {
     } finally {
       setLoading(false);
     }
-  }, [canChooseLieu, toProductArray, user?.role]);
+  }, [canChooseLieu, toProductArray, toLieuArray, user?.role]);
 
   useEffect(() => {
     load().catch(() => null);

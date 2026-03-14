@@ -42,6 +42,17 @@ interface ShopOption {
   id: number;
   nom: string;
 }
+type LocationPayload =
+  | ShopOption[]
+  | { results?: ShopOption[]; items?: ShopOption[]; data?: ShopOption[] }
+  | null
+  | undefined;
+
+function toLocationList(payload: LocationPayload): ShopOption[] {
+  if (Array.isArray(payload)) return payload;
+  if (!payload || typeof payload !== "object") return [];
+  return payload.results ?? payload.items ?? payload.data ?? [];
+}
 
 export default function FactoryTransfersPage() {
   const [tab, setTab] = useState<"boutiques" | "usines">("boutiques");
@@ -69,8 +80,8 @@ export default function FactoryTransfersPage() {
     ]);
     setRows((list as { results?: TransferRow[] }).results ?? (list as TransferRow[]));
     setLots((lotList as { results?: LotOption[] }).results ?? (lotList as LotOption[]));
-    setShops(shopList as ShopOption[]);
-    setFactories(factoryList as ShopOption[]);
+    setShops(toLocationList(shopList as LocationPayload));
+    setFactories(toLocationList(factoryList as LocationPayload));
     setInterRows((interList as { results?: InterUsineRow[] }).results ?? (interList as InterUsineRow[]));
   };
 

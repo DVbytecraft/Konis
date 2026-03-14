@@ -319,8 +319,9 @@ class LocationByTypeView(APIView):
                 "type_lieu": type_lieu,
                 "type_lieu_raw": type_lieu_raw,
             })
-        cache.set(cache_key, data, timeout=60)
-        return Response(data)
+        payload = {"count": len(data), "results": data}
+        cache.set(cache_key, payload, timeout=60)
+        return Response(payload)
 
 
 class UserViewSet(ModelViewSet):

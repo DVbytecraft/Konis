@@ -21,6 +21,11 @@ interface FactoryOption {
   id: number;
   nom: string;
 }
+type LocationPayload =
+  | FactoryOption[]
+  | { results?: FactoryOption[]; items?: FactoryOption[]; data?: FactoryOption[] }
+  | null
+  | undefined;
 
 const UNITE_CHOICES = [
   { value: "sacs", label: "Sacs" },
@@ -47,8 +52,11 @@ export default function FactoryAchatsPage() {
 
   const loadFactories = async () => {
     try {
-      const res = await apiFetch("/locations/by-type/?type=factory");
-      setFactories(res as FactoryOption[]);
+      const res = (await apiFetch("/locations/by-type/?type=factory")) as LocationPayload;
+      const list = Array.isArray(res)
+        ? res
+        : (res?.results ?? res?.items ?? res?.data ?? []);
+      setFactories(list);
     } catch {
       setFactories([]);
     }
