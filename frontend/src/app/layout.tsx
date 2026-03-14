@@ -13,6 +13,7 @@ const poppins = Poppins({
 export const metadata: Metadata = {
   title: "KONIS – Gestion provenderie",
   description: "Application de gestion KONIS",
+  charset: "utf-8",
 };
 
 export default function RootLayout({
@@ -22,6 +23,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="fr" className="overflow-x-hidden">
+      <head><meta charSet="utf-8" /></head>
       <body
         className={`${poppins.variable} min-h-screen bg-background font-sans antialiased text-base`}
       >
