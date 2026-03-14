@@ -101,6 +101,14 @@ class UserSerializer(serializers.ModelSerializer):
             fields["lieu"].queryset = Lieu.objects.filter(entreprise_id=request.user.entreprise_id)
         return fields
 
+    def validate_username(self, value):
+        qs = CustomUser.objects.filter(username__iexact=value)
+        if self.instance is not None:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError("Identifiant dÃ©jÃ  utilisÃ©.")
+        return value
+
     def to_representation(self, instance):
         data = super().to_representation(instance)
         data["lieu"] = LieuMinimalSerializer(instance.lieu).data if instance.lieu else None
