@@ -257,27 +257,22 @@ export default function FacturesPage() {
   const printInvoice = useCallback(async (factureId: number) => {
     const blob = await fetchInvoicePdfBlob(factureId, false);
     const pdfUrl = URL.createObjectURL(blob);
-    const popup = window.open("", "_blank");
+    const popup = window.open(pdfUrl, "_blank");
     if (!popup) {
       window.open(pdfUrl, "_blank");
       return;
     }
-    const escapedPdfUrl = pdfUrl.replace(/"/g, "&quot;");
-    popup.document.write(`<!doctype html>
-<html>
-  <head>
-    <title>Impression facture KONIS</title>
-    <style>html,body{margin:0;height:100%}iframe{width:100%;height:100%;border:0}</style>
-  </head>
-  <body>
-    <iframe id="invoice-pdf" src="${escapedPdfUrl}"></iframe>
-    <script>
-      const frame = document.getElementById('invoice-pdf');
-      frame.addEventListener('load', () => setTimeout(() => window.print(), 250));
-    </script>
-  </body>
-</html>`);
-    popup.document.close();
+    const interval = window.setInterval(() => {
+      try {
+        if (popup.document && popup.document.readyState === "complete") {
+          popup.focus();
+          popup.print();
+          window.clearInterval(interval);
+        }
+      } catch {
+        // Ignore cross-origin access errors while the PDF loads.
+      }
+    }, 300);
   }, [fetchInvoicePdfBlob]);
 
   return (
