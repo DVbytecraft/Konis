@@ -81,13 +81,9 @@ export default function AdminMagasinsPage() {
     (field: keyof FormState) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
       const value = e.target.value;
-      const normalizedValue =
-        field === "entrepriseId"
-          ? (value ? Number(value) : "")
-          : value;
       setForm((prev) => ({
         ...prev,
-        [field]: normalizedValue,
+        [field]: value,
       }));
       setError(null);
       setSuccess(null);
