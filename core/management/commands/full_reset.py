@@ -62,6 +62,7 @@ DELETION_ORDER = [
     ("ventes", "LigneFacture"),               # FK → Facture (CASCADE)
     ("ventes", "LigneVente"),                 # FK → Ticket (CASCADE), Produit (PROTECT)
     ("ventes", "Facture"),                    # FK → Ticket (CASCADE)
+    ("ventes", "TicketReprint"),              # FK → Ticket (PROTECT) — doit précéder Ticket
     ("ventes", "Ticket"),                     # FK → Lieu (PROTECT)
 
     # 4. Mouvements de stock (FK → Transfert : supprimer avant Transfert)
@@ -203,11 +204,11 @@ class Command(BaseCommand):
             Lieu = apps.get_model("core", "Lieu")
             Entreprise = apps.get_model("core", "Entreprise")
 
-            # Détacher le superadmin de son lieu et entreprise AVANT de les supprimer
-            # (évite une erreur CASCADE ou PROTECT quand on supprime les Lieux/Entreprises)
-            superadmin.lieu = None
-            superadmin.entreprise = None
-            superadmin.save(update_fields=["lieu", "entreprise"])
+            # Détacher le superadmin de son lieu et entreprise AVANT de les supprimer.
+            # On utilise QuerySet.update() et non instance.save() pour contourner le
+            # override CustomUser.save() qui, en mode SINGLE_ENTREPRISE, réassignerait
+            # immédiatement l'entreprise primaire (→ ProtectedError à l'étape 4).
+            CustomUser.objects.filter(pk=superadmin.pk).update(lieu=None, entreprise=None)
 
             # Supprimer tous les autres utilisateurs
             deleted_users, _ = CustomUser.objects.exclude(pk=superadmin.pk).delete()
