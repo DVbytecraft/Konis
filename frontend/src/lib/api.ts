@@ -130,6 +130,11 @@ export async function apiFetch<T = unknown>(path: string, options: RequestInit =
     }
   }
 
+  // 204 No Content (ex: DELETE réussi) — pas de body à parser
+  if (res.status === 204) {
+    return undefined as T;
+  }
+
   if (!res.ok) {
     let err: Record<string, unknown>;
     try {

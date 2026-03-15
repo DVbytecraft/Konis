@@ -145,7 +145,14 @@ export default function AdminUsersPage() {
       setUsers((prev) => prev.filter((x) => x.id !== u.id));
       setSuccess(`Utilisateur "${u.username}" supprimé.`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Erreur lors de la suppression.");
+      const msg = e instanceof Error ? e.message : "";
+      // 404 = déjà supprimé (suppression idempotente) — retirer de l'UI quand même
+      if (msg === "404" || msg.includes("Not Found") || msg.includes("404")) {
+        setUsers((prev) => prev.filter((x) => x.id !== u.id));
+        setSuccess(`Utilisateur "${u.username}" supprimé.`);
+      } else {
+        setError(msg || "Erreur lors de la suppression.");
+      }
     }
   }, []);
 
