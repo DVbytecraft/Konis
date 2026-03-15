@@ -122,12 +122,24 @@ class UserSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({"lieu": "Un compte boutique doit être lié à un magasin."})
             if lieu.type_lieu != Lieu.TYPE_MAGASIN:
                 raise serializers.ValidationError({"lieu": "Le lieu doit être de type magasin pour un compte boutique."})
+            existing_qs = CustomUser.objects.filter(lieu=lieu)
+            if self.instance:
+                existing_qs = existing_qs.exclude(pk=self.instance.pk)
+            if existing_qs.exists():
+                occupant = existing_qs.first()
+                raise serializers.ValidationError({"lieu": f"Ce lieu est déjà attribué à '{occupant.username}'. Modifiez cet utilisateur ou créez un nouveau lieu."})
             return
         if role == CustomUser.ROLE_USINE:
             if not lieu:
                 raise serializers.ValidationError({"lieu": "Un compte usine doit être lié à une usine."})
             if lieu.type_lieu != Lieu.TYPE_USINE:
                 raise serializers.ValidationError({"lieu": "Le lieu doit être de type usine pour un compte usine."})
+            existing_qs = CustomUser.objects.filter(lieu=lieu)
+            if self.instance:
+                existing_qs = existing_qs.exclude(pk=self.instance.pk)
+            if existing_qs.exists():
+                occupant = existing_qs.first()
+                raise serializers.ValidationError({"lieu": f"Ce lieu est déjà attribué à '{occupant.username}'. Modifiez cet utilisateur ou créez un nouveau lieu."})
             return
 
     def create(self, validated_data):
