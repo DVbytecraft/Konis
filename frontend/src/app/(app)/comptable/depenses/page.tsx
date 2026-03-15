@@ -217,7 +217,7 @@ export default function ComptableDepensesPage() {
       });
       setDepenses((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
       setEditDepense(null);
-      setSuccess("DÃ©pense modifiÃ©e.");
+      setSuccess("Dépense modifiée.");
     } catch (e) {
       setEditError(e instanceof Error ? e.message : "Erreur lors de la modification.");
     } finally {
@@ -226,11 +226,11 @@ export default function ComptableDepensesPage() {
   };
 
   const handleDelete = async (d: Depense) => {
-    if (!window.confirm(`Supprimer la dÃ©pense de ${montantFmt.format(Number(d.montant || 0))} ?`)) return;
+    if (!window.confirm(`Supprimer la dépense de ${montantFmt.format(Number(d.montant || 0))} ?`)) return;
     try {
       await apiFetch(`/comptable/depenses/${d.id}/`, { method: "DELETE" });
       setDepenses((prev) => prev.filter((x) => x.id !== d.id));
-      setSuccess("DÃ©pense supprimÃ©e.");
+      setSuccess("Dépense supprimée.");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erreur lors de la suppression.");
     }
@@ -370,12 +370,12 @@ export default function ComptableDepensesPage() {
       <Card>
         <CardHeader>
           <CardTitle>Filtres</CardTitle>
-          <CardDescription>Filtrer par date, lieu ou catÃ©gorie.</CardDescription>
+          <CardDescription>Filtrer par date, lieu ou catégorie.</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <div className="space-y-2">
-              <Label>Date dÃ©but</Label>
+              <Label>Date début</Label>
               <Input type="date" value={filters.debut} onChange={handleFilterChange("debut")} className="h-9" />
             </div>
             <div className="space-y-2">
@@ -398,7 +398,7 @@ export default function ComptableDepensesPage() {
               </select>
             </div>
             <div className="space-y-2">
-              <Label>CatÃ©gorie</Label>
+              <Label>Catégorie</Label>
               <select
                 value={filters.categorieId}
                 onChange={handleFilterChange("categorieId")}
@@ -416,7 +416,7 @@ export default function ComptableDepensesPage() {
               Appliquer
             </Button>
             <Button type="button" variant="outline" className="h-9" onClick={resetFilters} disabled={loading}>
-              RÃ©initialiser
+              Réinitialiser
             </Button>
           </div>
         </CardContent>
@@ -488,7 +488,7 @@ export default function ComptableDepensesPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setEditDepense(null)}>
           <Card className="w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
             <CardHeader className="flex flex-row items-center justify-between pb-3">
-              <CardTitle className="text-base">Modifier dÃ©pense</CardTitle>
+              <CardTitle className="text-base">Modifier dépense</CardTitle>
               <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditDepense(null)}>
                 <X className="h-4 w-4" />
               </Button>
@@ -504,7 +504,7 @@ export default function ComptableDepensesPage() {
                   onChange={(e) => setEditForm((prev) => ({ ...prev, lieuId: e.target.value }))}
                   className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
                 >
-                  <option value="">SÃ©lectionner...</option>
+                  <option value="">Sélectionner...</option>
                   {lieux.map((l) => (
                     <option key={l.id} value={l.id}>
                       {l.nom} {l.type_lieu_raw ? `(${l.type_lieu_raw})` : ""}
@@ -513,13 +513,13 @@ export default function ComptableDepensesPage() {
                 </select>
               </div>
               <div className="space-y-1.5">
-                <Label>CatÃ©gorie</Label>
+                <Label>Catégorie</Label>
                 <select
                   value={editForm.categorieId}
                   onChange={(e) => setEditForm((prev) => ({ ...prev, categorieId: e.target.value }))}
                   className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
                 >
-                  <option value="">SÃ©lectionner...</option>
+                  <option value="">Sélectionner...</option>
                   {categories.map((c) => (
                     <option key={c.id} value={c.id}>{c.nom}</option>
                   ))}
@@ -546,7 +546,7 @@ export default function ComptableDepensesPage() {
                 />
               </div>
               <div className="space-y-1.5">
-                <Label>LibellÃ©</Label>
+                <Label>Libellé</Label>
                 <Input
                   value={editForm.libelle}
                   onChange={(e) => setEditForm((prev) => ({ ...prev, libelle: e.target.value }))}
@@ -555,7 +555,7 @@ export default function ComptableDepensesPage() {
               </div>
               <div className="flex gap-2 pt-1">
                 <Button className="flex-1 bg-green-600 hover:bg-green-700 text-white h-9" onClick={handleEditSubmit} disabled={editSubmitting}>
-                  {editSubmitting ? "Enregistrementâ€¦" : "Enregistrer"}
+                  {editSubmitting ? "Enregistrement…" : "Enregistrer"}
                 </Button>
                 <Button variant="outline" className="h-9" onClick={() => setEditDepense(null)}>
                   Annuler
