@@ -236,6 +236,25 @@ class Command(BaseCommand):
             # Étape 5 : réinitialiser les séquences PostgreSQL
             self._reset_sequences()
 
+            # Étape 6 : repositionner la séquence des utilisateurs au-delà du superadmin.
+            # _reset_sequences() remet tout à 1, mais le superadmin conserve son id
+            # (ex : id=3). Sans cette correction, le 3ème nouvel utilisateur créé
+            # obtiendrait id=3 → conflit de clé unique → IntegrityError.
+            if connection.vendor == "postgresql":
+                with connection.cursor() as cursor:
+                    cursor.execute("""
+                        SELECT setval(
+                            pg_get_serial_sequence('core_customuser', 'id'),
+                            (SELECT MAX(id) FROM core_customuser),
+                            true
+                        )
+                    """)
+                self.stdout.write(
+                    self.style.SUCCESS(
+                        f"  ✓ Séquence utilisateurs repositionnée après superadmin (id={superadmin.pk})"
+                    )
+                )
+
         # ── Révocation JWT immédiate — HORS transaction ───────────────────────
         # Créé APRÈS le commit de la transaction principale pour être visible
         # immédiatement de toutes les connexions PostgreSQL.
