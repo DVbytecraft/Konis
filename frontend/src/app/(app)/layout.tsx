@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/auth-context";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { Button } from "@/components/ui/button";
-import { LayoutDashboard, Store, Calculator, LogOut, Users, Package, Warehouse, Receipt, BarChart3, ClipboardList, Wheat, Tag } from "lucide-react";
+import { LayoutDashboard, Store, Calculator, LogOut, Users, Package, Warehouse, Receipt, BarChart3, ClipboardList, Wheat, Tag, Truck } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navByRole: Record<string, { href: string; label: string; icon: React.ComponentType<{ className?: string }> }[]> = {
@@ -50,6 +50,11 @@ const navByRole: Record<string, { href: string; label: string; icon: React.Compo
     { href: "/boutique/mouture", label: "Mouture", icon: Wheat },
     { href: "/boutique/tickets", label: "Tickets", icon: ClipboardList },
     { href: "/factures", label: "Factures", icon: Receipt },
+  ],
+  mpsl: [
+    { href: "/mpsl", label: "Tableau de bord", icon: Truck },
+    { href: "/mpsl/achats", label: "Achats", icon: Package },
+    { href: "/mpsl/transferts", label: "Transferts", icon: Warehouse },
   ],
 };
 

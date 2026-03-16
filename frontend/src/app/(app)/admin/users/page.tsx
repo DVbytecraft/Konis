@@ -15,7 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Pencil, Trash2, X } from "lucide-react";
 
-type Role = "admin" | "comptable" | "usine" | "boutique";
+type Role = "admin" | "comptable" | "usine" | "boutique" | "mpsl";
 
 interface Lieu {
   id: number;
@@ -68,6 +68,7 @@ export default function AdminUsersPage() {
 
   const [magasins, setMagasins] = useState<Lieu[]>([]);
   const [usines, setUsines] = useState<Lieu[]>([]);
+  const [mpslLieux, setMpslLieux] = useState<Lieu[]>([]);
   const [users, setUsers] = useState<User[]>([]);
 
   const [editUser, setEditUser] = useState<User | null>(null);
@@ -90,13 +91,15 @@ export default function AdminUsersPage() {
       try {
         setLoading(true);
         const entrepriseParam = user?.entreprise ? `&entreprise=${user.entreprise}` : "";
-        const [magRes, usiRes, usersRes] = await Promise.all([
+        const [magRes, usiRes, mpslRes, usersRes] = await Promise.all([
           apiFetch<Paginated<Lieu> | Lieu[]>(`/admin/lieux/?type_lieu=magasin${entrepriseParam}`),
           apiFetch<Paginated<Lieu> | Lieu[]>(`/admin/lieux/?type_lieu=usine${entrepriseParam}`),
+          apiFetch<Paginated<Lieu> | Lieu[]>(`/admin/lieux/?type_lieu=mpsl${entrepriseParam}`),
           apiFetch<Paginated<User> | User[]>("/admin/users/"),
         ]);
         let magasinsList = toList(magRes);
         let usinesList = toList(usiRes);
+        let mpslList = toList(mpslRes);
         if (magasinsList.length === 0) {
           const fallbackMag = await apiFetch<Paginated<Lieu> | Lieu[]>("/locations/by-type/?type=shop");
           magasinsList = toList(fallbackMag);
@@ -105,8 +108,13 @@ export default function AdminUsersPage() {
           const fallbackU = await apiFetch<Paginated<Lieu> | Lieu[]>("/locations/by-type/?type=factory");
           usinesList = toList(fallbackU);
         }
+        if (mpslList.length === 0) {
+          const fallbackMpsl = await apiFetch<Paginated<Lieu> | Lieu[]>("/locations/by-type/?type=mpsl");
+          mpslList = toList(fallbackMpsl);
+        }
         setMagasins(magasinsList);
         setUsines(usinesList);
+        setMpslLieux(mpslList);
         setUsers(toList(usersRes));
       } catch (e) {
         setError(e instanceof Error ? e.message : "Erreur de chargement");
@@ -117,8 +125,8 @@ export default function AdminUsersPage() {
     charger();
   }, [user?.entreprise]);
 
-  const lieux = form.role === "boutique" ? magasins : form.role === "usine" ? usines : [];
-  const editLieux = editForm.role === "boutique" ? magasins : editForm.role === "usine" ? usines : [];
+  const lieux = form.role === "boutique" ? magasins : form.role === "usine" ? usines : form.role === "mpsl" ? mpslLieux : [];
+  const editLieux = editForm.role === "boutique" ? magasins : editForm.role === "usine" ? usines : editForm.role === "mpsl" ? mpslLieux : [];
 
   const handleChange =
     (field: keyof FormState) =>
@@ -169,9 +177,9 @@ export default function AdminUsersPage() {
     try {
       const payload: Record<string, unknown> = { role: editForm.role };
       if (editForm.password.trim()) payload.password = editForm.password.trim();
-      if ((editForm.role === "boutique" || editForm.role === "usine") && editForm.lieuId) {
+      if ((editForm.role === "boutique" || editForm.role === "usine" || editForm.role === "mpsl") && editForm.lieuId) {
         payload.lieu = editForm.lieuId;
-      } else if (editForm.role !== "boutique" && editForm.role !== "usine") {
+      } else if (editForm.role !== "boutique" && editForm.role !== "usine" && editForm.role !== "mpsl") {
         payload.lieu = null;
       }
       const updated = await apiFetch<User>(`/admin/users/${editUser.id}/`, {
@@ -197,7 +205,7 @@ export default function AdminUsersPage() {
       setError("Identifiant et mot de passe sont obligatoires.");
       return;
     }
-    if ((form.role === "boutique" || form.role === "usine") && !form.lieuId) {
+    if ((form.role === "boutique" || form.role === "usine" || form.role === "mpsl") && !form.lieuId) {
       setError("Veuillez sélectionner un lieu pour ce rôle.");
       return;
     }
@@ -213,7 +221,7 @@ export default function AdminUsersPage() {
         role: form.role,
         is_active: true,
       };
-      if ((form.role === "boutique" || form.role === "usine") && form.lieuId) {
+      if ((form.role === "boutique" || form.role === "usine" || form.role === "mpsl") && form.lieuId) {
         payload.lieu = form.lieuId;
       }
 
@@ -256,7 +264,7 @@ export default function AdminUsersPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Utilisateurs</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Création et gestion des comptes (admin, comptable, usine, boutiques).
+          Création et gestion des comptes (admin, comptable, usine, boutiques, MPSL).
         </p>
         <p className="mt-1 text-xs text-muted-foreground">Build: {buildTag}</p>
       </div>
@@ -265,7 +273,7 @@ export default function AdminUsersPage() {
         <CardHeader>
           <CardTitle>Créer un utilisateur</CardTitle>
           <CardDescription>
-            Pour un compte boutique/usine, rattacher l&apos;utilisateur à un lieu du bon type.
+            Pour un compte boutique/usine/MPSL, rattacher l&apos;utilisateur à un lieu du bon type.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -297,11 +305,12 @@ export default function AdminUsersPage() {
                 <option value="comptable">Comptable</option>
                 <option value="usine">Usine</option>
                 <option value="boutique">Boutique</option>
+                <option value="mpsl">MPSL</option>
               </select>
             </div>
-            {(form.role === "boutique" || form.role === "usine") && (
+            {(form.role === "boutique" || form.role === "usine" || form.role === "mpsl") && (
               <div className="space-y-2">
-                <Label htmlFor="lieu">{form.role === "boutique" ? "Boutique" : "Usine"}</Label>
+                <Label htmlFor="lieu">{form.role === "boutique" ? "Boutique" : form.role === "usine" ? "Usine" : "Dépôt MPSL"}</Label>
                 <select id="lieu" value={form.lieuId || ""} onChange={handleChange("lieuId")} className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm">
                   <option value="">Sélectionner…</option>
                   {lieux.map((l) => (
@@ -360,6 +369,8 @@ export default function AdminUsersPage() {
                             ? "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300"
                             : u.role === "usine"
                             ? "bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300"
+                            : u.role === "mpsl"
+                            ? "bg-cyan-100 text-cyan-800 dark:bg-cyan-900/40 dark:text-cyan-300"
                             : "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300"
                         }`}>
                           {u.role_display}
@@ -426,11 +437,12 @@ export default function AdminUsersPage() {
                   <option value="comptable">Comptable</option>
                   <option value="usine">Usine</option>
                   <option value="boutique">Boutique</option>
+                  <option value="mpsl">MPSL</option>
                 </select>
               </div>
-              {(editForm.role === "boutique" || editForm.role === "usine") && (
+              {(editForm.role === "boutique" || editForm.role === "usine" || editForm.role === "mpsl") && (
                 <div className="space-y-1.5">
-                  <Label>{editForm.role === "boutique" ? "Boutique" : "Usine"}</Label>
+                  <Label>{editForm.role === "boutique" ? "Boutique" : editForm.role === "usine" ? "Usine" : "Dépôt MPSL"}</Label>
                   <select
                     value={editForm.lieuId}
                     onChange={(e) => setEditForm((prev) => ({ ...prev, lieuId: e.target.value ? Number(e.target.value) : "" }))}
