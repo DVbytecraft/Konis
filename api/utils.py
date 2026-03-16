@@ -59,6 +59,31 @@ def get_lieu_usine(request) -> Lieu | None:
     return None
 
 
+def get_lieu_mpsl(request) -> Lieu | None:
+    """
+    Résout le lieu (dépôt MPSL) pour la requête courante.
+    - Rôle mpsl  : retourne request.user.lieu directement.
+    - Rôle admin : cherche ?lieu= ou body["lieu"].
+    Retourne None si aucun lieu trouvable.
+    """
+    if request.user.role == CustomUser.ROLE_ADMIN:
+        lieu_id = (
+            request.query_params.get("lieu")
+            or request.data.get("lieu")
+        )
+        if lieu_id:
+            return Lieu.objects.filter(pk=lieu_id, type_lieu=Lieu.TYPE_MPSL).first()
+        return None
+
+    if (
+        request.user.role == CustomUser.ROLE_MPSL
+        and request.user.lieu
+        and request.user.lieu.type_lieu == Lieu.TYPE_MPSL
+    ):
+        return request.user.lieu
+    return None
+
+
 def filter_by_lieu(queryset, request, field: str = "lieu"):
     """
     Filtre un queryset par ?lieu=<id> si le paramètre est présent.

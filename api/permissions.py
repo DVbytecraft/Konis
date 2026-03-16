@@ -84,8 +84,21 @@ class IsBoutiqueOwnLieu(permissions.BasePermission):
         return request.user.lieu_id == lieu.id
 
 
+class IsMPSLRole(permissions.BasePermission):
+    """Acces reserve au role MPSL (ou admin)."""
+    message = "Reserve aux opérateurs MPSL ou administrateurs."
+
+    def has_permission(self, request, view):
+        return (
+            request.user
+            and request.user.is_authenticated
+            and request.user.role in (CustomUser.ROLE_MPSL, CustomUser.ROLE_ADMIN)
+        )
+
+
 # Aliases pour la checklist securite (noms explicites)
 IsAdminUser = IsAdminRole
 IsComptableUser = IsComptableRole
 IsBoutiqueUser = IsBoutiqueRole
 IsUsineUser = IsUsineRole
+IsMPSLUser = IsMPSLRole

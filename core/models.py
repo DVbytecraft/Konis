@@ -59,12 +59,14 @@ class Entreprise(models.Model):
 
 
 class Lieu(models.Model):
-    """Lieu : usine ou magasin (boutique)."""
+    """Lieu : usine, magasin (boutique) ou dépôt MPSL."""
     TYPE_USINE = "usine"
     TYPE_MAGASIN = "magasin"
+    TYPE_MPSL = "mpsl"
     TYPE_CHOICES = [
         (TYPE_USINE, "Usine"),
         (TYPE_MAGASIN, "Magasin"),
+        (TYPE_MPSL, "MPSL"),
     ]
 
     entreprise = models.ForeignKey(
@@ -98,16 +100,18 @@ class Lieu(models.Model):
 
 
 class CustomUser(AbstractUser):
-    """Utilisateur avec rôle : admin, comptable, usine ou boutique."""
+    """Utilisateur avec rôle : admin, comptable, usine, boutique ou mpsl."""
     ROLE_ADMIN = "admin"
     ROLE_COMPTABLE = "comptable"
     ROLE_USINE = "usine"
     ROLE_BOUTIQUE = "boutique"
+    ROLE_MPSL = "mpsl"
     ROLE_CHOICES = [
         (ROLE_ADMIN, "Admin"),
         (ROLE_COMPTABLE, "Comptable"),
         (ROLE_USINE, "Usine"),
         (ROLE_BOUTIQUE, "Boutique"),
+        (ROLE_MPSL, "MPSL"),
     ]
 
     entreprise = models.ForeignKey(
@@ -130,6 +134,10 @@ class CustomUser(AbstractUser):
     def is_factory(self) -> bool:
         """True si l'utilisateur est rattaché à une usine."""
         return bool(self.lieu_id and self.lieu and self.lieu.type_lieu == Lieu.TYPE_USINE)
+
+    def is_mpsl(self) -> bool:
+        """True si l'utilisateur est rattaché à un dépôt MPSL."""
+        return bool(self.lieu_id and self.lieu and self.lieu.type_lieu == Lieu.TYPE_MPSL)
 
     def save(self, *args, **kwargs):
         if getattr(settings, "SINGLE_ENTREPRISE", False):

@@ -26,8 +26,10 @@ from api.serializers import (
     TicketSerializer,
     TransfertCessionCreateSerializer,
     TransfertCessionSerializer,
+    TransfertDirectUsineCreateSerializer,
     TransfertInterUsineCreateSerializer,
     TransfertInterUsineSerializer,
+    TransfertSerializer,
 )
 from core.models import CustomUser, Lieu
 from inventaire.models import AchatUsine, Stock
@@ -679,3 +681,87 @@ class MoutureSeuleUsineView(APIView):
             TicketSerializer(ticket).data,
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
         )
+
+
+# --- Transferts directs usine (sans LotProduction) ----------------------------
+
+class TransfertDirectUsineViewSet(ModelViewSet):
+    """
+    GET  /api/usine/transferts-directs/ : historique des transferts directs sortants.
+    POST /api/usine/transferts-directs/ : créer un transfert direct vers usine ou magasin.
+    Pas de LotProduction requis, pas de prix — mouvement pur de stock.
+    """
+    serializer_class = TransfertSerializer
+    permission_classes = [IsAuthenticated, IsFactoryUser]
+    http_method_names = ["get", "post", "head", "options"]
+
+    def get_queryset(self):
+        from inventaire.models import Transfert as TransfertModel
+        qs = TransfertModel.objects.select_related(
+            "from_lieu", "to_lieu"
+        ).prefetch_related("mouvements__produit").filter(
+            from_lieu__type_lieu=Lieu.TYPE_USINE,
+        ).order_by("-date")
+        lieu = get_lieu_usine(self.request)
+        if self.request.user.role == CustomUser.ROLE_USINE:
+            return qs.filter(from_lieu=lieu) if lieu else qs.none()
+        if lieu:
+            return (qs.filter(from_lieu=lieu) | qs.filter(to_lieu=lieu)).distinct()
+        if self.request.user.entreprise_id:
+            qs = qs.filter(from_lieu__entreprise_id=self.request.user.entreprise_id)
+        return qs
+
+    def create(self, request, *args, **kwargs):
+        from inventaire.services import transfert_direct_usine_vers
+        ser = TransfertDirectUsineCreateSerializer(data=request.data, context={"request": request})
+        ser.is_valid(raise_exception=True)
+        d = ser.validated_data
+        from_lieu = d["from_lieu"]
+        to_lieu = d["to_lieu"]
+
+        if request.user.role == CustomUser.ROLE_USINE and request.user.lieu_id != from_lieu.id:
+            return Response(
+                {"detail": "Acces limite a votre usine."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if from_lieu.entreprise_id != to_lieu.entreprise_id:
+            return Response(
+                {"detail": "Transfert inter-entreprises interdit."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        lignes_raw = d["lignes"]
+        lignes = []
+        for item in lignes_raw:
+            produit_id = item.get("produit_id") or item.get("produit")
+            try:
+                produit = Produit.objects.get(pk=produit_id, entreprise=from_lieu.entreprise)
+            except Produit.DoesNotExist:
+                return Response(
+                    {"detail": f"Produit {produit_id} introuvable dans cette usine."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            quantite = Decimal(str(item["quantite"]))
+            lignes.append((produit, quantite))
+
+        try:
+            transfert = transfert_direct_usine_vers(
+                from_usine=from_lieu,
+                to_lieu=to_lieu,
+                lignes=lignes,
+            )
+        except ErreurStock as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        audit_log(
+            user=request.user,
+            action="transfert_direct_usine_cree",
+            object_type="transfert",
+            object_id=transfert.pk,
+            extra={
+                "from_lieu": from_lieu.nom,
+                "to_lieu": to_lieu.nom,
+                "nb_lignes": len(lignes),
+            },
+        )
+        return Response(TransfertSerializer(transfert).data, status=status.HTTP_201_CREATED)

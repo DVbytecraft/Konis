@@ -146,6 +146,7 @@ class LieuViewSet(ModelViewSet):
                 "magasin": Lieu.TYPE_MAGASIN,
                 "factory": Lieu.TYPE_USINE,
                 "usine": Lieu.TYPE_USINE,
+                "mpsl": Lieu.TYPE_MPSL,
             }.get(type_lieu.lower(), type_lieu.lower())
             qs = qs.filter(type_lieu=normalized)
         return qs
@@ -306,10 +307,11 @@ class LocationByTypeView(APIView):
             "boutique": Lieu.TYPE_MAGASIN,
             "factory": Lieu.TYPE_USINE,
             "usine": Lieu.TYPE_USINE,
+            "mpsl": Lieu.TYPE_MPSL,
         }
         if type_param and type_param not in type_map:
             return Response(
-                {"detail": "type doit être 'shop' ou 'factory'."},
+                {"detail": "type doit être 'shop', 'factory' ou 'mpsl'."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         include_inactive = (request.query_params.get("include_inactive") or "").strip().lower() in ("1", "true", "yes")
@@ -336,6 +338,9 @@ class LocationByTypeView(APIView):
             if l.type_lieu == Lieu.TYPE_MAGASIN:
                 type_lieu = "shop"
                 type_lieu_raw = "magasin"
+            elif l.type_lieu == Lieu.TYPE_MPSL:
+                type_lieu = "mpsl"
+                type_lieu_raw = "mpsl"
             else:
                 type_lieu = "factory"
                 type_lieu_raw = "usine"

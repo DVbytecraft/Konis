@@ -49,9 +49,16 @@ from api.views.usine_views import (
     RapportBeneficesUsineView,
     StockBoutiquesProduitFiniViewSet,
     TransfertCessionUsineViewSet,
+    TransfertDirectUsineViewSet,
     TransfertInterUsineViewSet,
 )
 from api.views.facture_views import FactureListCreateView, FactureDetailView, FacturePdfView
+from api.views.mpsl_views import (
+    AchatMPSLViewSet,
+    MpslDashboardView,
+    StockMPSLView,
+    TransfertMPSLViewSet,
+)
 
 # Auth : pas de router
 auth_urlpatterns = [
@@ -91,6 +98,11 @@ router_comptable.register("categories-depense", CategorieDepenseComptableViewSet
 router_comptable.register("depenses", DepenseComptableViewSet, basename="comptable-depenses")
 router_comptable.register("achats-usine", AchatUsineComptableViewSet, basename="comptable-achats-usine")
 
+# MPSL
+router_mpsl = DefaultRouter()
+router_mpsl.register("achats", AchatMPSLViewSet, basename="mpsl-achats")
+router_mpsl.register("transferts", TransfertMPSLViewSet, basename="mpsl-transferts")
+
 # Usine
 router_usine = DefaultRouter()
 router_usine.register("achats", AchatUsineViewSet, basename="usine-achats")
@@ -98,6 +110,7 @@ router_usine.register("lots", LotProductionUsineViewSet, basename="usine-lots")
 router_usine.register("cessions", TransfertCessionUsineViewSet, basename="usine-cessions")
 router_usine.register("stocks-boutiques", StockBoutiquesProduitFiniViewSet, basename="usine-stocks-boutiques")
 router_usine.register("transferts-inter-usines", TransfertInterUsineViewSet, basename="usine-transferts-inter-usines")
+router_usine.register("transferts-directs", TransfertDirectUsineViewSet, basename="usine-transferts-directs")
 
 urlpatterns = [
     path("health/", HealthView.as_view(), name="health"),
@@ -109,6 +122,9 @@ urlpatterns = [
     path("boutique/", include(router_boutique.urls)),
     path("admin/", include(router_admin.urls)),
     path("comptable/", include(router_comptable.urls)),
+    path("mpsl/", include(router_mpsl.urls)),
+    path("mpsl/stock/", StockMPSLView.as_view(), name="mpsl-stock"),
+    path("mpsl/dashboard/", MpslDashboardView.as_view(), name="mpsl-dashboard"),
     path("usine/", include(router_usine.urls)),
     path("usine/rapports/benefices/", RapportBeneficesUsineView.as_view(), name="usine-rapport-benefices"),
     path("factory/finished-products/catalog/", FactoryFinishedProductsCatalogView.as_view(), name="factory-finished-products-catalog"),

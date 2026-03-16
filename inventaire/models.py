@@ -103,6 +103,73 @@ class MouvementStock(models.Model):
         super().save(*args, **kwargs)
 
 
+class AchatMPSL(models.Model):
+    """
+    Achat de produit au dépôt MPSL.
+    Contrairement à AchatUsine (purement comptable), AchatMPSL IMPACTE le stock.
+    Flux : Fournisseur → MPSL (avec prix d'achat, quantité, produit FK).
+    """
+
+    UNITE_SACS = "sacs"
+    UNITE_KG = "kg"
+    UNITE_TONNES = "tonnes"
+    UNITE_CHOICES = [
+        (UNITE_SACS, "Sacs"),
+        (UNITE_KG, "Kilogrammes"),
+        (UNITE_TONNES, "Tonnes"),
+    ]
+
+    lieu = models.ForeignKey(
+        Lieu,
+        on_delete=models.PROTECT,
+        related_name="achats_mpsl",
+        limit_choices_to={"type_lieu": "mpsl"},
+    )
+    produit = models.ForeignKey(
+        Produit,
+        on_delete=models.PROTECT,
+        related_name="achats_mpsl",
+    )
+    quantite = models.DecimalField(max_digits=12, decimal_places=2)
+    unite = models.CharField(max_length=10, choices=UNITE_CHOICES, default=UNITE_SACS)
+    prix_unitaire = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    prix_total = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    notes = models.TextField(blank=True, default="")
+    created_by = models.ForeignKey(
+        "core.CustomUser",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="achats_mpsl_crees",
+    )
+    date = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Achat MPSL"
+        verbose_name_plural = "Achats MPSL"
+        ordering = ["-date"]
+        constraints = [
+            models.CheckConstraint(condition=Q(quantite__gt=0), name="achatmpsl_quantite_positive"),
+            models.CheckConstraint(condition=Q(prix_unitaire__gte=0), name="achatmpsl_prix_unitaire_positif"),
+            models.CheckConstraint(condition=Q(prix_total__gte=0), name="achatmpsl_prix_total_positif"),
+        ]
+        indexes = [
+            models.Index(fields=["lieu", "date"]),
+            models.Index(fields=["produit", "lieu"]),
+        ]
+
+    def __str__(self):
+        return f"Achat MPSL {self.produit} x {self.quantite} {self.unite} @ {self.lieu}"
+
+    def save(self, *args, **kwargs):
+        if self.prix_unitaire and self.quantite:
+            from decimal import Decimal
+            calculated = Decimal(str(self.quantite)) * Decimal(str(self.prix_unitaire))
+            if not self.prix_total or self.prix_total == 0:
+                self.prix_total = calculated
+        super().save(*args, **kwargs)
+
+
 class AchatUsine(models.Model):
     """Enregistrement d'achat d'intrant à l'usine (pour comptabilité)."""
 

@@ -9,7 +9,7 @@ from rest_framework import serializers
 
 from core.models import CustomUser, Entreprise, Lieu
 from depenses.models import CategorieDepense, Depense
-from inventaire.models import AchatUsine, MouvementStock, Stock, Transfert
+from inventaire.models import AchatMPSL, AchatUsine, MouvementStock, Stock, Transfert
 from produits.models import Categorie, Produit
 from usine.models import LotProduction, TransfertCession, TransfertInterUsine
 from ventes.models import Facture, LigneFacture, LigneVente, Ticket, TicketReprint
@@ -134,6 +134,18 @@ class UserSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({"lieu": "Un compte usine doit être lié à une usine."})
             if lieu.type_lieu != Lieu.TYPE_USINE:
                 raise serializers.ValidationError({"lieu": "Le lieu doit être de type usine pour un compte usine."})
+            existing_qs = CustomUser.objects.filter(lieu=lieu)
+            if self.instance:
+                existing_qs = existing_qs.exclude(pk=self.instance.pk)
+            if existing_qs.exists():
+                occupant = existing_qs.first()
+                raise serializers.ValidationError({"lieu": f"Ce lieu est déjà attribué à '{occupant.username}'. Modifiez cet utilisateur ou créez un nouveau lieu."})
+            return
+        if role == CustomUser.ROLE_MPSL:
+            if not lieu:
+                raise serializers.ValidationError({"lieu": "Un compte MPSL doit être lié à un dépôt MPSL."})
+            if lieu.type_lieu != Lieu.TYPE_MPSL:
+                raise serializers.ValidationError({"lieu": "Le lieu doit être de type MPSL pour un compte MPSL."})
             existing_qs = CustomUser.objects.filter(lieu=lieu)
             if self.instance:
                 existing_qs = existing_qs.exclude(pk=self.instance.pk)
@@ -786,3 +798,149 @@ class TransfertInterUsineCreateSerializer(serializers.Serializer):
 class TicketReprintCreateSerializer(serializers.Serializer):
     """Serializer pour enregistrer une réimpression de ticket."""
     motif = serializers.CharField(max_length=255, required=False, allow_blank=True, default="")
+
+
+
+# ---- MPSL ----
+
+class AchatMPSLSerializer(serializers.ModelSerializer):
+    produit_nom = serializers.CharField(source="produit.nom", read_only=True)
+    produit_code = serializers.CharField(source="produit.code", read_only=True)
+    lieu_nom = serializers.CharField(source="lieu.nom", read_only=True)
+    created_by_username = serializers.CharField(source="created_by.username", read_only=True)
+
+    class Meta:
+        model = AchatMPSL
+        fields = (
+            "id",
+            "lieu",
+            "lieu_nom",
+            "produit",
+            "produit_nom",
+            "produit_code",
+            "quantite",
+            "unite",
+            "prix_unitaire",
+            "prix_total",
+            "notes",
+            "created_by",
+            "created_by_username",
+            "date",
+        )
+        read_only_fields = ("prix_total", "created_by", "date")
+
+
+class AchatMPSLCreateSerializer(serializers.Serializer):
+    lieu = serializers.PrimaryKeyRelatedField(
+        queryset=Lieu.objects.filter(type_lieu=Lieu.TYPE_MPSL)
+    )
+    produit = serializers.PrimaryKeyRelatedField(queryset=Produit.objects.all())
+    quantite = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal("0.01"))
+    unite = serializers.ChoiceField(choices=AchatMPSL.UNITE_CHOICES, default=AchatMPSL.UNITE_SACS)
+    prix_unitaire = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal("0"), default=Decimal("0"))
+    notes = serializers.CharField(max_length=1000, required=False, allow_blank=True, default="")
+
+    def get_fields(self):
+        fields = super().get_fields()
+        request = self.context.get("request")
+        if request and request.user and request.user.entreprise_id:
+            fields["produit"].queryset = Produit.objects.filter(
+                entreprise_id=request.user.entreprise_id
+            )
+            fields["lieu"].queryset = Lieu.objects.filter(
+                type_lieu=Lieu.TYPE_MPSL,
+                entreprise_id=request.user.entreprise_id,
+            )
+        return fields
+
+
+class TransfertMPSLCreateSerializer(serializers.Serializer):
+    """Transfert depuis MPSL vers usine ou magasin (mouvement pur, sans prix)."""
+    from_lieu = serializers.PrimaryKeyRelatedField(
+        queryset=Lieu.objects.filter(type_lieu=Lieu.TYPE_MPSL)
+    )
+    to_lieu = serializers.PrimaryKeyRelatedField(queryset=Lieu.objects.all())
+    lignes = serializers.ListField(
+        child=serializers.DictField(),
+        min_length=1,
+    )
+
+    def get_fields(self):
+        fields = super().get_fields()
+        request = self.context.get("request")
+        if request and request.user and request.user.entreprise_id:
+            ent_id = request.user.entreprise_id
+            fields["from_lieu"].queryset = Lieu.objects.filter(
+                type_lieu=Lieu.TYPE_MPSL,
+                entreprise_id=ent_id,
+            )
+            fields["to_lieu"].queryset = Lieu.objects.filter(
+                type_lieu__in=[Lieu.TYPE_USINE, Lieu.TYPE_MAGASIN],
+                entreprise_id=ent_id,
+            )
+        return fields
+
+    def validate_lignes(self, value):
+        from decimal import InvalidOperation
+        errors = []
+        for i, item in enumerate(value):
+            produit_id = item.get("produit_id") or item.get("produit")
+            quantite_raw = item.get("quantite")
+            if not produit_id:
+                errors.append(f"Ligne {i + 1} : produit_id manquant.")
+                continue
+            try:
+                quantite = Decimal(str(quantite_raw))
+                if quantite <= 0:
+                    errors.append(f"Ligne {i + 1} : quantité doit être > 0.")
+            except (InvalidOperation, TypeError):
+                errors.append(f"Ligne {i + 1} : quantité invalide.")
+        if errors:
+            raise serializers.ValidationError(errors)
+        return value
+
+
+class TransfertDirectUsineCreateSerializer(serializers.Serializer):
+    """Transfert direct depuis usine vers usine ou magasin (sans LotProduction, sans prix)."""
+    from_lieu = serializers.PrimaryKeyRelatedField(
+        queryset=Lieu.objects.filter(type_lieu=Lieu.TYPE_USINE)
+    )
+    to_lieu = serializers.PrimaryKeyRelatedField(queryset=Lieu.objects.all())
+    lignes = serializers.ListField(
+        child=serializers.DictField(),
+        min_length=1,
+    )
+
+    def get_fields(self):
+        fields = super().get_fields()
+        request = self.context.get("request")
+        if request and request.user and request.user.entreprise_id:
+            ent_id = request.user.entreprise_id
+            fields["from_lieu"].queryset = Lieu.objects.filter(
+                type_lieu=Lieu.TYPE_USINE,
+                entreprise_id=ent_id,
+            )
+            fields["to_lieu"].queryset = Lieu.objects.filter(
+                type_lieu__in=[Lieu.TYPE_USINE, Lieu.TYPE_MAGASIN],
+                entreprise_id=ent_id,
+            )
+        return fields
+
+    def validate_lignes(self, value):
+        from decimal import InvalidOperation
+        errors = []
+        for i, item in enumerate(value):
+            produit_id = item.get("produit_id") or item.get("produit")
+            quantite_raw = item.get("quantite")
+            if not produit_id:
+                errors.append(f"Ligne {i + 1} : produit_id manquant.")
+                continue
+            try:
+                quantite = Decimal(str(quantite_raw))
+                if quantite <= 0:
+                    errors.append(f"Ligne {i + 1} : quantité doit être > 0.")
+            except (InvalidOperation, TypeError):
+                errors.append(f"Ligne {i + 1} : quantité invalide.")
+        if errors:
+            raise serializers.ValidationError(errors)
+        return value
