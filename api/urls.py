@@ -53,6 +53,16 @@ from api.views.usine_views import (
     TransfertInterUsineViewSet,
 )
 from api.views.facture_views import FactureListCreateView, FactureDetailView, FacturePdfView
+from api.views.finance_views import (
+    FinanceResumeView,
+    CreancierViewSet,
+    JournalPayableViewSet,
+    ClientFinanceViewSet,
+    JournalCreanceViewSet,
+    EmpruntViewSet,
+    CaisseSupremeViewSet,
+    ProjetViewSet,
+)
 from api.views.mpsl_views import (
     AchatMPSLViewSet,
     CatalogueProduitsMPSLView,
@@ -104,6 +114,16 @@ router_mpsl = DefaultRouter()
 router_mpsl.register("achats", AchatMPSLViewSet, basename="mpsl-achats")
 router_mpsl.register("transferts", TransfertMPSLViewSet, basename="mpsl-transferts")
 
+# Finance
+router_finance = DefaultRouter()
+router_finance.register("creanciers",        CreancierViewSet,       basename="finance-creanciers")
+router_finance.register("journaux-payables", JournalPayableViewSet,  basename="finance-journaux-payables")
+router_finance.register("clients",           ClientFinanceViewSet,   basename="finance-clients")
+router_finance.register("journaux-creances", JournalCreanceViewSet,  basename="finance-journaux-creances")
+router_finance.register("emprunts",          EmpruntViewSet,         basename="finance-emprunts")
+router_finance.register("caisse",            CaisseSupremeViewSet,   basename="finance-caisse")
+router_finance.register("projets",           ProjetViewSet,          basename="finance-projets")
+
 # Usine
 router_usine = DefaultRouter()
 router_usine.register("achats", AchatUsineViewSet, basename="usine-achats")
@@ -143,6 +163,8 @@ urlpatterns = [
     path("comptable/rapport-usines/", RapportUsinesView.as_view(), name="comptable-rapport-usines"),
     path("comptable/rapport-usines/<int:lieu_id>/", DetailUsineView.as_view(), name="comptable-detail-usine"),
     path("comptable/bilan/", BilanView.as_view(), name="comptable-bilan"),
+    path("finance/resume/", FinanceResumeView.as_view(), name="finance-resume"),
+    path("finance/", include(router_finance.urls)),
     path("factures/", FactureListCreateView.as_view(), name="factures-list-create"),
     path("factures/<int:pk>/", FactureDetailView.as_view(), name="factures-detail"),
     path("factures/<int:pk>/pdf/", FacturePdfView.as_view(), name="factures-pdf"),

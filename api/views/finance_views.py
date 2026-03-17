@@ -1,0 +1,609 @@
+"""
+API Finance KONIS — Payables, Créances, Emprunts, Caisse Suprême, Projets.
+
+Accès : IsDafRole (supreme_admin + admin + daf).
+Toute la logique métier est déléguée à finance/services.py.
+"""
+from rest_framework import status
+from rest_framework.decorators import action
+from rest_framework.pagination import PageNumberPagination
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from rest_framework.viewsets import GenericViewSet
+from rest_framework.mixins import ListModelMixin, RetrieveModelMixin, CreateModelMixin
+
+from api.permissions import IsDafRole
+from api.serializers_finance import (
+    CaisseTransactionCreateSerializer,
+    CaisseTransactionSerializer,
+    ClientFinanceCreateSerializer,
+    ClientFinanceSerializer,
+    CreancierCreateSerializer,
+    CreancierSerializer,
+    DepenseProjetCreateSerializer,
+    DepotProjetCreateSerializer,
+    EmpruntCreateSerializer,
+    EmpruntSerializer,
+    JournalCreanceCreateSerializer,
+    JournalCreanceSerializer,
+    JournalPayableCreateSerializer,
+    JournalPayableSerializer,
+    PaiementCreanceCreateSerializer,
+    PaiementPayableCreateSerializer,
+    ProjetCreateSerializer,
+    ProjetSerializer,
+    RemboursementCreateSerializer,
+    ResumeFinancierSerializer,
+)
+from finance.models import (
+    CaisseSupremeTransaction,
+    ClientFinance,
+    Creancier,
+    Emprunt,
+    JournalCreance,
+    JournalPayable,
+    Projet,
+)
+from finance.services import (
+    ErreurFinance,
+    creer_emprunt,
+    creer_journal_creance,
+    creer_journal_payable,
+    creer_projet,
+    enregistrer_depot_projet,
+    enregistrer_depense_projet,
+    enregistrer_paiement_creance,
+    enregistrer_paiement_payable,
+    enregistrer_remboursement,
+    enregistrer_transaction_caisse,
+    get_resume_financier,
+    get_solde_caisse,
+    solder_journal_creance,
+    solder_journal_payable,
+)
+
+
+def _get_entreprise(request):
+    return request.user.entreprise
+
+
+def _err(exc: ErreurFinance):
+    return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# DASHBOARD
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class FinanceResumeView(APIView):
+    """GET /api/finance/resume/ — Résumé financier global (supreme_admin / DAF)."""
+    permission_classes = [IsDafRole]
+
+    def get(self, request):
+        if not request.user.entreprise_id:
+            return Response({"detail": "Entreprise requise."}, status=status.HTTP_403_FORBIDDEN)
+        resume = get_resume_financier(_get_entreprise(request))
+        ser = ResumeFinancierSerializer(resume)
+        return Response(ser.data)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CRÉANCIERS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CreancierViewSet(ListModelMixin, RetrieveModelMixin, CreateModelMixin, GenericViewSet):
+    """
+    GET    /api/finance/creanciers/       — liste
+    POST   /api/finance/creanciers/       — créer
+    GET    /api/finance/creanciers/{id}/  — détail
+    PATCH  /api/finance/creanciers/{id}/  — modifier nom/contact/notes
+    """
+    permission_classes = [IsDafRole]
+
+    def get_queryset(self):
+        ent_id = self.request.user.entreprise_id
+        if not ent_id:
+            return Creancier.objects.none()
+        return Creancier.objects.filter(entreprise_id=ent_id).order_by("nom")
+
+    def get_serializer_class(self):
+        if self.action == "create":
+            return CreancierCreateSerializer
+        return CreancierSerializer
+
+    def create(self, request, *args, **kwargs):
+        if not request.user.entreprise_id:
+            return Response({"detail": "Entreprise requise."}, status=status.HTTP_403_FORBIDDEN)
+        ser = CreancierCreateSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        obj = Creancier.objects.create(
+            entreprise=_get_entreprise(request),
+            **ser.validated_data,
+        )
+        return Response(CreancierSerializer(obj).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["patch"])
+    def modifier(self, request, pk=None):
+        obj = self.get_object()
+        ser = CreancierCreateSerializer(obj, data=request.data, partial=True)
+        ser.is_valid(raise_exception=True)
+        for attr, val in ser.validated_data.items():
+            setattr(obj, attr, val)
+        obj.save()
+        return Response(CreancierSerializer(obj).data)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# JOURNAUX PAYABLES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class JournalPayableViewSet(ListModelMixin, RetrieveModelMixin, CreateModelMixin, GenericViewSet):
+    """
+    GET  /api/finance/journaux-payables/             — liste
+    POST /api/finance/journaux-payables/             — créer journal
+    GET  /api/finance/journaux-payables/{id}/        — détail + paiements
+    POST /api/finance/journaux-payables/{id}/paiement/ — enregistrer paiement
+    POST /api/finance/journaux-payables/{id}/solder/   — solder manuellement
+    """
+    permission_classes = [IsDafRole]
+
+    def get_queryset(self):
+        ent_id = self.request.user.entreprise_id
+        if not ent_id:
+            return JournalPayable.objects.none()
+        qs = JournalPayable.objects.filter(
+            creancier__entreprise_id=ent_id,
+        ).select_related("creancier").prefetch_related("paiements")
+
+        statut = self.request.query_params.get("statut")
+        if statut in ("en_cours", "solde"):
+            qs = qs.filter(statut=statut)
+
+        creancier_id = self.request.query_params.get("creancier_id")
+        if creancier_id:
+            qs = qs.filter(creancier_id=creancier_id)
+
+        return qs.order_by("-created_at")
+
+    def get_serializer_class(self):
+        return JournalPayableSerializer
+
+    def create(self, request, *args, **kwargs):
+        if not request.user.entreprise_id:
+            return Response({"detail": "Entreprise requise."}, status=status.HTTP_403_FORBIDDEN)
+        ser = JournalPayableCreateSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        d = ser.validated_data
+
+        try:
+            creancier = Creancier.objects.get(
+                pk=d["creancier_id"],
+                entreprise_id=request.user.entreprise_id,
+            )
+        except Creancier.DoesNotExist:
+            return Response({"detail": "Créancier introuvable."}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            journal = creer_journal_payable(
+                creancier=creancier,
+                description=d["description"],
+                montant_initial=d["montant_initial"],
+                created_by=request.user,
+                reference=d.get("reference", ""),
+                date_echeance=d.get("date_echeance"),
+                notes=d.get("notes", ""),
+            )
+        except ErreurFinance as e:
+            return _err(e)
+
+        return Response(JournalPayableSerializer(journal).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"])
+    def paiement(self, request, pk=None):
+        journal = self.get_object()
+        ser = PaiementPayableCreateSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        d = ser.validated_data
+        try:
+            enregistrer_paiement_payable(
+                journal=journal,
+                montant=d["montant"],
+                date=d["date"],
+                created_by=request.user,
+                mode_paiement=d.get("mode_paiement", "especes"),
+                reference=d.get("reference", ""),
+                notes=d.get("notes", ""),
+            )
+        except ErreurFinance as e:
+            return _err(e)
+        journal.refresh_from_db()
+        return Response(JournalPayableSerializer(journal).data)
+
+    @action(detail=True, methods=["post"])
+    def solder(self, request, pk=None):
+        journal = self.get_object()
+        try:
+            solder_journal_payable(journal=journal, created_by=request.user)
+        except ErreurFinance as e:
+            return _err(e)
+        journal.refresh_from_db()
+        return Response(JournalPayableSerializer(journal).data)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CLIENTS FINANCE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class ClientFinanceViewSet(ListModelMixin, RetrieveModelMixin, CreateModelMixin, GenericViewSet):
+    permission_classes = [IsDafRole]
+
+    def get_queryset(self):
+        ent_id = self.request.user.entreprise_id
+        if not ent_id:
+            return ClientFinance.objects.none()
+        return ClientFinance.objects.filter(entreprise_id=ent_id).order_by("nom")
+
+    def get_serializer_class(self):
+        if self.action == "create":
+            return ClientFinanceCreateSerializer
+        return ClientFinanceSerializer
+
+    def create(self, request, *args, **kwargs):
+        if not request.user.entreprise_id:
+            return Response({"detail": "Entreprise requise."}, status=status.HTTP_403_FORBIDDEN)
+        ser = ClientFinanceCreateSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        obj = ClientFinance.objects.create(
+            entreprise=_get_entreprise(request),
+            **ser.validated_data,
+        )
+        return Response(ClientFinanceSerializer(obj).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["patch"])
+    def modifier(self, request, pk=None):
+        obj = self.get_object()
+        ser = ClientFinanceCreateSerializer(obj, data=request.data, partial=True)
+        ser.is_valid(raise_exception=True)
+        for attr, val in ser.validated_data.items():
+            setattr(obj, attr, val)
+        obj.save()
+        return Response(ClientFinanceSerializer(obj).data)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# JOURNAUX CRÉANCES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class JournalCreanceViewSet(ListModelMixin, RetrieveModelMixin, CreateModelMixin, GenericViewSet):
+    """
+    GET  /api/finance/journaux-creances/               — liste
+    POST /api/finance/journaux-creances/               — créer
+    GET  /api/finance/journaux-creances/{id}/          — détail + lignes + paiements
+    POST /api/finance/journaux-creances/{id}/paiement/ — enregistrer paiement reçu
+    POST /api/finance/journaux-creances/{id}/solder/   — solder manuellement
+    """
+    permission_classes = [IsDafRole]
+
+    def get_queryset(self):
+        ent_id = self.request.user.entreprise_id
+        if not ent_id:
+            return JournalCreance.objects.none()
+        qs = JournalCreance.objects.filter(
+            client__entreprise_id=ent_id,
+        ).select_related("client").prefetch_related("lignes__produit", "paiements")
+
+        statut = self.request.query_params.get("statut")
+        if statut in ("en_cours", "solde"):
+            qs = qs.filter(statut=statut)
+
+        client_id = self.request.query_params.get("client_id")
+        if client_id:
+            qs = qs.filter(client_id=client_id)
+
+        return qs.order_by("-created_at")
+
+    def get_serializer_class(self):
+        return JournalCreanceSerializer
+
+    def create(self, request, *args, **kwargs):
+        if not request.user.entreprise_id:
+            return Response({"detail": "Entreprise requise."}, status=status.HTTP_403_FORBIDDEN)
+        ser = JournalCreanceCreateSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        d = ser.validated_data
+
+        try:
+            client = ClientFinance.objects.get(
+                pk=d["client_id"],
+                entreprise_id=request.user.entreprise_id,
+            )
+        except ClientFinance.DoesNotExist:
+            return Response({"detail": "Client introuvable."}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            journal = creer_journal_creance(
+                client=client,
+                description=d["description"],
+                montant_initial=d["montant_initial"],
+                created_by=request.user,
+                lignes=d.get("lignes") or [],
+                reference=d.get("reference", ""),
+                date_echeance=d.get("date_echeance"),
+                notes=d.get("notes", ""),
+            )
+        except ErreurFinance as e:
+            return _err(e)
+
+        journal_qs = JournalCreance.objects.prefetch_related(
+            "lignes__produit", "paiements"
+        ).get(pk=journal.pk)
+        return Response(JournalCreanceSerializer(journal_qs).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"])
+    def paiement(self, request, pk=None):
+        journal = self.get_object()
+        ser = PaiementCreanceCreateSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        d = ser.validated_data
+        try:
+            enregistrer_paiement_creance(
+                journal=journal,
+                montant=d["montant"],
+                date=d["date"],
+                created_by=request.user,
+                mode_paiement=d.get("mode_paiement", "especes"),
+                reference=d.get("reference", ""),
+                notes=d.get("notes", ""),
+            )
+        except ErreurFinance as e:
+            return _err(e)
+        journal.refresh_from_db()
+        return Response(JournalCreanceSerializer(journal).data)
+
+    @action(detail=True, methods=["post"])
+    def solder(self, request, pk=None):
+        journal = self.get_object()
+        try:
+            solder_journal_creance(journal=journal, created_by=request.user)
+        except ErreurFinance as e:
+            return _err(e)
+        journal.refresh_from_db()
+        return Response(JournalCreanceSerializer(journal).data)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# EMPRUNTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class EmpruntViewSet(ListModelMixin, RetrieveModelMixin, CreateModelMixin, GenericViewSet):
+    """
+    GET  /api/finance/emprunts/                   — liste
+    POST /api/finance/emprunts/                   — enregistrer emprunt
+    GET  /api/finance/emprunts/{id}/              — détail + remboursements
+    POST /api/finance/emprunts/{id}/remboursement/ — enregistrer remboursement
+    """
+    permission_classes = [IsDafRole]
+
+    def get_queryset(self):
+        ent_id = self.request.user.entreprise_id
+        if not ent_id:
+            return Emprunt.objects.none()
+        qs = Emprunt.objects.filter(
+            entreprise_id=ent_id
+        ).prefetch_related("remboursements")
+
+        statut = self.request.query_params.get("statut")
+        if statut in ("en_cours", "rembourse"):
+            qs = qs.filter(statut=statut)
+
+        return qs.order_by("-created_at")
+
+    def get_serializer_class(self):
+        return EmpruntSerializer
+
+    def create(self, request, *args, **kwargs):
+        if not request.user.entreprise_id:
+            return Response({"detail": "Entreprise requise."}, status=status.HTTP_403_FORBIDDEN)
+        ser = EmpruntCreateSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        d = ser.validated_data
+        try:
+            emprunt = creer_emprunt(
+                entreprise=_get_entreprise(request),
+                created_by=request.user,
+                **d,
+            )
+        except ErreurFinance as e:
+            return _err(e)
+        return Response(EmpruntSerializer(emprunt).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"])
+    def remboursement(self, request, pk=None):
+        emprunt = self.get_object()
+        ser = RemboursementCreateSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        d = ser.validated_data
+        try:
+            enregistrer_remboursement(
+                emprunt=emprunt,
+                montant=d["montant"],
+                date=d["date"],
+                created_by=request.user,
+                reference=d.get("reference", ""),
+                notes=d.get("notes", ""),
+            )
+        except ErreurFinance as e:
+            return _err(e)
+        emprunt.refresh_from_db()
+        return Response(EmpruntSerializer(emprunt).data)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CAISSE SUPRÊME
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CaisseSupremeViewSet(ListModelMixin, CreateModelMixin, GenericViewSet):
+    """
+    GET  /api/finance/caisse/ — liste des mouvements + solde courant
+    POST /api/finance/caisse/ — enregistrer dépôt ou retrait
+    """
+    permission_classes = [IsDafRole]
+
+    def get_queryset(self):
+        ent_id = self.request.user.entreprise_id
+        if not ent_id:
+            return CaisseSupremeTransaction.objects.none()
+        qs = CaisseSupremeTransaction.objects.filter(
+            entreprise_id=ent_id
+        ).select_related("created_by")
+
+        type_t = self.request.query_params.get("type")
+        if type_t in ("depot", "retrait"):
+            qs = qs.filter(type_transaction=type_t)
+
+        return qs.order_by("-date", "-created_at")
+
+    def get_serializer_class(self):
+        if self.action == "create":
+            return CaisseTransactionCreateSerializer
+        return CaisseTransactionSerializer
+
+    def list(self, request, *args, **kwargs):
+        qs = self.get_queryset()
+        page = self.paginate_queryset(qs)
+        if page is not None:
+            data = CaisseTransactionSerializer(page, many=True).data
+            response = self.get_paginated_response(data)
+            ent = _get_entreprise(request)
+            response.data["solde_courant"] = str(get_solde_caisse(ent)) if ent else "0"
+            return response
+        data = CaisseTransactionSerializer(qs, many=True).data
+        ent = _get_entreprise(request)
+        return Response({
+            "results": data,
+            "solde_courant": str(get_solde_caisse(ent)) if ent else "0",
+        })
+
+    def create(self, request, *args, **kwargs):
+        if not request.user.entreprise_id:
+            return Response({"detail": "Entreprise requise."}, status=status.HTTP_403_FORBIDDEN)
+        ser = CaisseTransactionCreateSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        d = ser.validated_data
+        try:
+            t = enregistrer_transaction_caisse(
+                entreprise=_get_entreprise(request),
+                created_by=request.user,
+                type_transaction=d["type_transaction"],
+                montant=d["montant"],
+                description=d["description"],
+                date=d["date"],
+                reference=d.get("reference", ""),
+            )
+        except ErreurFinance as e:
+            return _err(e)
+        return Response(CaisseTransactionSerializer(t).data, status=status.HTTP_201_CREATED)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PROJETS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class ProjetViewSet(ListModelMixin, RetrieveModelMixin, CreateModelMixin, GenericViewSet):
+    """
+    GET  /api/finance/projets/               — liste
+    POST /api/finance/projets/               — créer
+    GET  /api/finance/projets/{id}/          — détail + dépenses + dépôts
+    POST /api/finance/projets/{id}/depense/  — ajouter dépense
+    POST /api/finance/projets/{id}/depot/    — ajouter fonds supplémentaires
+    PATCH /api/finance/projets/{id}/statut/  — changer statut (en_cours/termine/suspendu)
+    """
+    permission_classes = [IsDafRole]
+
+    def get_queryset(self):
+        ent_id = self.request.user.entreprise_id
+        if not ent_id:
+            return Projet.objects.none()
+        qs = Projet.objects.filter(
+            entreprise_id=ent_id
+        ).prefetch_related("depenses", "depots")
+
+        statut = self.request.query_params.get("statut")
+        if statut in ("en_cours", "termine", "suspendu"):
+            qs = qs.filter(statut=statut)
+
+        return qs.order_by("-created_at")
+
+    def get_serializer_class(self):
+        return ProjetSerializer
+
+    def create(self, request, *args, **kwargs):
+        if not request.user.entreprise_id:
+            return Response({"detail": "Entreprise requise."}, status=status.HTTP_403_FORBIDDEN)
+        ser = ProjetCreateSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        d = ser.validated_data
+        try:
+            projet = creer_projet(
+                entreprise=_get_entreprise(request),
+                created_by=request.user,
+                nom=d["nom"],
+                description=d.get("description", ""),
+                budget_initial=d["budget_initial"],
+                date_debut=d["date_debut"],
+                date_fin=d.get("date_fin"),
+            )
+        except ErreurFinance as e:
+            return _err(e)
+        return Response(ProjetSerializer(projet).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"])
+    def depense(self, request, pk=None):
+        projet = self.get_object()
+        ser = DepenseProjetCreateSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        d = ser.validated_data
+        try:
+            enregistrer_depense_projet(
+                projet=projet,
+                montant=d["montant"],
+                description=d["description"],
+                date=d["date"],
+                created_by=request.user,
+            )
+        except ErreurFinance as e:
+            return _err(e)
+        projet.refresh_from_db()
+        return Response(ProjetSerializer(projet).data)
+
+    @action(detail=True, methods=["post"])
+    def depot(self, request, pk=None):
+        projet = self.get_object()
+        ser = DepotProjetCreateSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        d = ser.validated_data
+        try:
+            enregistrer_depot_projet(
+                projet=projet,
+                montant=d["montant"],
+                description=d["description"],
+                date=d["date"],
+                created_by=request.user,
+            )
+        except ErreurFinance as e:
+            return _err(e)
+        projet.refresh_from_db()
+        return Response(ProjetSerializer(projet).data)
+
+    @action(detail=True, methods=["patch"])
+    def changer_statut(self, request, pk=None):
+        projet = self.get_object()
+        nouveau_statut = request.data.get("statut")
+        if nouveau_statut not in ("en_cours", "termine", "suspendu"):
+            return Response(
+                {"detail": "Statut invalide. Valeurs acceptées : en_cours, termine, suspendu."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        projet.statut = nouveau_statut
+        projet.save(update_fields=["statut", "updated_at"])
+        return Response(ProjetSerializer(projet).data)

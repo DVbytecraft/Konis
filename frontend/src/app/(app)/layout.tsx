@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/auth-context";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { Button } from "@/components/ui/button";
-import { LayoutDashboard, Store, Calculator, LogOut, Users, Package, Warehouse, Receipt, BarChart3, ClipboardList, Wheat, Tag, Truck } from "lucide-react";
+import { LayoutDashboard, Store, Calculator, LogOut, Users, Package, Warehouse, Receipt, BarChart3, ClipboardList, Wheat, Tag, Truck, TrendingUp, TrendingDown, Banknote, FolderKanban, Landmark, CreditCard, HandCoins, Building2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navByRole: Record<string, { href: string; label: string; icon: React.ComponentType<{ className?: string }> }[]> = {
@@ -55,6 +55,36 @@ const navByRole: Record<string, { href: string; label: string; icon: React.Compo
     { href: "/mpsl", label: "Tableau de bord", icon: Truck },
     { href: "/mpsl/achats", label: "Achats", icon: Package },
     { href: "/mpsl/transferts", label: "Transferts", icon: Warehouse },
+  ],
+  supreme_admin: [
+    { href: "/admin", label: "Tableau de bord", icon: LayoutDashboard },
+    { href: "/admin/users", label: "Utilisateurs", icon: Users },
+    { href: "/admin/factories", label: "Usines", icon: Warehouse },
+    { href: "/admin/magasins", label: "Lieux", icon: Store },
+    { href: "/admin/produits", label: "Produits", icon: Package },
+    { href: "/admin/rapport", label: "Rapport", icon: BarChart3 },
+    { href: "/factures", label: "Factures", icon: Receipt },
+    { href: "/comptable", label: "Vue comptable", icon: Calculator },
+    { href: "/comptable/depenses", label: "Dépenses", icon: ClipboardList },
+    { href: "/admin/categories-depense", label: "Catégories dépenses", icon: Tag },
+    { href: "/finance", label: "Finance", icon: TrendingUp },
+    { href: "/finance/creanciers", label: "Créanciers", icon: Landmark },
+    { href: "/finance/journaux-payables", label: "À payer", icon: TrendingDown },
+    { href: "/finance/clients", label: "Clients Finance", icon: Users },
+    { href: "/finance/journaux-creances", label: "Créances", icon: TrendingUp },
+    { href: "/finance/emprunts", label: "Emprunts", icon: CreditCard },
+    { href: "/finance/tresorerie", label: "Trésorerie", icon: Banknote },
+    { href: "/finance/projets", label: "Projets", icon: FolderKanban },
+  ],
+  daf: [
+    { href: "/finance", label: "Tableau de bord", icon: LayoutDashboard },
+    { href: "/finance/creanciers", label: "Créanciers", icon: Landmark },
+    { href: "/finance/journaux-payables", label: "À payer", icon: TrendingDown },
+    { href: "/finance/clients", label: "Clients Finance", icon: Building2 },
+    { href: "/finance/journaux-creances", label: "Créances", icon: TrendingUp },
+    { href: "/finance/emprunts", label: "Emprunts", icon: CreditCard },
+    { href: "/finance/tresorerie", label: "Trésorerie", icon: Banknote },
+    { href: "/finance/projets", label: "Projets", icon: FolderKanban },
   ],
 };
 
