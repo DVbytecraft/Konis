@@ -335,25 +335,15 @@ class LocationByTypeView(APIView):
         # Retourner un format simplifie pour les selects
         data = []
         for l in qs:
-            if l.type_lieu == Lieu.TYPE_MAGASIN:
-                type_lieu = "shop"
-                type_lieu_raw = "magasin"
-            elif l.type_lieu == Lieu.TYPE_MPSL:
-                type_lieu = "mpsl"
-                type_lieu_raw = "mpsl"
-            else:
-                type_lieu = "factory"
-                type_lieu_raw = "usine"
             data.append({
                 "id": l.id,
                 "nom": l.nom,
                 "name": l.nom,
-                "type_lieu": type_lieu,
-                "type_lieu_raw": type_lieu_raw,
+                "type_lieu": l.type_lieu,      # valeur brute : "usine", "magasin", "mpsl"
+                "type_lieu_raw": l.type_lieu,  # alias maintenu pour compatibilité
             })
-        payload = {"count": len(data), "results": data}
-        cache.set(cache_key, payload, timeout=60)
-        return Response(payload)
+        cache.set(cache_key, data, timeout=60)
+        return Response(data)
 
 
 class UserViewSet(ModelViewSet):

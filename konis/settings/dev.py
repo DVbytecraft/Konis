@@ -53,6 +53,11 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:3004",
 ]
 
+# SINGLE_ENTREPRISE : désactivé en dev/test (la migration 0005 crée une ENTREPRISE-DEFAULT
+# qui décale les IDs et casse les filtres entreprise= dans les tests).
+# La prod l'active via la variable d'environnement SINGLE_ENTREPRISE=1.
+SINGLE_ENTREPRISE = os.environ.get("SINGLE_ENTREPRISE", "0").lower() in ("1", "true", "yes", "y")
+
 # Secret partagé Next.js ↔ Django pour le proxy de login.
 # Valeur par défaut en dev — DOIT correspondre à INTERNAL_API_SECRET dans frontend/.env.local.
 # En production, remplacer par une valeur aléatoire forte (secrets.token_urlsafe(32)).
