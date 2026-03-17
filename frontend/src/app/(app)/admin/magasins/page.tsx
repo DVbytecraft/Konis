@@ -31,7 +31,7 @@ interface Lieu {
 interface FormState {
   nom: string;
   code: string;
-  type_lieu: "magasin" | "usine";
+  type_lieu: "magasin" | "usine" | "mpsl";
 }
 
 type ValidationErrorResponse = Record<string, unknown>;
