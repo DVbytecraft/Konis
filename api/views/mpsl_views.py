@@ -28,6 +28,22 @@ from inventaire.services import ErreurStock, enregistrer_achat_mpsl, transfert_d
 from produits.models import Produit
 
 
+# --- Catalogue produits (lecture seule, scoped entreprise) --------------------
+
+class CatalogueProduitsMPSLView(APIView):
+    """GET /api/mpsl/catalogue/ : liste des produits de l'entreprise pour les transferts."""
+    permission_classes = [IsAuthenticated, IsMPSLRole]
+
+    def get(self, request):
+        ent_id = request.user.entreprise_id
+        if not ent_id:
+            return Response([])
+        produits = Produit.objects.filter(
+            entreprise_id=ent_id
+        ).order_by("nom").values("id", "nom", "code", "unite")
+        return Response(list(produits))
+
+
 # --- Achats MPSL (avec impact stock) -----------------------------------------
 
 class AchatMPSLViewSet(ModelViewSet):
@@ -47,11 +63,12 @@ class AchatMPSLViewSet(ModelViewSet):
         lieu = get_lieu_mpsl(self.request)
         if self.request.user.role == CustomUser.ROLE_MPSL:
             return qs.filter(lieu=lieu) if lieu else qs.none()
+        # Admin : toujours scoper par entreprise — jamais retourner toute la table
+        if not self.request.user.entreprise_id:
+            return qs.none()
         if lieu:
             return qs.filter(lieu=lieu)
-        # Admin sans filtre de lieu : scoper par entreprise
-        if self.request.user.entreprise_id:
-            qs = qs.filter(lieu__entreprise_id=self.request.user.entreprise_id)
+        qs = qs.filter(lieu__entreprise_id=self.request.user.entreprise_id)
         qs = filter_by_date(qs, self.request)
         return qs
 
@@ -116,10 +133,12 @@ class TransfertMPSLViewSet(ModelViewSet):
         lieu = get_lieu_mpsl(self.request)
         if self.request.user.role == CustomUser.ROLE_MPSL:
             return qs.filter(from_lieu=lieu) if lieu else qs.none()
+        # Admin : toujours scoper par entreprise — jamais retourner toute la table
+        if not self.request.user.entreprise_id:
+            return qs.none()
         if lieu:
             return qs.filter(from_lieu=lieu)
-        if self.request.user.entreprise_id:
-            qs = qs.filter(from_lieu__entreprise_id=self.request.user.entreprise_id)
+        qs = qs.filter(from_lieu__entreprise_id=self.request.user.entreprise_id)
         qs = filter_by_date(qs, self.request)
         return qs
 

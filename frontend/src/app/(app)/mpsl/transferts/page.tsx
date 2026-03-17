@@ -52,9 +52,9 @@ export default function MpslTransfertsPage() {
 
   const load = async () => {
     const [produitsData, usinesData, magasinsData, transfertsData] = await Promise.all([
-      apiFetch("/admin/produits/"),
-      apiFetch("/admin/lieux/?type_lieu=usine"),
-      apiFetch("/admin/lieux/?type_lieu=magasin"),
+      apiFetch("/mpsl/catalogue/"),
+      apiFetch("/locations/by-type/?type=factory"),
+      apiFetch("/locations/by-type/?type=shop"),
       apiFetch("/mpsl/transferts/"),
     ]);
     setProduits(toList(produitsData as ApiList<ProduitOption>));

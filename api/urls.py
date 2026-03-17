@@ -55,6 +55,7 @@ from api.views.usine_views import (
 from api.views.facture_views import FactureListCreateView, FactureDetailView, FacturePdfView
 from api.views.mpsl_views import (
     AchatMPSLViewSet,
+    CatalogueProduitsMPSLView,
     MpslDashboardView,
     StockMPSLView,
     TransfertMPSLViewSet,
@@ -124,6 +125,7 @@ urlpatterns = [
     path("comptable/", include(router_comptable.urls)),
     path("mpsl/", include(router_mpsl.urls)),
     path("mpsl/stock/", StockMPSLView.as_view(), name="mpsl-stock"),
+    path("mpsl/catalogue/", CatalogueProduitsMPSLView.as_view(), name="mpsl-catalogue"),
     path("mpsl/dashboard/", MpslDashboardView.as_view(), name="mpsl-dashboard"),
     path("usine/", include(router_usine.urls)),
     path("usine/rapports/benefices/", RapportBeneficesUsineView.as_view(), name="usine-rapport-benefices"),
