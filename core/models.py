@@ -100,18 +100,22 @@ class Lieu(models.Model):
 
 
 class CustomUser(AbstractUser):
-    """Utilisateur avec rôle : admin, comptable, usine, boutique ou mpsl."""
+    """Utilisateur avec rôle : supreme_admin, admin, daf, comptable, usine, boutique ou mpsl."""
+    ROLE_SUPREME_ADMIN = "supreme_admin"
     ROLE_ADMIN = "admin"
+    ROLE_DAF = "daf"
     ROLE_COMPTABLE = "comptable"
     ROLE_USINE = "usine"
     ROLE_BOUTIQUE = "boutique"
     ROLE_MPSL = "mpsl"
     ROLE_CHOICES = [
-        (ROLE_ADMIN, "Admin"),
-        (ROLE_COMPTABLE, "Comptable"),
-        (ROLE_USINE, "Usine"),
-        (ROLE_BOUTIQUE, "Boutique"),
-        (ROLE_MPSL, "MPSL"),
+        (ROLE_SUPREME_ADMIN, "Supreme Admin"),
+        (ROLE_ADMIN,         "Admin"),
+        (ROLE_DAF,           "DAF"),
+        (ROLE_COMPTABLE,     "Comptable"),
+        (ROLE_USINE,         "Usine"),
+        (ROLE_BOUTIQUE,      "Boutique"),
+        (ROLE_MPSL,          "MPSL"),
     ]
 
     entreprise = models.ForeignKey(

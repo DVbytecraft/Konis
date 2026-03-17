@@ -1,38 +1,84 @@
 """
-Permissions strictes par role KONIS : admin, comptable, boutique.
+Permissions strictes par role KONIS.
+
+Hiérarchie des rôles :
+  supreme_admin > admin > daf > comptable > usine / boutique / mpsl
+
+  - supreme_admin : accès total, supervise tout
+  - admin         : accès opérationnel complet (supervisé par supreme_admin)
+  - daf           : accès financier complet, pas de gestion utilisateurs
+  - comptable     : lecture financière + dépenses
+  - usine         : opérations usine
+  - boutique      : opérations boutique
+  - mpsl          : opérations dépôt MPSL
+
+Règle générale : supreme_admin est inclus dans TOUTES les permissions admin/daf/opérationnel.
 """
 from rest_framework import permissions
 
 from core.models import CustomUser
 
+# Rôles avec accès admin opérationnel complet
+_ADMIN_ROLES = (CustomUser.ROLE_SUPREME_ADMIN, CustomUser.ROLE_ADMIN)
 
-class IsAdminRole(permissions.BasePermission):
-    """Acces reserve au role admin."""
-    message = "Reserve aux administrateurs."
+# Rôles avec accès financier (DAF + admins)
+_FINANCE_ROLES = (CustomUser.ROLE_SUPREME_ADMIN, CustomUser.ROLE_ADMIN, CustomUser.ROLE_DAF)
+
+# Rôles avec accès financier en lecture (comptable + DAF + admins)
+_FINANCE_READ_ROLES = (CustomUser.ROLE_SUPREME_ADMIN, CustomUser.ROLE_ADMIN, CustomUser.ROLE_DAF, CustomUser.ROLE_COMPTABLE)
+
+
+class IsSupremeAdminRole(permissions.BasePermission):
+    """Accès réservé exclusivement au supreme_admin."""
+    message = "Réservé au Supreme Admin."
 
     def has_permission(self, request, view):
         return (
             request.user
             and request.user.is_authenticated
-            and request.user.role == CustomUser.ROLE_ADMIN
+            and request.user.role == CustomUser.ROLE_SUPREME_ADMIN
+        )
+
+
+class IsAdminRole(permissions.BasePermission):
+    """Accès réservé aux admins (admin + supreme_admin)."""
+    message = "Réservé aux administrateurs."
+
+    def has_permission(self, request, view):
+        return (
+            request.user
+            and request.user.is_authenticated
+            and request.user.role in _ADMIN_ROLES
+        )
+
+
+class IsDafRole(permissions.BasePermission):
+    """Accès réservé au DAF et aux admins (accès financier complet)."""
+    message = "Réservé au DAF ou aux administrateurs."
+
+    def has_permission(self, request, view):
+        return (
+            request.user
+            and request.user.is_authenticated
+            and request.user.role in _FINANCE_ROLES
         )
 
 
 class IsComptableRole(permissions.BasePermission):
-    """Acces reserve au role comptable (ou admin)."""
-    message = "Reserve aux comptables ou administrateurs."
+    """Accès réservé au comptable, DAF et admins."""
+    message = "Réservé aux comptables ou administrateurs."
 
     def has_permission(self, request, view):
         return (
             request.user
             and request.user.is_authenticated
-            and request.user.role in (CustomUser.ROLE_COMPTABLE, CustomUser.ROLE_ADMIN)
+            and request.user.role in _FINANCE_READ_ROLES
         )
 
 
 class IsBoutiqueRole(permissions.BasePermission):
-    """Acces reserve strictement au role boutique."""
-    message = "Reserve aux boutiques."
+    """Accès réservé strictement au role boutique."""
+    message = "Réservé aux boutiques."
 
     def has_permission(self, request, view):
         return (
@@ -43,37 +89,35 @@ class IsBoutiqueRole(permissions.BasePermission):
 
 
 class IsUsineRole(permissions.BasePermission):
-    """Acces reserve au role usine (ou admin)."""
-    message = "Reserve aux usines ou administrateurs."
+    """Accès réservé au role usine ou admins."""
+    message = "Réservé aux usines ou administrateurs."
 
     def has_permission(self, request, view):
         return (
             request.user
             and request.user.is_authenticated
-            and request.user.role in (CustomUser.ROLE_USINE, CustomUser.ROLE_ADMIN)
+            and request.user.role in (CustomUser.ROLE_USINE, *_ADMIN_ROLES)
         )
 
 
 class IsFactoryUser(permissions.BasePermission):
-    """Acces reserve aux utilisateurs rattaches a une usine ou aux administrateurs."""
-    message = "Reserve aux utilisateurs d'usine ou administrateurs."
+    """Accès réservé aux utilisateurs rattachés à une usine ou aux admins."""
+    message = "Réservé aux utilisateurs d'usine ou administrateurs."
 
     def has_permission(self, request, view):
         if not request.user or not request.user.is_authenticated:
             return False
-        # Les administrateurs ont toujours acces
-        if request.user.role == CustomUser.ROLE_ADMIN:
+        if request.user.role in _ADMIN_ROLES:
             return True
-        # Les utilisateurs usine doivent etre rattaches a une usine
         return request.user.is_factory()
 
 
 class IsBoutiqueOwnLieu(permissions.BasePermission):
     """
-    Pour role boutique : uniquement les donnees du lieu de l'utilisateur.
-    Admin : tous les lieux (filtres cote vue si besoin).
+    Pour role boutique : uniquement les données du lieu de l'utilisateur.
+    Admin : tous les lieux (filtres côté vue si besoin).
     """
-    message = "Acces limite au lieu de votre boutique."
+    message = "Accès limité au lieu de votre boutique."
 
     def has_object_permission(self, request, view, obj):
         if request.user.role != CustomUser.ROLE_BOUTIQUE:
@@ -85,20 +129,21 @@ class IsBoutiqueOwnLieu(permissions.BasePermission):
 
 
 class IsMPSLRole(permissions.BasePermission):
-    """Acces reserve au role MPSL (ou admin)."""
-    message = "Reserve aux opérateurs MPSL ou administrateurs."
+    """Accès réservé au role MPSL ou admins."""
+    message = "Réservé aux opérateurs MPSL ou administrateurs."
 
     def has_permission(self, request, view):
         return (
             request.user
             and request.user.is_authenticated
-            and request.user.role in (CustomUser.ROLE_MPSL, CustomUser.ROLE_ADMIN)
+            and request.user.role in (CustomUser.ROLE_MPSL, *_ADMIN_ROLES)
         )
 
 
-# Aliases pour la checklist securite (noms explicites)
-IsAdminUser = IsAdminRole
+# Aliases pour la checklist sécurité (noms explicites)
+IsAdminUser     = IsAdminRole
 IsComptableUser = IsComptableRole
-IsBoutiqueUser = IsBoutiqueRole
-IsUsineUser = IsUsineRole
-IsMPSLUser = IsMPSLRole
+IsBoutiqueUser  = IsBoutiqueRole
+IsUsineUser     = IsUsineRole
+IsMPSLUser      = IsMPSLRole
+IsDafUser       = IsDafRole

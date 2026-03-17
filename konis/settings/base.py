@@ -33,6 +33,7 @@ INSTALLED_APPS = [
     "inventaire",
     "ventes",
     "depenses",
+    "finance",
     "api",
 ]
 
