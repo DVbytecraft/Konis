@@ -100,8 +100,8 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_THROTTLE_RATES": {
         "user": "600/hour",
-        "login": "10/minute",       # Par IP, non-authentifiés uniquement
-        "login_ip": "20/minute",    # Par IP, tous utilisateurs (filet de sécurité anti-brute-force)
+        "login": "20/minute",       # Par utilisateur/IP (non-authentifiés) — 20 users simultanés
+        "login_ip": "60/minute",    # Par IP globale — réseau partagé (NAT) avec 20+ utilisateurs
         "ventes_create": "60/minute",
         "mouture_create": "60/minute",
         "facture_create": "30/minute",
