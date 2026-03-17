@@ -154,8 +154,8 @@ class AchatMPSL(models.Model):
             models.CheckConstraint(condition=Q(prix_total__gte=0), name="achatmpsl_prix_total_positif"),
         ]
         indexes = [
-            models.Index(fields=["lieu", "date"]),
-            models.Index(fields=["produit", "lieu"]),
+            models.Index(fields=["lieu", "date"], name="achatmpsl_lieu_date_idx"),
+            models.Index(fields=["produit", "lieu"], name="achatmpsl_produit_lieu_idx"),
         ]
 
     def __str__(self):

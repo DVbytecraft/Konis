@@ -78,10 +78,10 @@ class Migration(migrations.Migration):
         ),
         migrations.AddIndex(
             model_name="achatmpsl",
-            index=models.Index(fields=["lieu", "date"], name="inventaire__lieu_id_achatmpsl_idx"),
+            index=models.Index(fields=["lieu", "date"], name="achatmpsl_lieu_date_idx"),
         ),
         migrations.AddIndex(
             model_name="achatmpsl",
-            index=models.Index(fields=["produit", "lieu"], name="inventaire__produit_lieu_achatmpsl_idx"),
+            index=models.Index(fields=["produit", "lieu"], name="achatmpsl_produit_lieu_idx"),
         ),
     ]
