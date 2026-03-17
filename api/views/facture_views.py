@@ -76,8 +76,9 @@ class FactureListCreateView(APIView):
             return Facture.objects.none()
         qs = Facture.objects.select_related("lieu", "created_by").prefetch_related("lignes__produit").order_by("-date")
         if request.user.role in (CustomUser.ROLE_ADMIN, CustomUser.ROLE_COMPTABLE):
-            if request.user.role == CustomUser.ROLE_COMPTABLE and request.user.entreprise_id:
-                qs = qs.filter(lieu__entreprise_id=request.user.entreprise_id)
+            if not request.user.entreprise_id:
+                return Facture.objects.none()
+            qs = qs.filter(lieu__entreprise_id=request.user.entreprise_id)
             lieu_id = request.query_params.get("lieu")
             if lieu_id:
                 qs = qs.filter(lieu_id=lieu_id)
@@ -149,6 +150,8 @@ class FactureDetailView(APIView):
         if not facture:
             return None
         if request.user.role == CustomUser.ROLE_ADMIN:
+            if not request.user.entreprise_id or facture.lieu.entreprise_id != request.user.entreprise_id:
+                return None
             return facture
         if request.user.role == CustomUser.ROLE_COMPTABLE:
             if request.user.entreprise_id and facture.lieu.entreprise_id != request.user.entreprise_id:
@@ -179,7 +182,7 @@ class FacturePdfView(APIView):
 
         # Autorisations par lieu/entreprise
         if request.user.role == CustomUser.ROLE_ADMIN:
-            allowed = True
+            allowed = bool(request.user.entreprise_id and facture.lieu.entreprise_id == request.user.entreprise_id)
         elif request.user.role == CustomUser.ROLE_COMPTABLE:
             allowed = bool(request.user.entreprise_id and facture.lieu.entreprise_id == request.user.entreprise_id)
         else:

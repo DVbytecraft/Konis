@@ -60,7 +60,9 @@ class AchatUsineViewSet(ModelViewSet):
             return qs.filter(lieu=lieu) if lieu else qs.none()
         if lieu:
             return qs.filter(lieu=lieu)
-        return qs
+        if not self.request.user.entreprise_id:
+            return qs.none()
+        return qs.filter(lieu__entreprise_id=self.request.user.entreprise_id)
 
     def create(self, request, *args, **kwargs):
         data = request.data
@@ -104,7 +106,9 @@ class LotProductionUsineViewSet(ModelViewSet):
             return qs.filter(lieu_usine=lieu) if lieu else qs.none()
         if lieu:
             return qs.filter(lieu_usine=lieu)
-        return qs
+        if not self.request.user.entreprise_id:
+            return qs.none()
+        return qs.filter(lieu_usine__entreprise_id=self.request.user.entreprise_id)
 
     def create(self, request, *args, **kwargs):
         data = request.data
@@ -149,7 +153,9 @@ class TransfertCessionUsineViewSet(ModelViewSet):
             return qs.filter(lot__lieu_usine=lieu) if lieu else qs.none()
         if lieu:
             return qs.filter(lot__lieu_usine=lieu)
-        return qs
+        if not self.request.user.entreprise_id:
+            return qs.none()
+        return qs.filter(lot__lieu_usine__entreprise_id=self.request.user.entreprise_id)
 
     def create(self, request, *args, **kwargs):
         data = request.data
@@ -199,7 +205,9 @@ class TransfertInterUsineViewSet(ModelViewSet):
             return qs.filter(lot__lieu_usine=lieu) | qs.filter(usine_destination=lieu)
         if lieu:
             return (qs.filter(lot__lieu_usine=lieu) | qs.filter(usine_destination=lieu)).distinct()
-        return qs
+        if not self.request.user.entreprise_id:
+            return qs.none()
+        return qs.filter(lot__lieu_usine__entreprise_id=self.request.user.entreprise_id)
 
     def create(self, request, *args, **kwargs):
         data = request.data
@@ -239,8 +247,9 @@ class StockBoutiquesProduitFiniViewSet(ReadOnlyModelViewSet):
     def get_queryset(self):
         qs = Stock.objects.filter(lieu__type_lieu=Lieu.TYPE_MAGASIN).select_related("produit", "lieu")
         lieu = get_lieu_usine(self.request)
-        if self.request.user.role != CustomUser.ROLE_ADMIN and self.request.user.entreprise_id:
-            qs = qs.filter(lieu__entreprise_id=self.request.user.entreprise_id)
+        if not self.request.user.entreprise_id:
+            return qs.none()
+        qs = qs.filter(lieu__entreprise_id=self.request.user.entreprise_id)
         if self.request.user.role == CustomUser.ROLE_USINE and lieu:
             produits_ids = LotProduction.objects.filter(
                 lieu_usine=lieu
@@ -707,9 +716,9 @@ class TransfertDirectUsineViewSet(ModelViewSet):
             return qs.filter(from_lieu=lieu) if lieu else qs.none()
         if lieu:
             return (qs.filter(from_lieu=lieu) | qs.filter(to_lieu=lieu)).distinct()
-        if self.request.user.entreprise_id:
-            qs = qs.filter(from_lieu__entreprise_id=self.request.user.entreprise_id)
-        return qs
+        if not self.request.user.entreprise_id:
+            return qs.none()
+        return qs.filter(from_lieu__entreprise_id=self.request.user.entreprise_id)
 
     def create(self, request, *args, **kwargs):
         from inventaire.services import transfert_direct_usine_vers
