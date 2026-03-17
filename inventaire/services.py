@@ -8,6 +8,7 @@ from django.db import transaction
 
 from core.models import Lieu
 from inventaire.models import AchatMPSL, AchatUsine, MouvementStock, Stock, Transfert
+from produits.models import Produit
 
 
 class ErreurStock(Exception):
@@ -79,10 +80,24 @@ def enregistrer_achat_mpsl(
         raise ErreurStock("Le prix unitaire doit être >= 0.")
 
     prix_total = Decimal(str(quantite)) * Decimal(str(prix_unitaire))
+    nom = produit_nom.strip()
+
+    # Synchroniser avec le catalogue : créer le Produit s'il n'existe pas encore
+    # afin qu'il soit disponible dans les transferts MPSL → boutiques/usines.
+    existing = Produit.objects.filter(
+        nom__iexact=nom,
+        entreprise_id=lieu.entreprise_id,
+    ).first()
+    if not existing:
+        Produit.objects.create(
+            nom=nom,
+            entreprise_id=lieu.entreprise_id,
+            unite=unite,
+        )
 
     return AchatMPSL.objects.create(
         lieu=lieu,
-        produit_nom=produit_nom.strip(),
+        produit_nom=nom,
         quantite=quantite,
         unite=unite,
         prix_unitaire=prix_unitaire,
