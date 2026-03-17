@@ -124,18 +124,17 @@ class TransfertMPSLViewSet(ModelViewSet):
         return qs
 
     def create(self, request, *args, **kwargs):
+        from_lieu = get_lieu_mpsl(request)
+        if not from_lieu:
+            return Response(
+                {"detail": "Dépôt MPSL introuvable pour ce compte."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         ser = TransfertMPSLCreateSerializer(data=request.data, context={"request": request})
         ser.is_valid(raise_exception=True)
         d = ser.validated_data
-        from_lieu = d["from_lieu"]
         to_lieu = d["to_lieu"]
-
-        # Isolation : opérateur MPSL limité à son propre dépôt
-        if request.user.role == CustomUser.ROLE_MPSL and request.user.lieu_id != from_lieu.id:
-            return Response(
-                {"detail": "Accès limité à votre dépôt MPSL."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
 
         # Construire les lignes (produit, quantite) — pas de prix
         lignes_raw = d["lignes"]

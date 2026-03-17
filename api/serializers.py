@@ -829,9 +829,6 @@ class AchatMPSLCreateSerializer(serializers.Serializer):
 
 class TransfertMPSLCreateSerializer(serializers.Serializer):
     """Transfert depuis MPSL vers usine ou magasin (mouvement pur, sans prix)."""
-    from_lieu = serializers.PrimaryKeyRelatedField(
-        queryset=Lieu.objects.filter(type_lieu=Lieu.TYPE_MPSL)
-    )
     to_lieu = serializers.PrimaryKeyRelatedField(queryset=Lieu.objects.all())
     lignes = serializers.ListField(
         child=serializers.DictField(),
@@ -842,14 +839,9 @@ class TransfertMPSLCreateSerializer(serializers.Serializer):
         fields = super().get_fields()
         request = self.context.get("request")
         if request and request.user and request.user.entreprise_id:
-            ent_id = request.user.entreprise_id
-            fields["from_lieu"].queryset = Lieu.objects.filter(
-                type_lieu=Lieu.TYPE_MPSL,
-                entreprise_id=ent_id,
-            )
             fields["to_lieu"].queryset = Lieu.objects.filter(
                 type_lieu__in=[Lieu.TYPE_USINE, Lieu.TYPE_MAGASIN],
-                entreprise_id=ent_id,
+                entreprise_id=request.user.entreprise_id,
             )
         return fields
 

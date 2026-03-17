@@ -14,11 +14,10 @@ interface TransfertRow {
   mouvements: { produit_nom: string; quantite: string }[];
 }
 
-interface StockItem {
-  produit_id: number;
-  produit_nom: string;
-  produit_code: string;
-  quantite: string;
+interface ProduitOption {
+  id: number;
+  nom: string;
+  code: string;
   unite: string;
 }
 
@@ -42,35 +41,26 @@ function toList<T>(r: ApiList<T>): T[] {
 export default function MpslTransfertsPage() {
   const [tab, setTab] = useState<"creer" | "historique">("creer");
 
-  const [stock, setStock] = useState<StockItem[]>([]);
+  const [produits, setProduits] = useState<ProduitOption[]>([]);
   const [destinations, setDestinations] = useState<LieuOption[]>([]);
-  const [mpslLieux, setMpslLieux] = useState<LieuOption[]>([]);
   const [rows, setRows] = useState<TransfertRow[]>([]);
 
-  const [fromLieu, setFromLieu] = useState("");
   const [toLieu, setToLieu] = useState("");
   const [lignes, setLignes] = useState<LigneForme[]>([{ produit_id: "", quantite: "" }]);
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
 
   const load = async () => {
-    const [stockData, shopsData, factoriesData, mpslData, transfertsData] = await Promise.all([
-      apiFetch("/mpsl/stock/"),
-      apiFetch("/locations/by-type/?type=shop"),
-      apiFetch("/locations/by-type/?type=factory"),
-      apiFetch("/locations/by-type/?type=mpsl"),
+    const [produitsData, usinesData, magasinsData, transfertsData] = await Promise.all([
+      apiFetch("/admin/produits/"),
+      apiFetch("/admin/lieux/?type_lieu=usine"),
+      apiFetch("/admin/lieux/?type_lieu=magasin"),
       apiFetch("/mpsl/transferts/"),
     ]);
-    setStock(toList(stockData as ApiList<StockItem>));
-
-    const shops = (shopsData as { results?: LieuOption[] }).results ?? (shopsData as LieuOption[]) ?? [];
-    const factories = (factoriesData as { results?: LieuOption[] }).results ?? (factoriesData as LieuOption[]) ?? [];
-    setDestinations([
-      ...shops.map((s) => ({ ...s, type_lieu: "magasin" })),
-      ...factories.map((f) => ({ ...f, type_lieu: "usine" })),
-    ]);
-    const mpsl = (mpslData as { results?: LieuOption[] }).results ?? (mpslData as LieuOption[]) ?? [];
-    setMpslLieux(mpsl);
+    setProduits(toList(produitsData as ApiList<ProduitOption>));
+    const usines = toList(usinesData as ApiList<LieuOption>).map((l) => ({ ...l, type_lieu: "usine" }));
+    const magasins = toList(magasinsData as ApiList<LieuOption>).map((l) => ({ ...l, type_lieu: "magasin" }));
+    setDestinations([...usines, ...magasins]);
     setRows(toList(transfertsData as ApiList<TransfertRow>));
   };
 
@@ -85,17 +75,15 @@ export default function MpslTransfertsPage() {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErr("");
-    if (!fromLieu) { setErr("Sélectionne le dépôt source."); return; }
     if (!toLieu) { setErr("Sélectionne la destination."); return; }
     const lignesValides = lignes.filter((l) => l.produit_id && Number(l.quantite) > 0);
-    if (lignesValides.length === 0) { setErr("Au moins une ligne valide requise."); return; }
+    if (lignesValides.length === 0) { setErr("Au moins une ligne de produit requise."); return; }
 
     setLoading(true);
     try {
       await apiFetch("/mpsl/transferts/", {
         method: "POST",
         body: JSON.stringify({
-          from_lieu: Number(fromLieu),
           to_lieu: Number(toLieu),
           lignes: lignesValides.map((l) => ({
             produit_id: Number(l.produit_id),
@@ -103,7 +91,6 @@ export default function MpslTransfertsPage() {
           })),
         }),
       });
-      setFromLieu("");
       setToLieu("");
       setLignes([{ produit_id: "", quantite: "" }]);
       setTab("historique");
@@ -120,7 +107,7 @@ export default function MpslTransfertsPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Transferts MPSL</h1>
         <p className="text-sm text-muted-foreground">
-          Envoyer des produits du dépôt vers une usine ou un magasin. Aucun prix — mouvement pur de stock.
+          Envoyer des produits du dépôt vers une usine ou un magasin.
         </p>
       </div>
 
@@ -145,45 +132,29 @@ export default function MpslTransfertsPage() {
       {/* Créer un transfert */}
       {tab === "creer" && (
         <form onSubmit={submit} className="space-y-4">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-muted-foreground">Dépôt source (MPSL)</label>
-              <select
-                className="h-10 rounded-md border border-input bg-background px-2 text-sm"
-                value={fromLieu}
-                onChange={(e) => setFromLieu(e.target.value)}
-              >
-                <option value="">Sélectionner le dépôt...</option>
-                {mpslLieux.map((l) => (
-                  <option key={l.id} value={l.id}>{l.nom}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-muted-foreground">Destination (usine ou magasin)</label>
-              <select
-                className="h-10 rounded-md border border-input bg-background px-2 text-sm"
-                value={toLieu}
-                onChange={(e) => setToLieu(e.target.value)}
-              >
-                <option value="">Sélectionner...</option>
-                {destinations.length > 0 && (
-                  <>
-                    <optgroup label="Usines">
-                      {destinations.filter((d) => d.type_lieu === "usine").map((d) => (
-                        <option key={d.id} value={d.id}>{d.nom}</option>
-                      ))}
-                    </optgroup>
-                    <optgroup label="Magasins">
-                      {destinations.filter((d) => d.type_lieu === "magasin").map((d) => (
-                        <option key={d.id} value={d.id}>{d.nom}</option>
-                      ))}
-                    </optgroup>
-                  </>
-                )}
-              </select>
-            </div>
+          <div className="flex flex-col gap-1 max-w-sm">
+            <label className="text-xs font-medium text-muted-foreground">Destination (usine ou magasin)</label>
+            <select
+              className="h-10 rounded-md border border-input bg-background px-2 text-sm"
+              value={toLieu}
+              onChange={(e) => setToLieu(e.target.value)}
+            >
+              <option value="">Sélectionner...</option>
+              {destinations.filter((d) => d.type_lieu === "usine").length > 0 && (
+                <optgroup label="Usines">
+                  {destinations.filter((d) => d.type_lieu === "usine").map((d) => (
+                    <option key={d.id} value={d.id}>{d.nom}</option>
+                  ))}
+                </optgroup>
+              )}
+              {destinations.filter((d) => d.type_lieu === "magasin").length > 0 && (
+                <optgroup label="Magasins">
+                  {destinations.filter((d) => d.type_lieu === "magasin").map((d) => (
+                    <option key={d.id} value={d.id}>{d.nom}</option>
+                  ))}
+                </optgroup>
+              )}
+            </select>
           </div>
 
           {/* Lignes de produits */}
@@ -199,9 +170,9 @@ export default function MpslTransfertsPage() {
               </button>
             </div>
 
-            {stock.length === 0 && (
+            {produits.length === 0 && (
               <p className="text-xs text-amber-700 dark:text-amber-400">
-                Aucun stock disponible dans ce dépôt. Enregistrez d&apos;abord des achats.
+                Aucun produit disponible dans le catalogue.
               </p>
             )}
 
@@ -214,9 +185,9 @@ export default function MpslTransfertsPage() {
                     onChange={(e) => updateLigne(i, "produit_id", e.target.value)}
                   >
                     <option value="">Produit...</option>
-                    {stock.map((s) => (
-                      <option key={s.produit_id} value={s.produit_id}>
-                        {s.produit_nom} — stock : {Number(s.quantite).toFixed(2)} {s.unite}
+                    {produits.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.nom}{p.code ? ` (${p.code})` : ""}
                       </option>
                     ))}
                   </select>
@@ -248,7 +219,7 @@ export default function MpslTransfertsPage() {
           <Button
             type="submit"
             disabled={loading}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+            className="bg-blue-600 hover:bg-blue-700 text-white"
           >
             {loading ? "Transfert en cours..." : "Confirmer le transfert"}
           </Button>
@@ -262,7 +233,6 @@ export default function MpslTransfertsPage() {
             <thead>
               <tr className="border-b bg-blue-50/50 dark:bg-blue-950/20">
                 <th className="text-left py-2 px-3 text-blue-700 dark:text-blue-300">#</th>
-                <th className="text-left py-2 px-3">Source</th>
                 <th className="text-left py-2 px-3">Destination</th>
                 <th className="text-left py-2 px-3">Produits</th>
                 <th className="text-left py-2 px-3">Date</th>
@@ -271,7 +241,7 @@ export default function MpslTransfertsPage() {
             <tbody>
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="py-6 text-center text-muted-foreground text-sm">
+                  <td colSpan={4} className="py-6 text-center text-muted-foreground text-sm">
                     Aucun transfert.
                   </td>
                 </tr>
@@ -279,7 +249,6 @@ export default function MpslTransfertsPage() {
               {rows.map((r) => (
                 <tr key={r.id} className="border-b hover:bg-blue-50/30 dark:hover:bg-blue-950/10">
                   <td className="py-1.5 px-3 font-mono text-blue-700 dark:text-blue-300">#{r.id}</td>
-                  <td className="py-1.5 px-3">{r.from_lieu_nom}</td>
                   <td className="py-1.5 px-3">{r.to_lieu_nom}</td>
                   <td className="py-1.5 px-3">
                     {(r.mouvements ?? []).map((m, i) => (
