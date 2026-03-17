@@ -125,11 +125,7 @@ class AchatMPSL(models.Model):
         related_name="achats_mpsl",
         limit_choices_to={"type_lieu": "mpsl"},
     )
-    produit = models.ForeignKey(
-        Produit,
-        on_delete=models.PROTECT,
-        related_name="achats_mpsl",
-    )
+    produit_nom = models.CharField(max_length=255, verbose_name="Produit acheté")
     quantite = models.DecimalField(max_digits=12, decimal_places=2)
     unite = models.CharField(max_length=10, choices=UNITE_CHOICES, default=UNITE_SACS)
     prix_unitaire = models.DecimalField(max_digits=12, decimal_places=2, default=0)
@@ -155,11 +151,10 @@ class AchatMPSL(models.Model):
         ]
         indexes = [
             models.Index(fields=["lieu", "date"], name="achatmpsl_lieu_date_idx"),
-            models.Index(fields=["produit", "lieu"], name="achatmpsl_produit_lieu_idx"),
         ]
 
     def __str__(self):
-        return f"Achat MPSL {self.produit} x {self.quantite} {self.unite} @ {self.lieu}"
+        return f"Achat MPSL {self.produit_nom} x {self.quantite} {self.unite} @ {self.lieu}"
 
     def save(self, *args, **kwargs):
         if self.prix_unitaire and self.quantite:

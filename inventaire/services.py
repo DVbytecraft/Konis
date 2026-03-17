@@ -52,11 +52,11 @@ def enregistrer_achat_usine(
     )
 
 
-# ─── Achat MPSL (avec impact stock) ───────────────────────────────────────────
+# ─── Achat MPSL (comptable uniquement, comme AchatUsine) ──────────────────────
 
 def enregistrer_achat_mpsl(
     lieu: Lieu,
-    produit,
+    produit_nom: str,
     quantite: Decimal,
     unite: str,
     prix_unitaire: Decimal = Decimal("0"),
@@ -64,42 +64,32 @@ def enregistrer_achat_mpsl(
     created_by=None,
 ) -> AchatMPSL:
     """
-    Enregistre un achat de produit au dépôt MPSL.
-    IMPACTE le stock : ajoute la quantité au stock du dépôt MPSL.
-    Flux : Fournisseur → MPSL (avec prix d'achat).
+    Enregistre un achat de produit au dépôt MPSL (enregistrement comptable uniquement).
+    NE modifie PAS le stock — le MPSL est la source d'approvisionnement, son stock
+    n'est pas contraint. Les transferts vers usines/boutiques gèrent le stock destination.
+    Flux : Fournisseur → MPSL (avec prix d'achat, nom produit libre).
     """
     if lieu.type_lieu != Lieu.TYPE_MPSL:
         raise ErreurStock(f"Le lieu '{lieu}' n'est pas un dépôt MPSL.")
+    if not produit_nom or not produit_nom.strip():
+        raise ErreurStock("Le nom du produit acheté est obligatoire.")
     if quantite <= 0:
         raise ErreurStock("La quantité doit être strictement positive.")
     if prix_unitaire < 0:
         raise ErreurStock("Le prix unitaire doit être >= 0.")
-    if produit.entreprise_id != lieu.entreprise_id:
-        raise ErreurStock("Le produit et le dépôt doivent appartenir à la même entreprise.")
 
     prix_total = Decimal(str(quantite)) * Decimal(str(prix_unitaire))
 
-    with transaction.atomic():
-        achat = AchatMPSL.objects.create(
-            lieu=lieu,
-            produit=produit,
-            quantite=quantite,
-            unite=unite,
-            prix_unitaire=prix_unitaire,
-            prix_total=prix_total,
-            notes=notes or "",
-            created_by=created_by,
-        )
-        # Créditer le stock du dépôt MPSL
-        stock, created = Stock.objects.select_for_update().get_or_create(
-            produit=produit,
-            lieu=lieu,
-            defaults={"quantite": Decimal("0")},
-        )
-        stock.quantite += quantite
-        stock.save(update_fields=["quantite"])
-
-    return achat
+    return AchatMPSL.objects.create(
+        lieu=lieu,
+        produit_nom=produit_nom.strip(),
+        quantite=quantite,
+        unite=unite,
+        prix_unitaire=prix_unitaire,
+        prix_total=prix_total,
+        notes=notes or "",
+        created_by=created_by,
+    )
 
 
 # ─── Noyau commun des transferts ──────────────────────────────────────────────
@@ -221,8 +211,9 @@ def transfert_depuis_mpsl(
     lignes: list[tuple],
 ) -> Transfert:
     """
-    Transfère du stock depuis un dépôt MPSL vers une usine ou un magasin.
-    Transfert pur : pas de prix (unit_price=0), pas de vente, pas d'achat.
+    Transfère des produits depuis un dépôt MPSL vers une usine ou un magasin.
+    Le MPSL est la source d'approvisionnement : son stock n'est pas contrôlé.
+    Seul le stock destination est crédité.
     Destinations autorisées : usine ou magasin.
     """
     if from_mpsl.type_lieu != Lieu.TYPE_MPSL:
@@ -235,11 +226,35 @@ def transfert_depuis_mpsl(
         raise ErreurStock("Transfert inter-entreprises interdit.")
     if from_mpsl.id == to_lieu.id:
         raise ErreurStock("Origine et destination doivent être différents.")
-    # Les transferts MPSL n'ont pas de prix — forcer unit_price à 0
-    lignes_sans_prix = [
-        (line[0], line[1], Decimal("0")) for line in lignes
-    ]
-    return _noyau_transfert(from_mpsl, to_lieu, lignes_sans_prix)
+
+    with transaction.atomic():
+        for line in lignes:
+            produit = line[0]
+            quantite = Decimal(str(line[1]))
+            if quantite <= 0:
+                raise ErreurStock(f"Quantité invalide pour {produit} : {quantite}.")
+
+        transfert = Transfert.objects.create(from_lieu=from_mpsl, to_lieu=to_lieu)
+
+        for line in lignes:
+            produit = line[0]
+            quantite = Decimal(str(line[1]))
+            MouvementStock.objects.create(
+                transfert=transfert,
+                produit=produit,
+                quantite=quantite,
+                unit_price=Decimal("0"),
+            )
+            # Créditer uniquement la destination
+            stock_dest, _ = Stock.objects.select_for_update().get_or_create(
+                produit=produit,
+                lieu=to_lieu,
+                defaults={"quantite": Decimal("0")},
+            )
+            stock_dest.quantite += quantite
+            stock_dest.save(update_fields=["quantite"])
+
+    return transfert
 
 
 # ─── Transferts directs usine (sans LotProduction) ────────────────────────────

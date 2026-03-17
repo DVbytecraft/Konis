@@ -42,7 +42,7 @@ class AchatMPSLViewSet(ModelViewSet):
 
     def get_queryset(self):
         qs = AchatMPSL.objects.select_related(
-            "lieu", "produit", "created_by"
+            "lieu", "created_by"
         ).order_by("-date")
         lieu = get_lieu_mpsl(self.request)
         if self.request.user.role == CustomUser.ROLE_MPSL:
@@ -56,22 +56,21 @@ class AchatMPSLViewSet(ModelViewSet):
         return qs
 
     def create(self, request, *args, **kwargs):
+        lieu = get_lieu_mpsl(request)
+        if not lieu:
+            return Response(
+                {"detail": "Dépôt MPSL introuvable pour ce compte."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         ser = AchatMPSLCreateSerializer(data=request.data, context={"request": request})
         ser.is_valid(raise_exception=True)
         d = ser.validated_data
-        lieu = d["lieu"]
-
-        # Isolation : un opérateur MPSL ne peut agir que sur son propre dépôt
-        if request.user.role == CustomUser.ROLE_MPSL and request.user.lieu_id != lieu.id:
-            return Response(
-                {"detail": "Accès limité à votre dépôt MPSL."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
 
         try:
             achat = enregistrer_achat_mpsl(
                 lieu=lieu,
-                produit=d["produit"],
+                produit_nom=d["produit_nom"],
                 quantite=d["quantite"],
                 unite=d["unite"],
                 prix_unitaire=d.get("prix_unitaire", Decimal("0")),
@@ -88,7 +87,7 @@ class AchatMPSLViewSet(ModelViewSet):
             object_id=achat.pk,
             extra={
                 "lieu": lieu.nom,
-                "produit": achat.produit.nom,
+                "produit_nom": achat.produit_nom,
                 "quantite": str(achat.quantite),
                 "prix_total": str(achat.prix_total),
             },
@@ -232,7 +231,7 @@ class MpslDashboardView(APIView):
             )
 
         stock_mpsl = Stock.objects.filter(lieu=lieu).select_related("produit")
-        last_achats = AchatMPSL.objects.filter(lieu=lieu).select_related("produit").order_by("-date")[:5]
+        last_achats = AchatMPSL.objects.filter(lieu=lieu).order_by("-date")[:5]
         last_transferts = (
             Transfert.objects.filter(from_lieu=lieu)
             .select_related("to_lieu")
@@ -257,7 +256,7 @@ class MpslDashboardView(APIView):
             "last_achats": [
                 {
                     "id": a.id,
-                    "produit": a.produit.nom,
+                    "produit": a.produit_nom,
                     "quantite": str(a.quantite),
                     "unite": a.unite,
                     "prix_total": str(a.prix_total),

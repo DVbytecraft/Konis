@@ -8,7 +8,6 @@ import { Input } from "@/components/ui/input";
 interface AchatRow {
   id: number;
   produit_nom: string;
-  produit_code: string;
   lieu_nom: string;
   quantite: string;
   unite: string;
@@ -16,18 +15,6 @@ interface AchatRow {
   prix_total: string;
   notes: string;
   date: string;
-}
-
-interface ProduitOption {
-  id: number;
-  nom: string;
-  code: string;
-  unite: string;
-}
-
-interface LieuOption {
-  id: number;
-  nom: string;
 }
 
 type ApiList<T> = T[] | { results?: T[] };
@@ -40,11 +27,8 @@ const UNITES = ["sacs", "kg", "tonnes"] as const;
 
 export default function MpslAchatsPage() {
   const [rows, setRows] = useState<AchatRow[]>([]);
-  const [produits, setProduits] = useState<ProduitOption[]>([]);
-  const [lieux, setLieux] = useState<LieuOption[]>([]);
   const [form, setForm] = useState({
-    lieu: "",
-    produit: "",
+    produit_nom: "",
     quantite: "",
     unite: "sacs",
     prix_unitaire: "",
@@ -54,15 +38,8 @@ export default function MpslAchatsPage() {
   const [loading, setLoading] = useState(false);
 
   const load = async () => {
-    const [achats, produitsData, lieuxData] = await Promise.all([
-      apiFetch("/mpsl/achats/"),
-      apiFetch("/admin/produits/"),
-      apiFetch("/locations/by-type/?type=mpsl"),
-    ]);
+    const achats = await apiFetch("/mpsl/achats/");
     setRows(toList(achats as ApiList<AchatRow>));
-    setProduits(toList(produitsData as ApiList<ProduitOption>));
-    const lieuxRaw = lieuxData as { results?: LieuOption[] } | LieuOption[];
-    setLieux(Array.isArray(lieuxRaw) ? lieuxRaw : (lieuxRaw.results ?? []));
   };
 
   useEffect(() => { load().catch(() => {}); }, []);
@@ -70,23 +47,21 @@ export default function MpslAchatsPage() {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErr("");
-    if (!form.lieu) { setErr("Sélectionne un dépôt MPSL."); return; }
-    if (!form.produit) { setErr("Sélectionne un produit."); return; }
+    if (!form.produit_nom.trim()) { setErr("Nom du produit obligatoire."); return; }
     if (!form.quantite || Number(form.quantite) <= 0) { setErr("Quantité > 0 requise."); return; }
     setLoading(true);
     try {
       await apiFetch("/mpsl/achats/", {
         method: "POST",
         body: JSON.stringify({
-          lieu: Number(form.lieu),
-          produit: Number(form.produit),
+          produit_nom: form.produit_nom.trim(),
           quantite: form.quantite,
           unite: form.unite,
           prix_unitaire: form.prix_unitaire || "0",
           notes: form.notes,
         }),
       });
-      setForm({ lieu: "", produit: "", quantite: "", unite: "sacs", prix_unitaire: "", notes: "" });
+      setForm({ produit_nom: "", quantite: "", unite: "sacs", prix_unitaire: "", notes: "" });
       await load();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Erreur lors de l'enregistrement.");
@@ -100,7 +75,7 @@ export default function MpslAchatsPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Achats MPSL</h1>
         <p className="text-sm text-muted-foreground">
-          Enregistrer les réceptions de produits au dépôt. Chaque achat met à jour le stock.
+          Enregistrer les réceptions de produits au dépôt.
         </p>
       </div>
 
@@ -108,31 +83,12 @@ export default function MpslAchatsPage() {
         <h2 className="text-base font-medium mb-4">Nouvel achat</h2>
         <form onSubmit={submit} className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-muted-foreground">Dépôt MPSL</label>
-            <select
-              className="h-10 rounded-md border border-input bg-background px-2 text-sm"
-              value={form.lieu}
-              onChange={(e) => setForm((f) => ({ ...f, lieu: e.target.value }))}
-            >
-              <option value="">Sélectionner...</option>
-              {lieux.map((l) => (
-                <option key={l.id} value={l.id}>{l.nom}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-muted-foreground">Produit</label>
-            <select
-              className="h-10 rounded-md border border-input bg-background px-2 text-sm"
-              value={form.produit}
-              onChange={(e) => setForm((f) => ({ ...f, produit: e.target.value }))}
-            >
-              <option value="">Sélectionner...</option>
-              {produits.map((p) => (
-                <option key={p.id} value={p.id}>{p.nom}{p.code ? ` (${p.code})` : ""}</option>
-              ))}
-            </select>
+            <label className="text-xs font-medium text-muted-foreground">Nom du produit</label>
+            <Input
+              placeholder="Ex : Maïs jaune, Son de blé..."
+              value={form.produit_nom}
+              onChange={(e) => setForm((f) => ({ ...f, produit_nom: e.target.value }))}
+            />
           </div>
 
           <div className="flex flex-col gap-1">
@@ -203,11 +159,10 @@ export default function MpslAchatsPage() {
       <div>
         <h2 className="text-base font-medium mb-3">Historique des achats</h2>
         <div className="overflow-x-auto rounded-md border -mx-1 sm:mx-0">
-          <table className="w-full text-xs sm:text-sm min-w-[680px]">
+          <table className="w-full text-xs sm:text-sm min-w-[580px]">
             <thead>
               <tr className="border-b bg-orange-50/50 dark:bg-orange-950/20">
                 <th className="text-left py-2 px-3 text-orange-700 dark:text-orange-300">Produit</th>
-                <th className="text-left py-2 px-3">Dépôt</th>
                 <th className="text-right py-2 px-3">Quantité</th>
                 <th className="text-left py-2 px-3">Unité</th>
                 <th className="text-right py-2 px-3">Prix unit.</th>
@@ -218,18 +173,14 @@ export default function MpslAchatsPage() {
             <tbody>
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="py-6 text-center text-muted-foreground text-sm">
+                  <td colSpan={6} className="py-6 text-center text-muted-foreground text-sm">
                     Aucun achat enregistré.
                   </td>
                 </tr>
               )}
               {rows.map((r) => (
                 <tr key={r.id} className="border-b hover:bg-orange-50/30 dark:hover:bg-orange-950/10">
-                  <td className="py-1.5 px-3 font-medium">
-                    {r.produit_nom}
-                    {r.produit_code && <span className="ml-1 text-xs text-muted-foreground">({r.produit_code})</span>}
-                  </td>
-                  <td className="py-1.5 px-3 text-muted-foreground">{r.lieu_nom}</td>
+                  <td className="py-1.5 px-3 font-medium">{r.produit_nom}</td>
                   <td className="py-1.5 px-3 text-right font-mono">{Number(r.quantite).toFixed(2)}</td>
                   <td className="py-1.5 px-3 text-muted-foreground">{r.unite}</td>
                   <td className="py-1.5 px-3 text-right">{Number(r.prix_unitaire).toLocaleString("fr-FR")}</td>

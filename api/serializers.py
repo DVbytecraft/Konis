@@ -797,8 +797,6 @@ class TicketReprintCreateSerializer(serializers.Serializer):
 # ---- MPSL ----
 
 class AchatMPSLSerializer(serializers.ModelSerializer):
-    produit_nom = serializers.CharField(source="produit.nom", read_only=True)
-    produit_code = serializers.CharField(source="produit.code", read_only=True)
     lieu_nom = serializers.CharField(source="lieu.nom", read_only=True)
     created_by_username = serializers.CharField(source="created_by.username", read_only=True)
 
@@ -808,9 +806,7 @@ class AchatMPSLSerializer(serializers.ModelSerializer):
             "id",
             "lieu",
             "lieu_nom",
-            "produit",
             "produit_nom",
-            "produit_code",
             "quantite",
             "unite",
             "prix_unitaire",
@@ -824,27 +820,11 @@ class AchatMPSLSerializer(serializers.ModelSerializer):
 
 
 class AchatMPSLCreateSerializer(serializers.Serializer):
-    lieu = serializers.PrimaryKeyRelatedField(
-        queryset=Lieu.objects.filter(type_lieu=Lieu.TYPE_MPSL)
-    )
-    produit = serializers.PrimaryKeyRelatedField(queryset=Produit.objects.all())
+    produit_nom = serializers.CharField(max_length=255)
     quantite = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal("0.01"))
     unite = serializers.ChoiceField(choices=AchatMPSL.UNITE_CHOICES, default=AchatMPSL.UNITE_SACS)
     prix_unitaire = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal("0"), default=Decimal("0"))
     notes = serializers.CharField(max_length=1000, required=False, allow_blank=True, default="")
-
-    def get_fields(self):
-        fields = super().get_fields()
-        request = self.context.get("request")
-        if request and request.user and request.user.entreprise_id:
-            fields["produit"].queryset = Produit.objects.filter(
-                entreprise_id=request.user.entreprise_id
-            )
-            fields["lieu"].queryset = Lieu.objects.filter(
-                type_lieu=Lieu.TYPE_MPSL,
-                entreprise_id=request.user.entreprise_id,
-            )
-        return fields
 
 
 class TransfertMPSLCreateSerializer(serializers.Serializer):
