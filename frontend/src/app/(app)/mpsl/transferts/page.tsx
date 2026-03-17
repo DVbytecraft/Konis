@@ -132,7 +132,7 @@ export default function MpslTransfertsPage() {
       {/* Créer un transfert */}
       {tab === "creer" && (
         <form onSubmit={submit} className="space-y-4">
-          <div className="flex flex-col gap-1 max-w-sm">
+          <div className="flex flex-col gap-1 w-full sm:max-w-sm">
             <label className="text-xs font-medium text-muted-foreground">Destination (usine ou magasin)</label>
             <select
               className="h-10 rounded-md border border-input bg-background px-2 text-sm"
@@ -196,7 +196,7 @@ export default function MpslTransfertsPage() {
                     min="0.01"
                     step="0.01"
                     placeholder="Quantité"
-                    className="w-32"
+                    className="w-24 sm:w-32"
                     value={ligne.quantite}
                     onChange={(e) => updateLigne(i, "quantite", e.target.value)}
                   />

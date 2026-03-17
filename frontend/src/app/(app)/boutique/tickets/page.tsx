@@ -187,14 +187,14 @@ export default function BoutiqueTicketsPage() {
                 type="date"
                 value={debut}
                 onChange={(e) => setDebut(e.target.value)}
-                className="w-36 h-8 text-sm"
+                className="w-full sm:w-36 h-8 text-sm"
               />
               <span className="text-muted-foreground text-sm">→</span>
               <Input
                 type="date"
                 value={fin}
                 onChange={(e) => setFin(e.target.value)}
-                className="w-36 h-8 text-sm"
+                className="w-full sm:w-36 h-8 text-sm"
               />
               <Button size="sm" onClick={appliquerPersonnalise}>
                 Appliquer

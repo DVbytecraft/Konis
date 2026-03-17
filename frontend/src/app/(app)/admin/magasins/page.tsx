@@ -272,7 +272,7 @@ export default function AdminMagasinsPage() {
         </CardContent>
       </Card>
 
-      <div className="grid gap-6 sm:grid-cols-2">
+      <div className="grid gap-6 lg:grid-cols-2">
         <Card className="border-t-2 border-t-green-500">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-green-700 dark:text-green-300">

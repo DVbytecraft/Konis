@@ -93,13 +93,18 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen min-w-0 bg-muted/20 overflow-x-hidden">
       <header className="md:hidden border-b border-border bg-card">
         <div className="flex h-14 items-center justify-between px-4">
-          <Link href="/" className="font-bold tracking-tight text-green-600 dark:text-green-400">
-            KONIS
-          </Link>
+          <div className="flex flex-col min-w-0">
+            <Link href="/" className="font-bold tracking-tight text-green-600 dark:text-green-400 leading-tight">
+              KONIS
+            </Link>
+            {user.lieu && (
+              <span className="text-xs text-muted-foreground truncate leading-tight">{user.lieu.nom}</span>
+            )}
+          </div>
           <Button
             variant="ghost"
             size="sm"
-            className="h-8 px-2 gap-1 text-muted-foreground"
+            className="h-8 px-2 gap-1 text-muted-foreground shrink-0"
             onClick={() => logout().then(() => router.push("/login"))}
           >
             <LogOut className="h-4 w-4" />
