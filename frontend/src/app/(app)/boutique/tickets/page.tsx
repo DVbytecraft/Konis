@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Ticket58mm } from "@/components/caisse/ticket-58mm";
 import { ClipboardList, Copy, Printer, X } from "lucide-react";
+import { fmt } from "@/lib/utils";
 
 interface LigneTicket {
   produit_nom: string;
@@ -211,7 +212,7 @@ export default function BoutiqueTicketsPage() {
             {tickets.length} ticket{tickets.length > 1 ? "s" : ""}
           </span>
           <span className="font-semibold text-green-700 dark:text-green-300">
-            Total période : {totalPeriode.toFixed(2)} FCFA
+            Total période : {fmt(totalPeriode)} FCFA
           </span>
         </div>
       )}
@@ -435,10 +436,10 @@ export default function BoutiqueTicketsPage() {
                   <div className="flex justify-between text-sm text-muted-foreground">
                     <span>Sous-total produits</span>
                     <span>
-                      {(
+                      {fmt(
                         Number(ticketDetail.montant_total) -
                         Number(ticketDetail.cout_mouture)
-                      ).toFixed(2)}{" "}
+                      )}{" "}
                       FCFA
                     </span>
                   </div>

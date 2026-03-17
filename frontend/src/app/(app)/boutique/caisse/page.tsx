@@ -17,7 +17,7 @@ import {
   Keyboard,
   Package,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, fmt } from "@/lib/utils";
 
 interface ProduitWithStock {
   id: number;
@@ -462,14 +462,14 @@ export default function BoutiqueCaissePage() {
             <div className="flex items-baseline gap-4 mb-2">
               <span className="text-2xl font-bold text-green-800 dark:text-green-200">{ventesDuJour.length}</span>
               <span className="text-muted-foreground">tickets</span>
-              <span className="text-lg font-semibold text-green-700 dark:text-green-300">{caDuJour.toFixed(2)} FCFA</span>
+              <span className="text-lg font-semibold text-green-700 dark:text-green-300">{fmt(caDuJour)} FCFA</span>
             </div>
             {ventesDuJour.length > 0 && (
               <ul className="text-sm max-h-24 overflow-y-auto space-y-0.5">
                 {ventesDuJour.slice(0, 8).map((t) => (
                   <li key={t.id} className="flex justify-between">
                     <span className="font-mono text-green-700 dark:text-green-300">{t.numero}</span>
-                    <span className="font-medium">{t.total.toFixed(2)}</span>
+                    <span className="font-medium">{fmt(t.total)}</span>
                   </li>
                 ))}
                 {ventesDuJour.length > 8 && (
@@ -657,7 +657,7 @@ export default function BoutiqueCaissePage() {
                           className="w-20 rounded border border-input px-1.5 py-0.5 text-xs"
                         />
                         <span className="text-muted-foreground">
-                          = {(l.quantite * l.prix_unitaire).toFixed(2)}
+                          = {fmt(Number(l.quantite) * Number(l.prix_unitaire))}
                         </span>
                       </div>
                     </div>
@@ -717,7 +717,7 @@ export default function BoutiqueCaissePage() {
                   {coutMouture > 0 && (
                     <>
                       <p className="text-xs text-orange-700 dark:text-orange-300 font-semibold">
-                        Coût mouture calculé : {coutMouture.toFixed(2)} FCFA
+                        Coût mouture calculé : {fmt(coutMouture)} FCFA
                       </p>
                       {panier.length > 0 && (
                         <div className="border-t border-orange-200 dark:border-orange-800 pt-1.5 mt-1 space-y-0.5">
@@ -738,7 +738,7 @@ export default function BoutiqueCaissePage() {
                                   {l.produit_nom} ({l.quantite} {l.produit_unite} × {prix}/{label})
                                 </span>
                                 <span className="shrink-0 font-medium">
-                                  {(l.quantite * prix).toFixed(2)} F
+                                  {fmt(Number(l.quantite) * prix)} F
                                 </span>
                               </div>
                             );
@@ -759,17 +759,17 @@ export default function BoutiqueCaissePage() {
                     <>
                       <div className="flex justify-between text-sm text-muted-foreground">
                         <span>Sous-total produits</span>
-                        <span>{totalPanier.toFixed(2)} FCFA</span>
+                        <span>{fmt(totalPanier)} FCFA</span>
                       </div>
                       <div className="flex justify-between text-sm text-orange-600 dark:text-orange-400">
                         <span>Mouture</span>
-                        <span>+{coutMouture.toFixed(2)} FCFA</span>
+                        <span>+{fmt(coutMouture)} FCFA</span>
                       </div>
                     </>
                   )}
                   <div className="flex items-center justify-between font-semibold bg-green-50/50 dark:bg-green-950/20 -mx-3 px-3 py-2 rounded-b">
                     <span>TOTAL</span>
-                    <span className="text-lg text-green-700 dark:text-green-300">{totalGeneral.toFixed(2)} FCFA</span>
+                    <span className="text-lg text-green-700 dark:text-green-300">{fmt(totalGeneral)} FCFA</span>
                   </div>
                 </div>
                 <Button

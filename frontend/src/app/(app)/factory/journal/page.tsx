@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { fmt } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -187,15 +188,15 @@ export default function FactoryJournalPage() {
       <div className="grid gap-4 sm:grid-cols-3">
         <div className="rounded-md border p-3">
           <p className="text-sm text-muted-foreground">Valorisation entrees</p>
-          <p className="text-xl font-semibold">{displayTotals.entriesValue.toFixed(2)}</p>
+          <p className="text-xl font-semibold">{fmt(displayTotals.entriesValue)}</p>
         </div>
         <div className="rounded-md border p-3">
           <p className="text-sm text-muted-foreground">Valorisation sorties</p>
-          <p className="text-xl font-semibold">{displayTotals.exitsValue.toFixed(2)}</p>
+          <p className="text-xl font-semibold">{fmt(displayTotals.exitsValue)}</p>
         </div>
         <div className="rounded-md border p-3">
           <p className="text-sm text-muted-foreground">Solde valeur</p>
-          <p className="text-xl font-semibold">{displayTotals.netValue.toFixed(2)}</p>
+          <p className="text-xl font-semibold">{fmt(displayTotals.netValue)}</p>
         </div>
       </div>
 

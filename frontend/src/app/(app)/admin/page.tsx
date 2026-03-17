@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/contexts/auth-context";
 import { apiFetch } from "@/lib/api";
+import { fmt } from "@/lib/utils";
 import {
   Card,
   CardContent,
@@ -141,7 +142,7 @@ export default function AdminPage() {
             {loading ? (
               <p className="text-2xl font-bold text-muted-foreground">—</p>
             ) : (
-              <p className="text-2xl font-bold text-green-800 dark:text-green-200">{kpi.caAujourdhui.toFixed(2)}</p>
+              <p className="text-2xl font-bold text-green-800 dark:text-green-200">{fmt(kpi.caAujourdhui)}</p>
             )}
             <p className="text-xs text-green-600/70 dark:text-green-400/70">Chiffre d&apos;affaires</p>
           </CardContent>
@@ -303,7 +304,7 @@ export default function AdminPage() {
                         <td className="py-1.5 px-1">{s.produit_nom}</td>
                         <td className="py-1.5 px-1">{s.lieu_nom}</td>
                         <td className={`py-1.5 px-1 text-right font-mono font-medium ${enAlerte ? "text-red-600 dark:text-red-400" : "text-emerald-700 dark:text-emerald-300"}`}>
-                          {qte.toFixed(2)}
+                          {fmt(qte)}
                         </td>
                       </tr>
                     );

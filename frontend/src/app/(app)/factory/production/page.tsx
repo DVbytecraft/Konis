@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
+import { fmt } from "@/lib/utils";
 
 interface ProductionRow {
   id: number;
@@ -70,7 +71,7 @@ export default function FactoryProductionPage() {
                     {Number(r.poids) > 0 ? `${Number(r.poids).toFixed(2)} ${r.unite_poids}` : "—"}
                   </td>
                   <td className={`py-1.5 px-3 text-right font-semibold ${stockFaible ? "text-red-600 dark:text-red-400" : "text-emerald-700 dark:text-emerald-300"}`}>
-                    {stockRestant.toFixed(0)}
+                    {fmt(stockRestant, 0)}
                   </td>
                   <td className="py-1.5 px-3 text-muted-foreground">
                     {new Date(r.created_at).toLocaleString("fr-FR")}

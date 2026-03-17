@@ -1,5 +1,7 @@
 "use client";
 
+import { fmt } from "@/lib/utils";
+
 export interface LigneTicket {
   produit_nom: string;
   quantite: number;
@@ -47,7 +49,7 @@ export function Ticket58mm({
   copie = false,
 }: Ticket58mmProps) {
   const moutureSeule = mouture && lignes.length === 0;
-  const totalProduits = lignes.reduce((a, l) => a + l.total, 0);
+  const totalProduits = lignes.reduce((a, l) => a + Number(l.total), 0);
 
   return (
     <div
@@ -98,7 +100,7 @@ export function Ticket58mm({
             <span className="flex-1 truncate">
               {l.quantite} x {l.produit_nom}
             </span>
-            <span className="ml-1">{l.total.toFixed(2)}</span>
+            <span className="ml-1">{fmt(l.total)}</span>
           </div>
         ))
       )}
@@ -112,24 +114,24 @@ export function Ticket58mm({
           {prixMoutureKg != null && prixMoutureKg > 0 && (
             <div className="flex justify-between text-[9px]">
               <span>Mouture/kg</span>
-              <span>{prixMoutureKg.toFixed(2)} FCFA/kg</span>
+              <span>{fmt(prixMoutureKg)} FCFA/kg</span>
             </div>
           )}
           {prixMoutureTonne != null && prixMoutureTonne > 0 && (
             <div className="flex justify-between text-[9px]">
               <span>Mouture/tonne</span>
-              <span>{prixMoutureTonne.toFixed(2)} FCFA/t</span>
+              <span>{fmt(prixMoutureTonne)} FCFA/t</span>
             </div>
           )}
           {prixMoutureSac != null && prixMoutureSac > 0 && (
             <div className="flex justify-between text-[9px]">
               <span>Mouture/sac</span>
-              <span>{prixMoutureSac.toFixed(2)} FCFA/sac</span>
+              <span>{fmt(prixMoutureSac)} FCFA/sac</span>
             </div>
           )}
           <div className="flex justify-between text-[10px] font-medium">
             <span>Coût mouture</span>
-            <span>{coutMouture.toFixed(2)} FCFA</span>
+            <span>{fmt(coutMouture)} FCFA</span>
           </div>
         </div>
       ) : (
@@ -141,12 +143,12 @@ export function Ticket58mm({
       {mouture && coutMouture > 0 && !moutureSeule && (
         <div className="flex justify-between text-[9px]">
           <span>Sous-total produits</span>
-          <span>{totalProduits.toFixed(2)}</span>
+          <span>{fmt(totalProduits)}</span>
         </div>
       )}
       <div className="flex justify-between font-semibold text-[11px]">
         <span>TOTAL</span>
-        <span>{totalGeneral.toFixed(2)} FCFA</span>
+        <span>{fmt(totalGeneral)} FCFA</span>
       </div>
 
       <div className="text-center text-[9px] mt-2">
