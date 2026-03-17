@@ -68,7 +68,6 @@ export default function AdminUsersPage() {
 
   const [magasins, setMagasins] = useState<Lieu[]>([]);
   const [usines, setUsines] = useState<Lieu[]>([]);
-  const [mpslLieux, setMpslLieux] = useState<Lieu[]>([]);
   const [users, setUsers] = useState<User[]>([]);
 
   const [editUser, setEditUser] = useState<User | null>(null);
@@ -91,15 +90,13 @@ export default function AdminUsersPage() {
       try {
         setLoading(true);
         const entrepriseParam = user?.entreprise ? `&entreprise=${user.entreprise}` : "";
-        const [magRes, usiRes, mpslRes, usersRes] = await Promise.all([
+        const [magRes, usiRes, usersRes] = await Promise.all([
           apiFetch<Paginated<Lieu> | Lieu[]>(`/admin/lieux/?type_lieu=magasin${entrepriseParam}`),
           apiFetch<Paginated<Lieu> | Lieu[]>(`/admin/lieux/?type_lieu=usine${entrepriseParam}`),
-          apiFetch<Paginated<Lieu> | Lieu[]>(`/admin/lieux/?type_lieu=mpsl${entrepriseParam}`),
           apiFetch<Paginated<User> | User[]>("/admin/users/"),
         ]);
         let magasinsList = toList(magRes);
         let usinesList = toList(usiRes);
-        let mpslList = toList(mpslRes);
         if (magasinsList.length === 0) {
           const fallbackMag = await apiFetch<Paginated<Lieu> | Lieu[]>("/locations/by-type/?type=shop");
           magasinsList = toList(fallbackMag);
@@ -108,13 +105,8 @@ export default function AdminUsersPage() {
           const fallbackU = await apiFetch<Paginated<Lieu> | Lieu[]>("/locations/by-type/?type=factory");
           usinesList = toList(fallbackU);
         }
-        if (mpslList.length === 0) {
-          const fallbackMpsl = await apiFetch<Paginated<Lieu> | Lieu[]>("/locations/by-type/?type=mpsl");
-          mpslList = toList(fallbackMpsl);
-        }
         setMagasins(magasinsList);
         setUsines(usinesList);
-        setMpslLieux(mpslList);
         setUsers(toList(usersRes));
       } catch (e) {
         setError(e instanceof Error ? e.message : "Erreur de chargement");
