@@ -28,6 +28,9 @@ export default function HomePage() {
       case "boutique":
         router.replace("/boutique/caisse");
         break;
+      case "mpsl":
+        router.replace("/mpsl");
+        break;
       default:
         router.replace("/login");
     }
