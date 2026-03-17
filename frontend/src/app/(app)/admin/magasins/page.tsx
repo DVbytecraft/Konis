@@ -114,7 +114,7 @@ export default function AdminMagasinsPage() {
 
       setLieux((prev) => [created, ...prev]);
       setSuccess(
-        `${form.type_lieu === "magasin" ? "Magasin" : "Usine"} créé${form.type_lieu === "magasin" ? "" : "e"} avec succès.`
+        `${form.type_lieu === "magasin" ? "Magasin" : form.type_lieu === "mpsl" ? "Dépôt MPSL" : "Usine"} créé avec succès.`
       );
       setForm((prev) => ({
         ...prev,
@@ -197,13 +197,14 @@ export default function AdminMagasinsPage() {
 
   const magasins = lieux.filter((l) => l.type_lieu === "magasin");
   const usines = lieux.filter((l) => l.type_lieu === "usine");
+  const mpslDepots = lieux.filter((l) => l.type_lieu === "mpsl");
 
   return (
     <div className="space-y-8 min-w-0">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Magasins et Usines</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Lieux</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Création et gestion des lieux (magasins et usines).
+          Création et gestion des lieux (magasins, usines, dépôts MPSL).
         </p>
       </div>
 
@@ -249,6 +250,7 @@ export default function AdminMagasinsPage() {
               >
                 <option value="magasin">Magasin</option>
                 <option value="usine">Usine</option>
+                <option value="mpsl">Dépôt MPSL</option>
               </select>
             </div>
             <div className="sm:col-span-2 flex flex-col gap-2">
@@ -445,6 +447,74 @@ export default function AdminMagasinsPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Dépôts MPSL */}
+      <Card className="border-t-2 border-t-cyan-500">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-cyan-700 dark:text-cyan-300">
+            <span className="inline-block w-2.5 h-2.5 rounded-full bg-cyan-500"></span>
+            Dépôts MPSL
+          </CardTitle>
+          <CardDescription>
+            Centres logistiques d&apos;approvisionnement ({mpslDepots.length}).
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <p className="text-sm text-muted-foreground">Chargement…</p>
+          ) : mpslDepots.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Aucun dépôt MPSL. Créez-en un via le formulaire ci-dessus.</p>
+          ) : (
+            <div className="overflow-x-auto -mx-1 min-w-0">
+              <table className="w-full min-w-[320px] text-sm">
+                <thead>
+                  <tr className="border-b bg-cyan-50/40 dark:bg-cyan-950/20">
+                    <th className="text-left py-2 px-1">Nom</th>
+                    <th className="text-left py-2 px-1">Code</th>
+                    <th className="text-left py-2 px-1">Entreprise</th>
+                    <th className="text-left py-2 px-1">Statut</th>
+                    <th className="py-2 px-1">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {mpslDepots.map((l) => {
+                    const actif = l.is_active !== false;
+                    return (
+                      <tr key={l.id} className={`border-b hover:bg-cyan-50/30 dark:hover:bg-cyan-950/10 ${!actif ? "opacity-60" : ""}`}>
+                        <td className="py-1.5 px-1 font-medium">{l.nom}</td>
+                        <td className="py-1.5 px-1 font-mono text-muted-foreground">
+                          {l.code ? (
+                            <span className="bg-cyan-100 text-cyan-800 dark:bg-cyan-900/40 dark:text-cyan-300 px-1.5 py-0.5 rounded text-xs">
+                              {l.code}
+                            </span>
+                          ) : "—"}
+                        </td>
+                        <td className="py-1.5 px-1 text-muted-foreground">{l.entreprise_nom}</td>
+                        <td className="py-1.5 px-1">
+                          <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium ${actif ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300" : "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300"}`}>
+                            {actif ? "Actif" : "Inactif"}
+                          </span>
+                        </td>
+                        <td className="py-1.5 px-1">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-6 text-xs"
+                            onClick={() => handleToggleLieu(l)}
+                          >
+                            {actif ? "Désactiver" : "Réactiver"}
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

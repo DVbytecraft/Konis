@@ -14,7 +14,7 @@ const navByRole: Record<string, { href: string; label: string; icon: React.Compo
     { href: "/admin", label: "Tableau de bord", icon: LayoutDashboard },
     { href: "/admin/users", label: "Utilisateurs", icon: Users },
     { href: "/admin/factories", label: "Usines", icon: Warehouse },
-    { href: "/admin/magasins", label: "Magasins", icon: Store },
+    { href: "/admin/magasins", label: "Lieux", icon: Store },
     { href: "/admin/produits", label: "Produits", icon: Package },
     { href: "/admin/rapport", label: "Rapport", icon: BarChart3 },
     { href: "/factures", label: "Factures", icon: Receipt },
