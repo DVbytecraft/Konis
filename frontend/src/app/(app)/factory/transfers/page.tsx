@@ -13,8 +13,6 @@ interface TransferRow {
   produit_nom: string;
   quantite_sacs: string | number;
   poids_total: string | number;
-  prix_par_sac: string | number;
-  montant_cession: string | number;
   created_at: string;
 }
 
@@ -25,8 +23,6 @@ interface InterUsineRow {
   usine_source_nom: string;
   usine_destination_nom: string;
   quantite_sacs: string | number;
-  prix_par_sac: string | number;
-  montant_transfert: string | number;
   notes: string;
   created_at: string;
 }
@@ -61,13 +57,13 @@ export default function FactoryTransfersPage() {
   const [rows, setRows] = useState<TransferRow[]>([]);
   const [lots, setLots] = useState<LotOption[]>([]);
   const [shops, setShops] = useState<ShopOption[]>([]);
-  const [form, setForm] = useState({ lot: "", boutique: "", quantite_sacs: "", poids_total: "", prix_par_sac: "" });
+  const [form, setForm] = useState({ lot: "", boutique: "", quantite_sacs: "", poids_total: "" });
   const [err, setErr] = useState("");
 
   // --- Vers usines ---
   const [interRows, setInterRows] = useState<InterUsineRow[]>([]);
   const [factories, setFactories] = useState<ShopOption[]>([]);
-  const [formU, setFormU] = useState({ lot: "", usine_destination: "", quantite_sacs: "", poids_total: "", prix_par_sac: "", notes: "" });
+  const [formU, setFormU] = useState({ lot: "", usine_destination: "", quantite_sacs: "", poids_total: "", notes: "" });
   const [errU, setErrU] = useState("");
 
   const load = async () => {
@@ -93,7 +89,6 @@ export default function FactoryTransfersPage() {
     if (!form.lot) { setErr("Sélectionne un lot."); return; }
     if (!form.boutique) { setErr("Sélectionne une boutique."); return; }
     if (!form.quantite_sacs || Number(form.quantite_sacs) <= 0) { setErr("Nombre de sacs > 0 requis."); return; }
-    if (!form.prix_par_sac || Number(form.prix_par_sac) < 0) { setErr("Prix par sac >= 0 requis."); return; }
     try {
       await apiFetch("/usine/cessions/", {
         method: "POST",
@@ -102,10 +97,9 @@ export default function FactoryTransfersPage() {
           boutique: Number(form.boutique),
           quantite_sacs: form.quantite_sacs,
           poids_total: form.poids_total || "0",
-          prix_par_sac: form.prix_par_sac,
         }),
       });
-      setForm({ lot: "", boutique: "", quantite_sacs: "", poids_total: "", prix_par_sac: "" });
+      setForm({ lot: "", boutique: "", quantite_sacs: "", poids_total: "" });
       await load();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Erreur");
@@ -126,11 +120,10 @@ export default function FactoryTransfersPage() {
           usine_destination: Number(formU.usine_destination),
           quantite_sacs: formU.quantite_sacs,
           poids_total: formU.poids_total || "0",
-          prix_par_sac: formU.prix_par_sac || "0",
           notes: formU.notes,
         }),
       });
-      setFormU({ lot: "", usine_destination: "", quantite_sacs: "", poids_total: "", prix_par_sac: "", notes: "" });
+      setFormU({ lot: "", usine_destination: "", quantite_sacs: "", poids_total: "", notes: "" });
       await load();
     } catch (e) {
       setErrU(e instanceof Error ? e.message : "Erreur");
@@ -195,7 +188,6 @@ export default function FactoryTransfersPage() {
             </select>
             <Input placeholder="Nb sacs" value={form.quantite_sacs} onChange={(e) => setForm((f) => ({ ...f, quantite_sacs: e.target.value }))} />
             <Input placeholder="Poids total (optionnel)" value={form.poids_total} onChange={(e) => setForm((f) => ({ ...f, poids_total: e.target.value }))} />
-            <Input placeholder="Prix / sac (FCFA)" value={form.prix_par_sac} onChange={(e) => setForm((f) => ({ ...f, prix_par_sac: e.target.value }))} />
             <Button type="submit" className="w-full lg:col-span-6 sm:col-span-2 bg-blue-600 hover:bg-blue-700 text-white">
               Créer transfert vers boutique
             </Button>
@@ -211,14 +203,12 @@ export default function FactoryTransfersPage() {
                   <th className="text-left py-2 px-3">Boutique</th>
                   <th className="text-left py-2 px-3">Produit</th>
                   <th className="text-right py-2 px-3">Sacs</th>
-                  <th className="text-right py-2 px-3">Prix/sac</th>
-                  <th className="text-right py-2 px-3 text-blue-700 dark:text-blue-300">Montant</th>
                   <th className="text-left py-2 px-3">Date</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.length === 0 && (
-                  <tr><td colSpan={7} className="py-4 text-center text-muted-foreground text-sm">Aucun transfert.</td></tr>
+                  <tr><td colSpan={5} className="py-4 text-center text-muted-foreground text-sm">Aucun transfert.</td></tr>
                 )}
                 {rows.map((r) => (
                   <tr key={r.id} className="border-b hover:bg-blue-50/30 dark:hover:bg-blue-950/10">
@@ -226,10 +216,6 @@ export default function FactoryTransfersPage() {
                     <td className="py-1.5 px-3">{r.boutique_nom}</td>
                     <td className="py-1.5 px-3">{r.produit_nom}</td>
                     <td className="py-1.5 px-3 text-right">{Number(r.quantite_sacs).toFixed(0)}</td>
-                    <td className="py-1.5 px-3 text-right">{Number(r.prix_par_sac).toLocaleString("fr-FR")}</td>
-                    <td className="py-1.5 px-3 text-right font-semibold text-blue-700 dark:text-blue-300">
-                      {Number(r.montant_cession).toLocaleString("fr-FR")}
-                    </td>
                     <td className="py-1.5 px-3 text-muted-foreground">{new Date(r.created_at).toLocaleString("fr-FR")}</td>
                   </tr>
                 ))}
@@ -267,7 +253,6 @@ export default function FactoryTransfersPage() {
             </select>
             <Input placeholder="Nb sacs" value={formU.quantite_sacs} onChange={(e) => setFormU((f) => ({ ...f, quantite_sacs: e.target.value }))} />
             <Input placeholder="Poids total (optionnel)" value={formU.poids_total} onChange={(e) => setFormU((f) => ({ ...f, poids_total: e.target.value }))} />
-            <Input placeholder="Prix / sac (FCFA, optionnel)" value={formU.prix_par_sac} onChange={(e) => setFormU((f) => ({ ...f, prix_par_sac: e.target.value }))} />
             <Input placeholder="Notes (optionnel)" value={formU.notes} onChange={(e) => setFormU((f) => ({ ...f, notes: e.target.value }))} className="lg:col-span-5" />
             <Button type="submit" className="w-full lg:col-span-6 sm:col-span-2 bg-purple-600 hover:bg-purple-700 text-white">
               Créer transfert inter-usines
@@ -285,14 +270,12 @@ export default function FactoryTransfersPage() {
                   <th className="text-left py-2 px-3">Destination</th>
                   <th className="text-left py-2 px-3">Produit</th>
                   <th className="text-right py-2 px-3">Sacs</th>
-                  <th className="text-right py-2 px-3">Prix/sac</th>
-                  <th className="text-right py-2 px-3 text-purple-700 dark:text-purple-300">Montant</th>
                   <th className="text-left py-2 px-3">Date</th>
                 </tr>
               </thead>
               <tbody>
                 {interRows.length === 0 && (
-                  <tr><td colSpan={8} className="py-4 text-center text-muted-foreground text-sm">Aucun transfert inter-usines.</td></tr>
+                  <tr><td colSpan={6} className="py-4 text-center text-muted-foreground text-sm">Aucun transfert inter-usines.</td></tr>
                 )}
                 {interRows.map((r) => (
                   <tr key={r.id} className="border-b hover:bg-purple-50/30 dark:hover:bg-purple-950/10">
@@ -301,10 +284,6 @@ export default function FactoryTransfersPage() {
                     <td className="py-1.5 px-3">{r.usine_destination_nom}</td>
                     <td className="py-1.5 px-3">{r.produit_nom}</td>
                     <td className="py-1.5 px-3 text-right">{Number(r.quantite_sacs).toFixed(0)}</td>
-                    <td className="py-1.5 px-3 text-right">{Number(r.prix_par_sac).toLocaleString("fr-FR")}</td>
-                    <td className="py-1.5 px-3 text-right font-semibold text-purple-700 dark:text-purple-300">
-                      {Number(r.montant_transfert).toLocaleString("fr-FR")}
-                    </td>
                     <td className="py-1.5 px-3 text-muted-foreground">{new Date(r.created_at).toLocaleString("fr-FR")}</td>
                   </tr>
                 ))}

@@ -142,16 +142,9 @@ class UserSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({"lieu": f"Ce lieu est déjà attribué à '{occupant.username}'. Modifiez cet utilisateur ou créez un nouveau lieu."})
             return
         if role == CustomUser.ROLE_MPSL:
-            if not lieu:
-                raise serializers.ValidationError({"lieu": "Un compte MPSL doit être lié à un dépôt MPSL."})
-            if lieu.type_lieu != Lieu.TYPE_MPSL:
-                raise serializers.ValidationError({"lieu": "Le lieu doit être de type MPSL pour un compte MPSL."})
-            existing_qs = CustomUser.objects.filter(lieu=lieu)
-            if self.instance:
-                existing_qs = existing_qs.exclude(pk=self.instance.pk)
-            if existing_qs.exists():
-                occupant = existing_qs.first()
-                raise serializers.ValidationError({"lieu": f"Ce lieu est déjà attribué à '{occupant.username}'. Modifiez cet utilisateur ou créez un nouveau lieu."})
+            # Lieu optionnel pour MPSL — l'utilisateur opère sur tout dépôt MPSL de son entreprise.
+            if lieu and lieu.type_lieu != Lieu.TYPE_MPSL:
+                raise serializers.ValidationError({"lieu": "Si un lieu est fourni, il doit être de type MPSL."})
             return
 
     def create(self, validated_data):
@@ -682,7 +675,7 @@ class TransfertCessionCreateSerializer(serializers.Serializer):
     boutique = serializers.PrimaryKeyRelatedField(queryset=Lieu.objects.filter(type_lieu=Lieu.TYPE_MAGASIN))
     quantite_sacs = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal("0.01"))
     poids_total = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal("0"), required=False, default=Decimal("0"))
-    prix_par_sac = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal("0"))
+    prix_par_sac = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal("0"), required=False, default=Decimal("0"))
 
     def validate(self, attrs):
         poids_total = attrs.get("poids_total", Decimal("0"))

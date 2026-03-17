@@ -125,8 +125,8 @@ export default function AdminUsersPage() {
     charger();
   }, [user?.entreprise]);
 
-  const lieux = form.role === "boutique" ? magasins : form.role === "usine" ? usines : form.role === "mpsl" ? mpslLieux : [];
-  const editLieux = editForm.role === "boutique" ? magasins : editForm.role === "usine" ? usines : editForm.role === "mpsl" ? mpslLieux : [];
+  const lieux = form.role === "boutique" ? magasins : form.role === "usine" ? usines : [];
+  const editLieux = editForm.role === "boutique" ? magasins : editForm.role === "usine" ? usines : [];
 
   const handleChange =
     (field: keyof FormState) =>
@@ -177,9 +177,9 @@ export default function AdminUsersPage() {
     try {
       const payload: Record<string, unknown> = { role: editForm.role };
       if (editForm.password.trim()) payload.password = editForm.password.trim();
-      if ((editForm.role === "boutique" || editForm.role === "usine" || editForm.role === "mpsl") && editForm.lieuId) {
+      if ((editForm.role === "boutique" || editForm.role === "usine") && editForm.lieuId) {
         payload.lieu = editForm.lieuId;
-      } else if (editForm.role !== "boutique" && editForm.role !== "usine" && editForm.role !== "mpsl") {
+      } else if (editForm.role !== "boutique" && editForm.role !== "usine") {
         payload.lieu = null;
       }
       const updated = await apiFetch<User>(`/admin/users/${editUser.id}/`, {
@@ -205,7 +205,7 @@ export default function AdminUsersPage() {
       setError("Identifiant et mot de passe sont obligatoires.");
       return;
     }
-    if ((form.role === "boutique" || form.role === "usine" || form.role === "mpsl") && !form.lieuId) {
+    if ((form.role === "boutique" || form.role === "usine") && !form.lieuId) {
       setError("Veuillez sélectionner un lieu pour ce rôle.");
       return;
     }
@@ -221,7 +221,7 @@ export default function AdminUsersPage() {
         role: form.role,
         is_active: true,
       };
-      if ((form.role === "boutique" || form.role === "usine" || form.role === "mpsl") && form.lieuId) {
+      if ((form.role === "boutique" || form.role === "usine") && form.lieuId) {
         payload.lieu = form.lieuId;
       }
 
@@ -308,9 +308,9 @@ export default function AdminUsersPage() {
                 <option value="mpsl">MPSL</option>
               </select>
             </div>
-            {(form.role === "boutique" || form.role === "usine" || form.role === "mpsl") && (
+            {(form.role === "boutique" || form.role === "usine") && (
               <div className="space-y-2">
-                <Label htmlFor="lieu">{form.role === "boutique" ? "Boutique" : form.role === "usine" ? "Usine" : "Dépôt MPSL"}</Label>
+                <Label htmlFor="lieu">{form.role === "boutique" ? "Boutique" : "Usine"}</Label>
                 <select id="lieu" value={form.lieuId || ""} onChange={handleChange("lieuId")} className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm">
                   <option value="">Sélectionner…</option>
                   {lieux.map((l) => (
@@ -440,9 +440,9 @@ export default function AdminUsersPage() {
                   <option value="mpsl">MPSL</option>
                 </select>
               </div>
-              {(editForm.role === "boutique" || editForm.role === "usine" || editForm.role === "mpsl") && (
+              {(editForm.role === "boutique" || editForm.role === "usine") && (
                 <div className="space-y-1.5">
-                  <Label>{editForm.role === "boutique" ? "Boutique" : editForm.role === "usine" ? "Usine" : "Dépôt MPSL"}</Label>
+                  <Label>{editForm.role === "boutique" ? "Boutique" : "Usine"}</Label>
                   <select
                     value={editForm.lieuId}
                     onChange={(e) => setEditForm((prev) => ({ ...prev, lieuId: e.target.value ? Number(e.target.value) : "" }))}

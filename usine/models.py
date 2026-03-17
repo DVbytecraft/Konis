@@ -55,7 +55,7 @@ class TransfertCession(models.Model):
     poids_total = models.DecimalField(
         max_digits=12, decimal_places=2, default=0, verbose_name="Poids total transféré"
     )
-    prix_par_sac = models.DecimalField(max_digits=12, decimal_places=2, verbose_name="Prix de vente par sac")
+    prix_par_sac = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name="Prix de vente par sac")
     transfert = models.ForeignKey(
         Transfert, on_delete=models.SET_NULL, null=True, blank=True, related_name="cessions"
     )
