@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/auth-context";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { Button } from "@/components/ui/button";
-import { LayoutDashboard, Store, Calculator, LogOut, Users, Package, Warehouse, Receipt, BarChart3, ClipboardList, Wheat, Tag, Truck, TrendingUp, TrendingDown, Banknote, FolderKanban, Landmark, CreditCard, HandCoins, Building2 } from "lucide-react";
+import { LayoutDashboard, Store, Calculator, LogOut, Users, Package, Warehouse, Receipt, BarChart3, ClipboardList, Wheat, Tag, Truck, TrendingUp, TrendingDown, Banknote, FolderKanban, Landmark, CreditCard, Building2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navByRole: Record<string, { href: string; label: string; icon: React.ComponentType<{ className?: string }> }[]> = {
