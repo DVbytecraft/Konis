@@ -7,6 +7,7 @@ export default function BoutiqueMouturePage() {
     <MoutureConsole
       submitPath="/boutique/mouture-seule/"
       historyPath="/boutique/mouture-seule/"
+      statsPath="/boutique/mouture-stats/"
       roleGuard="boutique"
       lieuLabel="Boutique"
     />

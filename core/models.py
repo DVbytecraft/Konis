@@ -81,6 +81,18 @@ class Lieu(models.Model):
         default=True,
         help_text="Ce lieu propose-t-il le service de mouture (broyage de grain) ?"
     )
+    prix_mouture_defaut = models.DecimalField(
+        max_digits=10, decimal_places=2,
+        null=True, blank=True,
+        verbose_name="Prix mouture par défaut (FCFA/kg)",
+        help_text="Pré-rempli automatiquement dans le formulaire de saisie.",
+    )
+    prix_mouture_max = models.DecimalField(
+        max_digits=10, decimal_places=2,
+        null=True, blank=True,
+        verbose_name="Prix mouture maximum autorisé (FCFA/kg)",
+        help_text="Si défini, tout prix supérieur est refusé sans autorisation admin.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

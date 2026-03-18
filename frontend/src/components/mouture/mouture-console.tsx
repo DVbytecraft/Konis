@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
-import { Calculator, Printer, RotateCcw, Wheat } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, Calculator, Printer, RotateCcw, Wheat } from "lucide-react";
 
 import { Ticket58mm } from "@/components/caisse/ticket-58mm";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,9 @@ import { openTicketPrintWindow } from "@/lib/print";
 
 type Unite = "kg" | "tonne" | "sac";
 type Numeric = number | string;
+
+// Seuil au-delà duquel une alerte visuelle est affichée (en unités saisies)
+const SEUIL_ALERTE = 1000;
 
 interface TicketMouture {
   id: number;
@@ -30,6 +33,14 @@ interface TicketMouture {
   produit_apporte?: string;
 }
 
+interface MoutureStats {
+  aujourd_hui: { nb_tickets: number; cout_total: string; kg_apportee: string };
+  "7_jours": { nb_tickets: number; cout_total: string; kg_apportee: string };
+  "30_jours": { nb_tickets: number; cout_total: string; kg_apportee: string };
+  prix_defaut: string | null;
+  prix_max: string | null;
+}
+
 interface PaginatedResponse<T> {
   count: number;
   next: string | null;
@@ -40,6 +51,7 @@ interface PaginatedResponse<T> {
 interface MoutureConsoleProps {
   submitPath: "/boutique/mouture-seule/" | "/factory/mouture-seule/";
   historyPath: "/boutique/mouture-seule/" | "/factory/mouture-seule/";
+  statsPath?: "/boutique/mouture-stats/";
   roleGuard: "boutique" | "usine";
   lieuLabel: "Boutique" | "Usine";
 }
@@ -65,14 +77,15 @@ function buildIdempotencyKey(scope: "boutique" | "usine"): string {
 export function MoutureConsole({
   submitPath,
   historyPath,
+  statsPath,
   roleGuard,
   lieuLabel,
 }: MoutureConsoleProps) {
   const { user } = useAuth();
 
   const [produitApporte, setProduitApporte] = useState("");
-  const [qteApportee, setQteApportee] = useState("");   // grain du client
-  const [qteAchetee, setQteAchetee] = useState("");     // grain acheté / supplémentaire
+  const [qteApportee, setQteApportee] = useState("");
+  const [qteAchetee, setQteAchetee] = useState("");
   const [unite, setUnite] = useState<Unite>("kg");
   const [prixParKg, setPrixParKg] = useState("");
   const [saving, setSaving] = useState(false);
@@ -80,10 +93,8 @@ export function MoutureConsole({
   const [createdTicket, setCreatedTicket] = useState<TicketMouture | null>(null);
   const [selectedTicket, setSelectedTicket] = useState<TicketMouture | null>(null);
 
-  // Keep local copies of apportee/achetee for print (before API response)
   const lastApporteeRef = useRef<number>(0);
   const lastAcheteeRef = useRef<number>(0);
-
   const apporteeRef = useRef<HTMLInputElement>(null);
   const submitLockRef = useRef(false);
 
@@ -92,7 +103,24 @@ export function MoutureConsole({
     useFetch<PaginatedResponse<TicketMouture>>(historyUrl);
   const historyTickets = data?.results ?? [];
 
-  // Auto-compute total and cost (frontend preview only — backend is the truth)
+  // Stats dashboard (boutique uniquement)
+  const { data: statsData, refetch: refetchStats } =
+    useFetch<MoutureStats>(statsPath ?? null);
+
+  // Pré-remplir le prix depuis le défaut configuré sur le lieu
+  useEffect(() => {
+    const defaut = user?.lieu?.prix_mouture_defaut;
+    if (defaut && !prixParKg) {
+      setPrixParKg(String(defaut));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.lieu?.prix_mouture_defaut]);
+
+  const prixMax = user?.lieu?.prix_mouture_max
+    ? Number(user.lieu.prix_mouture_max)
+    : null;
+
+  // Preview calcul
   const { totalQte, coutMouture } = useMemo(() => {
     const a = Number.parseFloat(qteApportee) || 0;
     const b = Number.parseFloat(qteAchetee) || 0;
@@ -101,9 +129,14 @@ export function MoutureConsole({
     if (total <= 0 || p < 0 || !Number.isFinite(total) || !Number.isFinite(p)) {
       return { totalQte: null, coutMouture: null };
     }
-    // Note: this preview uses raw units; backend normalises to kg for the real cost
-    return { totalQte: total, coutMouture: (total * p) };
+    return { totalQte: total, coutMouture: total * p };
   }, [qteApportee, qteAchetee, prixParKg]);
+
+  const depasseSeuil = totalQte !== null && totalQte > SEUIL_ALERTE;
+  const depassePrixMax =
+    prixMax !== null &&
+    Number.parseFloat(prixParKg) > prixMax &&
+    prixParKg !== "";
 
   const imprimerTicket = useCallback(
     (ticket: TicketMouture, apporteeKg: number, acheteeKg: number) => {
@@ -132,11 +165,13 @@ export function MoutureConsole({
     setQteApportee("");
     setQteAchetee("");
     setUnite("kg");
-    setPrixParKg("");
+    // Conserver le prix configuré lors du reset
+    const defaut = user?.lieu?.prix_mouture_defaut;
+    setPrixParKg(defaut ? String(defaut) : "");
     setError("");
     setCreatedTicket(null);
     setTimeout(() => apporteeRef.current?.focus(), 50);
-  }, []);
+  }, [user?.lieu?.prix_mouture_defaut]);
 
   const submit = useCallback(async () => {
     if (submitLockRef.current) return;
@@ -146,6 +181,7 @@ export function MoutureConsole({
     const b = Number.parseFloat(qteAchetee) || 0;
     const p = Number.parseFloat(prixParKg);
 
+    // Validations strictes
     if (a < 0 || b < 0 || (a === 0 && b === 0)) {
       setError("Saisir au moins une quantité (apportée ou achetée) supérieure à 0.");
       return;
@@ -153,6 +189,31 @@ export function MoutureConsole({
     if (!prixParKg || !Number.isFinite(p) || p < 0) {
       setError("Saisir un prix par kg valide (≥ 0).");
       return;
+    }
+    if (depassePrixMax) {
+      setError(
+        `Prix ${p} FCFA/kg dépasse le plafond autorisé (${prixMax} FCFA/kg). Contactez l'administrateur.`,
+      );
+      return;
+    }
+
+    // Confirmation si quantité élevée
+    if (a + b > SEUIL_ALERTE) {
+      const ok = window.confirm(
+        `Attention : quantité élevée (${fmt(a + b, 3)} ${unite}).\n` +
+          `Coût estimé : ${fmt((a + b) * p)} FCFA\n\n` +
+          `Confirmer l'opération ?`,
+      );
+      if (!ok) return;
+    } else {
+      // Confirmation standard
+      const ok = window.confirm(
+        `Confirmer la mouture ?\n` +
+          `Grain : ${produitApporte || "—"}\n` +
+          `Total : ${fmt(a + b, 3)} ${unite} × ${p} FCFA/kg\n` +
+          `= ${fmt((a + b) * p)} FCFA`,
+      );
+      if (!ok) return;
     }
 
     lastApporteeRef.current = a;
@@ -174,13 +235,14 @@ export function MoutureConsole({
       });
       setCreatedTicket(response);
       refetch();
+      refetchStats?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erreur lors de l'enregistrement.");
     } finally {
       setSaving(false);
       submitLockRef.current = false;
     }
-  }, [prixParKg, produitApporte, qteApportee, qteAchetee, refetch, roleGuard, submitPath, unite]);
+  }, [depassePrixMax, prixMax, prixParKg, produitApporte, qteApportee, qteAchetee, refetch, refetchStats, roleGuard, submitPath, unite]);
 
   // ── Access guards ──────────────────────────────────────────────────────────
   if (roleGuard === "boutique" && user?.role !== "boutique") {
@@ -229,6 +291,37 @@ export function MoutureConsole({
         </div>
       </div>
 
+      {/* ── Dashboard Stats ── */}
+      {statsData && (
+        <div className="grid grid-cols-3 gap-3">
+          {(
+            [
+              { label: "Aujourd'hui", key: "aujourd_hui" },
+              { label: "7 jours", key: "7_jours" },
+              { label: "30 jours", key: "30_jours" },
+            ] as const
+          ).map(({ label, key }) => {
+            const s = statsData[key];
+            return (
+              <Card key={key} className="bg-muted/20">
+                <CardContent className="py-3 px-4 space-y-0.5">
+                  <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">
+                    {label}
+                  </p>
+                  <p className="text-lg font-bold tabular-nums">
+                    {fmt(Number(s.cout_total))} FCFA
+                  </p>
+                  <p className="text-xs text-muted-foreground tabular-nums">
+                    {s.nb_tickets} ticket{s.nb_tickets !== 1 ? "s" : ""} ·{" "}
+                    {fmt(Number(s.kg_apportee), 1)} kg apportés
+                  </p>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* ── Saisie ── */}
         <Card>
@@ -236,6 +329,11 @@ export function MoutureConsole({
             <CardTitle className="text-base flex items-center gap-2">
               <Calculator className="h-4 w-4" />
               Saisie de la mouture
+              {prixMax !== null && (
+                <span className="ml-auto text-xs font-normal text-muted-foreground">
+                  Plafond : {fmt(prixMax)} FCFA/kg
+                </span>
+              )}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -279,7 +377,7 @@ export function MoutureConsole({
               <p className="text-xs text-muted-foreground">{UNITE_LABELS[unite]}</p>
             </div>
 
-            {/* Quantités — 2 champs séparés */}
+            {/* Quantités */}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <label className="text-sm font-medium">
@@ -315,7 +413,17 @@ export function MoutureConsole({
               </div>
             </div>
 
-            {/* Total à moudre — lecture seule */}
+            {/* Alerte quantité élevée */}
+            {depasseSeuil && (
+              <div className="flex items-start gap-2 text-sm text-amber-700 bg-amber-50 dark:bg-amber-950/30 dark:text-amber-400 border border-amber-200 dark:border-amber-800 rounded-md px-3 py-2">
+                <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+                <span>
+                  Quantité élevée ({fmt(totalQte!, 3)} {unite}). Vérifiez avant de valider.
+                </span>
+              </div>
+            )}
+
+            {/* Total à moudre */}
             {totalQte !== null && totalQte > 0 && (
               <div className="flex items-center justify-between rounded-md border border-dashed px-3 py-2 text-sm bg-muted/30">
                 <span className="text-muted-foreground">Total à moudre</span>
@@ -335,11 +443,17 @@ export function MoutureConsole({
                 placeholder="Ex: 200 FCFA/kg"
                 value={prixParKg}
                 onChange={(e) => setPrixParKg(e.target.value)}
-                className="h-10"
+                className={`h-10 ${depassePrixMax ? "border-destructive ring-1 ring-destructive" : ""}`}
               />
-              <p className="text-xs text-muted-foreground">
-                Toutes unités normalisées en kg avant calcul.
-              </p>
+              {depassePrixMax ? (
+                <p className="text-xs text-destructive">
+                  Dépasse le plafond autorisé ({fmt(prixMax!)} FCFA/kg)
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Toutes unités normalisées en kg avant calcul.
+                </p>
+              )}
             </div>
 
             {/* Preview coût */}
@@ -367,6 +481,7 @@ export function MoutureConsole({
               onClick={submit}
               disabled={
                 saving ||
+                depassePrixMax ||
                 ((!qteApportee || Number.parseFloat(qteApportee) <= 0) &&
                   (!qteAchetee || Number.parseFloat(qteAchetee) <= 0)) ||
                 !prixParKg

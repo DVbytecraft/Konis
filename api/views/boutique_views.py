@@ -7,10 +7,12 @@ Règles d'accès :
   - Stock : lecture seule pour boutique (alimentation via cessions usine uniquement)
   - Ventes : création + lecture pour boutique et admin
 """
+from datetime import timedelta
 from decimal import Decimal
 
 from django.db import transaction
-from django.db.models import Count
+from django.db.models import Count, Sum
+from django.utils import timezone
 
 from rest_framework import status
 from rest_framework.pagination import PageNumberPagination
@@ -185,6 +187,18 @@ class VenteBoutiqueViewSet(ModelViewSet):
         mouture = ser.validated_data.get("mouture", False)
         prix_mouture_kg = ser.validated_data.get("prix_mouture_kg")
 
+        # ── Garde-fou prix mouture ──────────────────────────────────────────
+        if mouture and prix_mouture_kg and lieu.prix_mouture_max and prix_mouture_kg > lieu.prix_mouture_max:
+            return Response(
+                {
+                    "detail": (
+                        f"Prix mouture {prix_mouture_kg} FCFA/kg dépasse le plafond autorisé "
+                        f"({lieu.prix_mouture_max} FCFA/kg). Contactez l'administrateur."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         # Grain apporté par le client — normaliser en kg
         quantite_apportee_client_kg = Decimal("0")
         if mouture:
@@ -221,6 +235,13 @@ class VenteBoutiqueViewSet(ModelViewSet):
         except ErreurStock as e:
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
+        mouture_extra = {}
+        if mouture:
+            mouture_extra = {
+                "prix_mouture_kg": str(prix_mouture_kg) if prix_mouture_kg else None,
+                "quantite_apportee_client_kg": str(quantite_apportee_client_kg),
+                "cout_mouture": str(ticket.cout_mouture),
+            }
         audit_log(
             user=request.user,
             action="vente_creée",
@@ -231,6 +252,8 @@ class VenteBoutiqueViewSet(ModelViewSet):
                 "lieu_id": lieu.pk,
                 "mouture": mouture,
                 "montant_total": str(ticket.montant_total),
+                "operateur": request.user.username,
+                **mouture_extra,
             },
         )
         return Response(TicketSerializer(ticket).data, status=status.HTTP_201_CREATED)
@@ -301,6 +324,19 @@ class MoutureSeuleView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # ── Garde-fou prix ──────────────────────────────────────────────────
+        prix_par_kg = ser.validated_data["prix_par_kg"]
+        if lieu.prix_mouture_max and prix_par_kg > lieu.prix_mouture_max:
+            return Response(
+                {
+                    "detail": (
+                        f"Prix {prix_par_kg} FCFA/kg dépasse le plafond autorisé "
+                        f"({lieu.prix_mouture_max} FCFA/kg). Contactez l'administrateur."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         produit_nom = ser.validated_data.get("produit_nom", "")
         produit_ref = None
         produit_id = ser.validated_data.get("produit_id")
@@ -321,7 +357,7 @@ class MoutureSeuleView(APIView):
                 quantite_apportee=ser.validated_data["quantite_apportee"],
                 quantite_achetee=ser.validated_data["quantite_achetee"],
                 unite=ser.validated_data["unite"],
-                prix_par_kg=ser.validated_data["prix_par_kg"],
+                prix_par_kg=prix_par_kg,
                 produit_apporte=produit_nom,
                 produit_ref=produit_ref,
                 idempotency_key=idempotency_key,
@@ -335,7 +371,17 @@ class MoutureSeuleView(APIView):
                 action="mouture_seule_créée",
                 object_type="ticket",
                 object_id=ticket.pk,
-                extra={"numero": ticket.numero, "montant_total": str(ticket.montant_total)},
+                extra={
+                    "numero": ticket.numero,
+                    "montant_total": str(ticket.montant_total),
+                    "prix_par_kg": str(prix_par_kg),
+                    "quantite_apportee": str(ser.validated_data.get("quantite_apportee", 0)),
+                    "quantite_achetee": str(ser.validated_data.get("quantite_achetee", 0)),
+                    "unite": ser.validated_data.get("unite", "kg"),
+                    "produit_apporte": produit_nom,
+                    "lieu_id": lieu.pk,
+                    "operateur": request.user.username,
+                },
             )
         else:
             audit_log(
@@ -343,7 +389,11 @@ class MoutureSeuleView(APIView):
                 action="mouture_seule_rejouee",
                 object_type="ticket",
                 object_id=ticket.pk,
-                extra={"numero": ticket.numero, "idempotency_key": idempotency_key},
+                extra={
+                    "numero": ticket.numero,
+                    "idempotency_key": idempotency_key,
+                    "operateur": request.user.username,
+                },
             )
 
         return Response(
@@ -389,3 +439,43 @@ class TicketReprintView(APIView):
             extra={"numero": ticket.numero, "lieu_id": lieu.pk},
         )
         return Response(TicketSerializer(ticket).data, status=status.HTTP_200_OK)
+
+
+class MoutureStatsView(APIView):
+    """
+    GET /api/boutique/mouture-stats/
+    Statistiques mouture du lieu : aujourd'hui, 7 jours, 30 jours.
+    Inclut aussi les config prix (défaut et plafond).
+    """
+    permission_classes = [IsAuthenticated, IsBoutiqueRole | IsAdminRole]
+
+    def get(self, request):
+        lieu = get_lieu_boutique(request)
+        if not lieu:
+            return Response({"detail": "Lieu requis."}, status=status.HTTP_400_BAD_REQUEST)
+
+        today = timezone.now().date()
+
+        def _stats(debut, fin):
+            qs = Ticket.objects.filter(
+                lieu=lieu, mouture=True,
+                date__date__gte=debut, date__date__lte=fin,
+            )
+            agg = qs.aggregate(
+                nb_tickets=Count("id"),
+                cout_total=Sum("cout_mouture"),
+                kg_apportee=Sum("quantite_apportee_client"),
+            )
+            return {
+                "nb_tickets": agg["nb_tickets"] or 0,
+                "cout_total": str(agg["cout_total"] or "0.00"),
+                "kg_apportee": str(agg["kg_apportee"] or "0.000"),
+            }
+
+        return Response({
+            "aujourd_hui": _stats(today, today),
+            "7_jours": _stats(today - timedelta(days=6), today),
+            "30_jours": _stats(today - timedelta(days=29), today),
+            "prix_defaut": str(lieu.prix_mouture_defaut) if lieu.prix_mouture_defaut else None,
+            "prix_max": str(lieu.prix_mouture_max) if lieu.prix_mouture_max else None,
+        })

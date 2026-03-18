@@ -21,6 +21,8 @@ export const userSchema = z.object({
       nom: z.string(),
       type_lieu: z.string(),
       mouture_enabled: z.boolean().optional(),
+      prix_mouture_defaut: z.union([z.string(), z.number()]).nullable().optional(),
+      prix_mouture_max: z.union([z.string(), z.number()]).nullable().optional(),
     })
     .nullable()
     .optional(),

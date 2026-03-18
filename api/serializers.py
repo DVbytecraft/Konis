@@ -21,7 +21,8 @@ class LieuMinimalSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Lieu
-        fields = ("id", "nom", "type_lieu", "type_lieu_display", "mouture_enabled")
+        fields = ("id", "nom", "type_lieu", "type_lieu_display", "mouture_enabled",
+                  "prix_mouture_defaut", "prix_mouture_max")
 
 
 class EntrepriseSerializer(serializers.ModelSerializer):
