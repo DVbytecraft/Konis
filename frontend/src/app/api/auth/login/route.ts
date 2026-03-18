@@ -33,16 +33,24 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-    const backendRes = await fetch(`${BACKEND_URL}/api/auth/login/`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        // Secret partagé Django↔Next.js — vérifié côté Django via INTERNAL_API_SECRET
-        // Fail-fast si absent : une chaîne vide désactiverait silencieusement l'authentification proxy.
-        "X-Proxy": process.env.INTERNAL_API_SECRET ?? (() => { throw new Error("INTERNAL_API_SECRET non configuré"); })(),
-      },
-      body: JSON.stringify({ username, password }),
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15_000);
+    let backendRes: Response;
+    try {
+      backendRes = await fetch(`${BACKEND_URL}/api/auth/login/`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          // Secret partagé Django↔Next.js — vérifié côté Django via INTERNAL_API_SECRET
+          // Fail-fast si absent : une chaîne vide désactiverait silencieusement l'authentification proxy.
+          "X-Proxy": process.env.INTERNAL_API_SECRET ?? (() => { throw new Error("INTERNAL_API_SECRET non configuré"); })(),
+        },
+        body: JSON.stringify({ username, password }),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
     const data = await backendRes.json().catch(() => ({}));
     if (!backendRes.ok) {
       return NextResponse.json(
