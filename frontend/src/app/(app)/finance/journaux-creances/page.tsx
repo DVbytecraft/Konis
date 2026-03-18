@@ -43,7 +43,7 @@ function toList<T>(data: Paginated<T> | T[]): T[] {
 
 function StatutBadge({ statut, label }: { statut: string; label: string }) {
   const cls =
-    statut === "ouvert" ? "bg-yellow-100 text-yellow-800" :
+    statut === "en_cours" ? "bg-yellow-100 text-yellow-800" :
     statut === "solde" ? "bg-green-100 text-green-800" :
     statut === "en_retard" ? "bg-red-100 text-red-800" :
     "bg-gray-100 text-gray-600";
@@ -351,7 +351,7 @@ export default function JournauxCreancesPage() {
                         </div>
                       )}
 
-                      {j.statut === "ouvert" && (
+                      {j.statut === "en_cours" && (
                         <div className="flex flex-wrap gap-2">
                           <Button size="sm" className="h-8 text-xs" onClick={() => openPaiement(j)}>
                             Enregistrer un encaissement
