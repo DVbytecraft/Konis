@@ -3,7 +3,21 @@
     "allow": [
       "Bash(DATABASE_URL=postgres://konis_user:konis_password@localhost:5433/konis_db python manage.py:*)",
       "Bash(DATABASE_URL=postgres://konis_user:konis_password@localhost:5433/konis_db DJANGO_SETTINGS_MODULE=konis.settings.prod DJANGO_SECRET_KEY=abcdefghijklmnopqrstuvwxyz0123456789abcdefghij01234 DJANGO_ALLOWED_HOSTS=konis.example.com python manage.py check:*)",
-      "Bash(find /c/Users/RAPHAEL/Pictures/\"konis \\(1\\)\"/konis -type f -name \"*.py\")"
+      "Bash(find /c/Users/RAPHAEL/Pictures/\"konis \\(1\\)\"/konis -type f -name \"*.py\")",
+      "Bash(tail -20 \"c:/Users/RAPHAEL/Pictures/konis \\(1\\)/konis/api/serializers.py\")",
+      "Bash(python manage.py check --settings=konis.settings.dev)",
+      "Bash(python manage.py migrate --settings=konis.settings.dev)",
+      "Bash(find \"c:/Users/RAPHAEL/Pictures/konis \\(1\\)/konis\" -name \"models.py\" -type f)",
+      "Bash(find \"c:/Users/RAPHAEL/Pictures/konis \\(1\\)/konis/api/views\" -name \"*.py\" -type f)",
+      "Bash(find \"c:/Users/RAPHAEL/Pictures/konis \\(1\\)/konis\" -path \"*/migrations/*.py\" -name \"[0-9]*.py\")",
+      "Bash(head -100 \"c:/Users/RAPHAEL/Pictures/konis \\(1\\)/konis/api/views/admin_views.py\")",
+      "Bash(head -50 \"c:/Users/RAPHAEL/Pictures/konis \\(1\\)/konis/api/views/comptable_views.py\")",
+      "Bash(wc -l \"c:/Users/RAPHAEL/Pictures/konis \\(1\\)/konis/api/serializers.py\")",
+      "Bash(find \"c:/Users/RAPHAEL/Pictures/konis \\(1\\)/konis\" -name \"*.py\" -type f)",
+      "Read(//c/Users/RAPHAEL/Pictures/**)",
+      "Bash(find \"konis \\(1\\)/konis\" -name \"*.py\" -type f)",
+      "Bash(grep -o \"class [A-Z][A-Za-z]*ViewSet\\\\|class [A-Z][A-Za-z]*View\" \"konis \\(1\\)/konis/api/views/\"*.py)",
+      "Bash(ls \"c:/Users/RAPHAEL/Pictures/konis \\(1\\)/konis/api/views/\")"
     ]
   }
 }
