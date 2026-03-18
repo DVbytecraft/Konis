@@ -254,30 +254,11 @@ export default function FacturesPage() {
     URL.revokeObjectURL(url);
   }, [fetchInvoicePdfBlob]);
 
-  const printInvoice = useCallback(async (factureId: number) => {
-    try {
-      const blob = await fetchInvoicePdfBlob(factureId, false);
-      const pdfUrl = URL.createObjectURL(blob);
-      const popup = window.open(pdfUrl, "_blank");
-      if (!popup) {
-        window.open(pdfUrl, "_blank");
-        return;
-      }
-      const interval = window.setInterval(() => {
-        try {
-          if (popup.document && popup.document.readyState === "complete") {
-            popup.focus();
-            popup.print();
-            window.clearInterval(interval);
-          }
-        } catch {
-          // Ignore cross-origin access errors while the PDF loads.
-        }
-      }, 300);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Erreur lors de l'impression du PDF.");
-    }
-  }, [fetchInvoicePdfBlob]);
+  const printInvoice = useCallback((facture: FactureItem) => {
+    setSelected(facture);
+    // Laisse le temps au DOM de rendre la modale avant d'imprimer
+    setTimeout(() => window.print(), 150);
+  }, []);
 
   return (
     <div className="space-y-6 min-w-0">
@@ -400,7 +381,7 @@ export default function FacturesPage() {
                       <Button size="sm" variant="outline" type="button" onClick={() => setSelected(f)}>
                         Voir
                       </Button>
-                      <Button size="sm" type="button" onClick={() => printInvoice(f.id)}>
+                      <Button size="sm" type="button" onClick={() => printInvoice(f)}>
                         Imprimer facture
                       </Button>
                       <Button size="sm" type="button" variant="outline" onClick={() => downloadInvoice(f.id)}>PDF</Button>
@@ -455,7 +436,7 @@ export default function FacturesPage() {
           </div>
 
           <div className="print:hidden absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2">
-            <Button type="button" onClick={() => printInvoice(selected.id)}>Imprimer A4</Button>
+            <Button type="button" onClick={() => window.print()}>Imprimer A4</Button>
             <Button type="button" variant="outline" onClick={() => downloadInvoice(selected.id)}>Télécharger PDF</Button>
             <Button type="button" variant="outline" onClick={() => setSelected(null)}>Fermer</Button>
           </div>
