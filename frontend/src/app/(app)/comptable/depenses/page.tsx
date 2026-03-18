@@ -270,7 +270,7 @@ export default function ComptableDepensesPage() {
     }
   };
 
-  if (user?.role !== "comptable" && user?.role !== "admin") {
+  if (user?.role !== "comptable" && user?.role !== "admin" && user?.role !== "supreme_admin" && user?.role !== "daf") {
     return (
       <div className="space-y-4">
         <h1 className="text-2xl font-semibold tracking-tight">Dépenses</h1>

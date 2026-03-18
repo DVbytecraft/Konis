@@ -93,7 +93,7 @@ export default function FacturesPage() {
     { produit: "", description: "", quantite: "1", prix_unitaire: "0" },
   ]);
 
-  const canChooseLieu = user?.role === "admin" || user?.role === "comptable";
+  const canChooseLieu = user?.role === "admin" || user?.role === "supreme_admin" || user?.role === "comptable" || user?.role === "daf";
 
   const toProductArray = useCallback((payload: ProductPayload): ProductItem[] => {
     if (Array.isArray(payload)) return payload;
@@ -134,7 +134,7 @@ export default function FacturesPage() {
       } else if (user?.role === "factory" || user?.role === "usine") {
         reqs.push(apiFetch("/factory/raw-materials/catalog/"));
         reqs.push(apiFetch("/factory/finished-products/catalog/"));
-      } else if (user?.role === "admin") {
+      } else if (user?.role === "admin" || user?.role === "supreme_admin") {
         reqs.push(apiFetch("/admin/produits/"));
       }
 

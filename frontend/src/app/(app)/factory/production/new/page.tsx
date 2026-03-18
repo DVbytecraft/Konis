@@ -35,7 +35,7 @@ export default function FactoryProductionNewPage() {
   const [savingProduct, setSavingProduct] = useState(false);
   const [err, setErr] = useState("");
 
-  const isAdmin = user?.role === "admin";
+  const isAdmin = user?.role === "admin" || user?.role === "supreme_admin";
 
   const loadProducts = async () => {
     const res = await apiFetch("/factory/finished-products/catalog/");

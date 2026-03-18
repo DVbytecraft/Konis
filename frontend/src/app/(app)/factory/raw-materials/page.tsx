@@ -48,7 +48,7 @@ export default function FactoryAchatsPage() {
   const [err, setErr] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const isAdmin = user?.role === "admin";
+  const isAdmin = user?.role === "admin" || user?.role === "supreme_admin";
 
   const loadFactories = async () => {
     try {

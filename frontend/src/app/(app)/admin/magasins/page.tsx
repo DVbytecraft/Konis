@@ -184,7 +184,7 @@ export default function AdminMagasinsPage() {
     }
   };
 
-  if (user?.role !== "admin") {
+  if (user?.role !== "admin" && user?.role !== "supreme_admin") {
     return (
       <div className="space-y-4">
         <h1 className="text-2xl font-semibold tracking-tight">Magasins</h1>
