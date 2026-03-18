@@ -38,6 +38,7 @@ export default function RootLayout({
     <html lang="fr" className="overflow-x-hidden">
       <head>
         <meta charSet="utf-8" />
+        <meta name="mobile-web-app-capable" content="yes" />
         <link rel="apple-touch-icon" href="/icons/icon-192.png" />
       </head>
       <body
