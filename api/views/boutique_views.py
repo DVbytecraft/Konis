@@ -227,16 +227,25 @@ class VenteBoutiqueViewSet(ModelViewSet):
                 except ErreurStock as e:
                     return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
+        idempotency_key = (request.headers.get("Idempotency-Key") or "").strip()[:128] or None
+
         try:
-            ticket = vente_boutique(
+            ticket, created = vente_boutique(
                 lieu,
                 lignes,
                 mouture=mouture,
                 prix_mouture_kg=prix_mouture_kg,
                 quantite_apportee_client_kg=quantite_apportee_client_kg,
+                idempotency_key=idempotency_key,
             )
         except ErreurStock as e:
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not created:
+            return Response(
+                TicketSerializer(ticket).data,
+                status=status.HTTP_200_OK,
+            )
 
         mouture_extra = {}
         if mouture:
@@ -555,6 +564,15 @@ class MoutureExportView(APIView):
         elif source in {"vente", "vente_avec_mouture"}:
             qs = qs.filter(lignes_count__gt=0)
 
+        audit_log(
+            user=request.user,
+            action="mouture_export_csv",
+            object_type="lieu",
+            object_id=lieu.pk,
+            extra={"lieu": lieu.nom, "debut": str(debut), "fin": str(fin), "source": source},
+            request=request,
+        )
+
         filename = f"mouture_{lieu.nom.replace(' ', '_')}_{debut}_{fin}.csv"
         response = HttpResponse(content_type="text/csv; charset=utf-8")
         response["Content-Disposition"] = f'attachment; filename="{filename}"'
@@ -774,6 +792,16 @@ class MouturePdfExportView(APIView):
 
         doc.build(story)
         buf.seek(0)
+
+        audit_log(
+            user=request.user,
+            action="mouture_export_pdf",
+            object_type="lieu",
+            object_id=lieu.pk,
+            extra={"lieu": lieu.nom, "debut": str(debut), "fin": str(fin), "source": source, "nb_tickets": len(tickets)},
+            request=request,
+        )
+
         fname = f"mouture_{lieu.nom.replace(' ', '_')}_{debut}_{fin}.pdf"
         response = HttpResponse(buf.read(), content_type="application/pdf")
         response["Content-Disposition"] = f'attachment; filename="{fname}"'

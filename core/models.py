@@ -142,6 +142,14 @@ class CustomUser(AbstractUser):
         blank=True,
         help_text="Pour rôle boutique : le magasin lié à ce compte.",
     )
+    tokens_revoked_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=(
+            "Si renseigné, tout token JWT émis AVANT cette date est invalidé. "
+            "Mis à jour automatiquement lors d'un changement de mot de passe ou d'une désactivation."
+        ),
+    )
 
     class Meta:
         verbose_name = "Utilisateur"

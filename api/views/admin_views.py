@@ -6,6 +6,7 @@ from django.conf import settings
 from django.contrib.auth.models import Group
 from django.core.cache import cache
 from django.db import transaction
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -398,11 +399,24 @@ class UserViewSet(ModelViewSet):
 
     def perform_update(self, serializer):
         old_role = serializer.instance.role
+        old_is_active = serializer.instance.is_active
+        old_password = serializer.instance.password
         user = serializer.save()
         extra = {"user_id": user.pk}
         if old_role != user.role:
             extra["role_before"] = old_role
             extra["role_after"] = user.role
+        # Révocation immédiate des tokens si mot de passe changé ou compte désactivé
+        revoke = False
+        if user.password != old_password:
+            extra["password_changed"] = True
+            revoke = True
+        if not user.is_active and old_is_active:
+            extra["deactivated"] = True
+            revoke = True
+        if revoke:
+            user.tokens_revoked_at = timezone.now()
+            user.save(update_fields=["tokens_revoked_at"])
         audit_log(
             user=self.request.user,
             action="user_updated",

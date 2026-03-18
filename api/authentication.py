@@ -72,6 +72,27 @@ class JWTCookieAuthentication(JWTAuthentication):
         self._check_revocation_epoch(validated)
         return validated
 
+    def get_user(self, validated_token):
+        """
+        Récupère l'utilisateur et applique deux vérifications supplémentaires :
+        1. is_active=False → rejet immédiat (désactivation effective sans attendre l'expiration)
+        2. tokens_revoked_at → rejet si le token a été émis avant la révocation individuelle
+           (changement de mot de passe, désactivation manuelle)
+        """
+        user = super().get_user(validated_token)
+        if not user.is_active:
+            raise InvalidToken("Compte désactivé. Contactez votre administrateur.")
+        if user.tokens_revoked_at is not None:
+            iat = validated_token.payload.get("iat")
+            if iat is not None:
+                token_issued_at = datetime.fromtimestamp(iat, tz=dt_timezone.utc)
+                if token_issued_at <= user.tokens_revoked_at:
+                    raise InvalidToken(
+                        "Session révoquée suite à un changement de sécurité. "
+                        "Veuillez vous reconnecter."
+                    )
+        return user
+
     # ── CSRF enforcement ──────────────────────────────────────────────────────
 
     def _enforce_csrf(self, request):

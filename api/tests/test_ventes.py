@@ -84,7 +84,7 @@ class VenteBoutiqueTests(APITestCase):
 
     def test_ticket_numero_auto_non_null(self):
         """Le numéro de ticket est généré automatiquement et n'est jamais null."""
-        t = vente_boutique(self.lieu, [(self.produit, Decimal("1"), Decimal("100"))])
+        t, _ = vente_boutique(self.lieu, [(self.produit, Decimal("1"), Decimal("100"))])
         self.assertIsNotNone(t.numero)
         self.assertTrue(len(t.numero) > 0)
         t.refresh_from_db()
@@ -92,11 +92,11 @@ class VenteBoutiqueTests(APITestCase):
 
     def test_ticket_numero_unique_sur_2_ventes(self):
         """2 ventes consécutives produisent 2 numéros de ticket différents."""
-        t1 = vente_boutique(
+        t1, _ = vente_boutique(
             self.lieu,
             [(self.produit, Decimal("1"), Decimal("100"))],
         )
-        t2 = vente_boutique(
+        t2, _ = vente_boutique(
             self.lieu,
             [(self.produit, Decimal("1"), Decimal("100"))],
         )
@@ -108,7 +108,7 @@ class VenteBoutiqueTests(APITestCase):
         """Format KONIS-{CODE}-{YYYYMMDD}-{SEQ:06d}."""
         self.lieu.code = "CENTRE"
         self.lieu.save()
-        t = vente_boutique(self.lieu, [(self.produit, Decimal("1"), Decimal("100"))])
+        t, _ = vente_boutique(self.lieu, [(self.produit, Decimal("1"), Decimal("100"))])
         parts = t.numero.split("-")
         self.assertEqual(parts[0], "KONIS")
         self.assertEqual(parts[1], "CENTRE")

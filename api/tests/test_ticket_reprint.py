@@ -66,7 +66,7 @@ class TestTicketReprint(APITestCase):
         Stock.objects.create(produit=cls.produit, lieu=cls.boutique_a, quantite=Decimal("500"))
 
         # Ticket appartenant à boutique_a
-        cls.ticket = vente_boutique(
+        cls.ticket, _ = vente_boutique(
             cls.boutique_a,
             [(cls.produit, Decimal("10"), Decimal("500"))],
         )
@@ -127,7 +127,7 @@ class TestTicketReprint(APITestCase):
 
     def test_reimpression_ticket_mouture_conserve_total_et_cout(self):
         """Un ticket avec mouture garde exactement les montants persistés."""
-        ticket_mouture = vente_boutique(
+        ticket_mouture, _ = vente_boutique(
             self.boutique_a,
             [(self.produit, Decimal("5"), Decimal("500"))],
             mouture=True,

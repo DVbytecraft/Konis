@@ -43,7 +43,7 @@ class TestVenteBoutique(APITestCase):
 
     def test_vente_simple_cree_ticket_et_ligne(self):
         """Une vente valide crée un Ticket et une LigneVente."""
-        ticket = vente_boutique(
+        ticket, _ = vente_boutique(
             self.boutique,
             [(self.produit_kg, Decimal("10"), Decimal("500"))],
         )
@@ -53,7 +53,7 @@ class TestVenteBoutique(APITestCase):
 
     def test_montant_total_calcule_correctement(self):
         """montant_total = somme(quantite × prix_unitaire)."""
-        ticket = vente_boutique(
+        ticket, _ = vente_boutique(
             self.boutique,
             [
                 (self.produit_kg, Decimal("10"), Decimal("500")),
@@ -95,18 +95,18 @@ class TestVenteBoutique(APITestCase):
 
     def test_numero_ticket_unique_et_format(self):
         """Le numéro de ticket suit le format KONIS-{CODE}-{DATE}-{SEQ:06d}."""
-        ticket = vente_boutique(self.boutique, [(self.produit_kg, Decimal("1"), Decimal("100"))])
+        ticket, _ = vente_boutique(self.boutique, [(self.produit_kg, Decimal("1"), Decimal("100"))])
         self.assertRegex(ticket.numero, r"^KONIS-TEST-\d{8}-\d{6}$")
 
     def test_plusieurs_ventes_meme_jour_numeros_distincts(self):
         """Deux ventes le même jour ont des numéros séquentiels distincts."""
-        t1 = vente_boutique(self.boutique, [(self.produit_kg, Decimal("1"), Decimal("100"))])
-        t2 = vente_boutique(self.boutique, [(self.produit_kg, Decimal("1"), Decimal("100"))])
+        t1, _ = vente_boutique(self.boutique, [(self.produit_kg, Decimal("1"), Decimal("100"))])
+        t2, _ = vente_boutique(self.boutique, [(self.produit_kg, Decimal("1"), Decimal("100"))])
         self.assertNotEqual(t1.numero, t2.numero)
 
     def test_vente_avec_mouture_kg(self):
         """Vente + mouture kg : cout_mouture et montant_total corrects."""
-        ticket = vente_boutique(
+        ticket, _ = vente_boutique(
             self.boutique,
             [(self.produit_kg, Decimal("50"), Decimal("400"))],
             mouture=True,
@@ -120,7 +120,7 @@ class TestVenteBoutique(APITestCase):
 
     def test_vente_sans_mouture_cout_zero(self):
         """Sans mouture, cout_mouture = 0."""
-        ticket = vente_boutique(
+        ticket, _ = vente_boutique(
             self.boutique,
             [(self.produit_kg, Decimal("10"), Decimal("300"))],
         )
@@ -131,7 +131,7 @@ class TestVenteBoutique(APITestCase):
         """Vente mixte kg + sac : mouture calculée sur le total kg normalisé (formule unifiée)."""
         # produit_kg : 10 × kg = 10 kg
         # produit_sac : 3 × 50 kg/sac = 150 kg  →  total = 160 kg × 25 = 4000
-        ticket = vente_boutique(
+        ticket, _ = vente_boutique(
             self.boutique,
             [
                 (self.produit_kg, Decimal("10"), Decimal("500")),

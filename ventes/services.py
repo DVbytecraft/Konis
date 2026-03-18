@@ -137,19 +137,31 @@ def vente_boutique(
     mouture: bool = False,
     prix_mouture_kg: Decimal | None = None,
     quantite_apportee_client_kg: Decimal = Decimal("0"),
-) -> Ticket:
+    idempotency_key: str | None = None,
+) -> tuple[Ticket, bool]:
     """
     Enregistre une vente en boutique (ticket + lignes + mouture optionnelle).
     Transaction atomique. Numéro de ticket généré automatiquement.
     Lève ErreurStock si stock insuffisant.
 
+    Retourne (ticket, created) :
+      created=False si un ticket existant avec la même clé idempotency a été renvoyé.
+
     lignes : liste de (produit, quantite, prix_unitaire)
     mouture : True si le client demande la mouture
     prix_mouture_kg : prix FCFA/kg (toutes unités normalisées en kg avant calcul)
     quantite_apportee_client_kg : grain supplémentaire apporté par le client (déjà en kg)
+    idempotency_key : clé de déduplication (header Idempotency-Key du client)
     """
+    key = (idempotency_key or "").strip() or None
     if lieu.type_lieu != Lieu.TYPE_MAGASIN:
         raise ErreurStock(f"Le lieu {lieu} n'est pas un magasin.")
+
+    # Déduplication : renvoyer le ticket existant sans re-traiter la commande
+    if key:
+        existing = Ticket.objects.filter(lieu=lieu, idempotency_key=key, mouture=mouture).first()
+        if existing is not None:
+            return existing, False
 
     with transaction.atomic():
         # Verrouiller et vérifier les stocks
@@ -187,6 +199,7 @@ def vente_boutique(
                     cout_mouture=cout_mouture,
                     montant_total=montant_total,
                     quantite_apportee_client=quantite_apportee_client_kg if mouture else Decimal("0"),
+                    idempotency_key=key,
                 )
                 break
             except IntegrityError:
@@ -205,7 +218,7 @@ def vente_boutique(
             stock.quantite -= quantite
             stock.save(update_fields=["quantite"])
 
-    return ticket
+    return ticket, True
 
 
 # ── Mouture seule (sans vente de produits) ───────────────────────────────────

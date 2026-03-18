@@ -126,6 +126,13 @@ SIMPLE_JWT = {
 SIMPLE_JWT_COOKIE_ACCESS_NAME = "access_token"
 SIMPLE_JWT_COOKIE_REFRESH_NAME = "refresh_token"
 
+# IPs de proxies de confiance pour l'extraction de l'IP réelle du client.
+# X-Forwarded-For n'est honnoré QUE si REMOTE_ADDR est dans cette liste.
+# En prod : ajouter l'IP du réseau Docker interne (ex: "172.18.0.0/16") via env TRUSTED_PROXIES.
+# Format CSV : "127.0.0.1,172.18.0.2"
+_trusted_raw = os.environ.get("TRUSTED_PROXIES", "127.0.0.1")
+TRUSTED_PROXIES: frozenset[str] = frozenset(ip.strip() for ip in _trusted_raw.split(",") if ip.strip())
+
 # CORS : réglé finement en dev/prod
 CORS_ALLOW_CREDENTIALS = True
 
