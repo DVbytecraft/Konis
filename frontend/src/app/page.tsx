@@ -15,8 +15,12 @@ export default function HomePage() {
       return;
     }
     switch (user.role) {
+      case "supreme_admin":
       case "admin":
         router.replace("/admin");
+        break;
+      case "daf":
+        router.replace("/finance");
         break;
       case "comptable":
         router.replace("/comptable");
