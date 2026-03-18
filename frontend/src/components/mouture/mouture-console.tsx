@@ -33,10 +33,19 @@ interface TicketMouture {
   produit_apporte?: string;
 }
 
+interface StatPeriod {
+  nb_tickets: number;
+  cout_total: string;
+  kg_apportee: string;
+  debut?: string;
+  fin?: string;
+}
+
 interface MoutureStats {
-  aujourd_hui: { nb_tickets: number; cout_total: string; kg_apportee: string };
-  "7_jours": { nb_tickets: number; cout_total: string; kg_apportee: string };
-  "30_jours": { nb_tickets: number; cout_total: string; kg_apportee: string };
+  aujourd_hui: StatPeriod;
+  "7_jours": StatPeriod;
+  "30_jours": StatPeriod;
+  custom?: StatPeriod;
   prix_defaut: string | null;
   prix_max: string | null;
 }
@@ -53,6 +62,7 @@ interface MoutureConsoleProps {
   historyPath: "/boutique/mouture-seule/" | "/factory/mouture-seule/";
   statsPath?: "/boutique/mouture-stats/";
   exportPath?: "/boutique/mouture-export/";
+  pdfPath?: "/boutique/mouture-pdf/";
   roleGuard: "boutique" | "usine";
   lieuLabel: "Boutique" | "Usine";
 }
@@ -80,6 +90,7 @@ export function MoutureConsole({
   historyPath,
   statsPath,
   exportPath,
+  pdfPath,
   roleGuard,
   lieuLabel,
 }: MoutureConsoleProps) {
@@ -100,14 +111,54 @@ export function MoutureConsole({
   const apporteeRef = useRef<HTMLInputElement>(null);
   const submitLockRef = useRef(false);
 
-  const historyUrl = user?.role ? `${historyPath}?page=1&page_size=20` : null;
+  // ── Filtres dashboard ──────────────────────────────────────────────────────
+  const today = new Date().toISOString().split("T")[0];
+  const thirtyDaysAgo = new Date(Date.now() - 29 * 86400000).toISOString().split("T")[0];
+  const [filterDebut, setFilterDebut] = useState(thirtyDaysAgo);
+  const [filterFin, setFilterFin] = useState(today);
+  const [filterSource, setFilterSource] = useState<"" | "seule" | "vente">("");
+  const [filtersApplied, setFiltersApplied] = useState(false);
+
+  const historyParams = useMemo(() => {
+    const p = new URLSearchParams({ page: "1", page_size: "50" });
+    if (filtersApplied) {
+      if (filterDebut) p.set("debut", filterDebut);
+      if (filterFin) p.set("fin", filterFin);
+      if (filterSource) p.set("source", filterSource);
+    }
+    return p.toString();
+  }, [filtersApplied, filterDebut, filterFin, filterSource]);
+
+  const historyUrl = user?.role ? `${historyPath}?${historyParams}` : null;
   const { data, loading, error: historyError, refetch, cancel } =
     useFetch<PaginatedResponse<TicketMouture>>(historyUrl);
   const historyTickets = data?.results ?? [];
 
-  // Stats dashboard (boutique uniquement)
+  // Stats dashboard (boutique uniquement) — se met à jour avec les filtres
+  const statsParams = useMemo(() => {
+    if (!statsPath) return null;
+    const p = new URLSearchParams();
+    if (filtersApplied) {
+      if (filterDebut) p.set("debut", filterDebut);
+      if (filterFin) p.set("fin", filterFin);
+      if (filterSource) p.set("source", filterSource);
+    }
+    const qs = p.toString();
+    return qs ? `${statsPath}?${qs}` : statsPath;
+  }, [statsPath, filtersApplied, filterDebut, filterFin, filterSource]);
+
   const { data: statsData, refetch: refetchStats } =
-    useFetch<MoutureStats>(statsPath ?? null);
+    useFetch<MoutureStats>(statsParams);
+
+  // Construit l'URL d'export avec les filtres actifs
+  const exportUrl = useMemo(() => {
+    const p = new URLSearchParams();
+    if (filterDebut) p.set("debut", filterDebut);
+    if (filterFin) p.set("fin", filterFin);
+    if (filterSource) p.set("source", filterSource);
+    const qs = p.toString();
+    return { csv: exportPath ? `/api${exportPath}?${qs}` : null, pdf: pdfPath ? `/api${pdfPath}?${qs}` : null };
+  }, [exportPath, pdfPath, filterDebut, filterFin, filterSource]);
 
   // Pré-remplir le prix depuis le défaut configuré sur le lieu
   useEffect(() => {
@@ -293,35 +344,123 @@ export function MoutureConsole({
         </div>
       </div>
 
-      {/* ── Dashboard Stats ── */}
-      {statsData && (
-        <div className="grid grid-cols-3 gap-3">
-          {(
-            [
-              { label: "Aujourd'hui", key: "aujourd_hui" },
-              { label: "7 jours", key: "7_jours" },
-              { label: "30 jours", key: "30_jours" },
-            ] as const
-          ).map(({ label, key }) => {
-            const s = statsData[key];
-            return (
-              <Card key={key} className="bg-muted/20">
-                <CardContent className="py-3 px-4 space-y-0.5">
-                  <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">
-                    {label}
-                  </p>
-                  <p className="text-lg font-bold tabular-nums">
-                    {fmt(Number(s.cout_total))} FCFA
-                  </p>
-                  <p className="text-xs text-muted-foreground tabular-nums">
-                    {s.nb_tickets} ticket{s.nb_tickets !== 1 ? "s" : ""} ·{" "}
-                    {fmt(Number(s.kg_apportee), 1)} kg apportés
-                  </p>
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
+      {/* ── Filtres + Dashboard ── */}
+      {statsPath && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2">
+              Filtres
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {/* Barre de filtres */}
+            <div className="flex flex-wrap gap-2 items-end">
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">Du</label>
+                <Input
+                  type="date"
+                  value={filterDebut}
+                  onChange={(e) => setFilterDebut(e.target.value)}
+                  className="h-8 text-sm w-36"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">Au</label>
+                <Input
+                  type="date"
+                  value={filterFin}
+                  onChange={(e) => setFilterFin(e.target.value)}
+                  className="h-8 text-sm w-36"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">Type</label>
+                <select
+                  value={filterSource}
+                  onChange={(e) => setFilterSource(e.target.value as "" | "seule" | "vente")}
+                  className="h-8 rounded-md border border-input bg-background px-3 text-sm"
+                >
+                  <option value="">Tous types</option>
+                  <option value="seule">Mouture seule</option>
+                  <option value="vente">Vente + mouture</option>
+                </select>
+              </div>
+              <Button
+                size="sm"
+                className="h-8 bg-green-600 hover:bg-green-700 text-white"
+                onClick={() => setFiltersApplied(true)}
+              >
+                Appliquer
+              </Button>
+              {filtersApplied && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-8"
+                  onClick={() => {
+                    setFilterDebut(thirtyDaysAgo);
+                    setFilterFin(today);
+                    setFilterSource("");
+                    setFiltersApplied(false);
+                  }}
+                >
+                  Réinitialiser
+                </Button>
+              )}
+              {/* Exports liés aux filtres */}
+              <div className="ml-auto flex items-center gap-2">
+                {exportUrl.csv && (
+                  <a href={exportUrl.csv} download className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-muted transition-colors">
+                    <Download className="h-3.5 w-3.5" />
+                    CSV
+                  </a>
+                )}
+                {exportUrl.pdf && (
+                  <a href={exportUrl.pdf} download className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium bg-red-50 hover:bg-red-100 text-red-700 border-red-200 transition-colors">
+                    <Download className="h-3.5 w-3.5" />
+                    PDF
+                  </a>
+                )}
+              </div>
+            </div>
+
+            {/* KPI cards */}
+            {statsData && (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
+                {(
+                  [
+                    { label: "Aujourd'hui", key: "aujourd_hui" as const },
+                    { label: "7 jours", key: "7_jours" as const },
+                    { label: "30 jours", key: "30_jours" as const },
+                    ...(statsData.custom
+                      ? [{ label: `${filterDebut} → ${filterFin}`, key: "custom" as const }]
+                      : []),
+                  ]
+                ).map(({ label, key }) => {
+                  const s = statsData[key];
+                  if (!s) return null;
+                  const isCustom = key === "custom";
+                  return (
+                    <div
+                      key={key}
+                      className={`rounded-lg border p-3 space-y-0.5 ${isCustom ? "border-green-300 bg-green-50/60 dark:bg-green-950/20" : "bg-muted/20"}`}
+                    >
+                      <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide truncate">
+                        {label}
+                      </p>
+                      <p className="text-base font-bold tabular-nums">
+                        {fmt(Number(s.cout_total))} FCFA
+                      </p>
+                      <p className="text-xs text-muted-foreground tabular-nums">
+                        {s.nb_tickets} ticket{s.nb_tickets !== 1 ? "s" : ""} · {fmt(Number(s.kg_apportee), 1)} kg
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -501,16 +640,6 @@ export function MoutureConsole({
             <CardTitle className="text-base flex items-center justify-between">
               <span>Historique Mouture</span>
               <div className="flex items-center gap-2">
-                {exportPath && (
-                  <a
-                    href={`/api${exportPath}`}
-                    download
-                    className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-muted transition-colors"
-                  >
-                    <Download className="h-3.5 w-3.5" />
-                    CSV
-                  </a>
-                )}
                 <Button variant="outline" size="sm" onClick={refetch}>
                   Rafraîchir
                 </Button>

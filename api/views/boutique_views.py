@@ -446,8 +446,12 @@ class TicketReprintView(APIView):
 class MoutureStatsView(APIView):
     """
     GET /api/boutique/mouture-stats/
-    Statistiques mouture du lieu : aujourd'hui, 7 jours, 30 jours.
-    Inclut aussi les config prix (défaut et plafond).
+    Statistiques mouture du lieu : KPI fixes + période personnalisée optionnelle.
+
+    Params optionnels :
+      ?debut=YYYY-MM-DD   période personnalisée — début
+      ?fin=YYYY-MM-DD     période personnalisée — fin
+      ?source=seule|vente filtre type mouture (s'applique à la période perso seulement)
     """
     permission_classes = [IsAuthenticated, IsBoutiqueRole | IsAdminRole]
 
@@ -458,11 +462,15 @@ class MoutureStatsView(APIView):
 
         today = timezone.now().date()
 
-        def _stats(debut, fin):
+        def _stats(debut, fin, source_filter=None):
             qs = Ticket.objects.filter(
                 lieu=lieu, mouture=True,
                 date__date__gte=debut, date__date__lte=fin,
             )
+            if source_filter in {"seule", "mouture_seule"}:
+                qs = qs.annotate(_lc=Count("lignes")).filter(_lc=0)
+            elif source_filter in {"vente", "vente_avec_mouture"}:
+                qs = qs.annotate(_lc=Count("lignes")).filter(_lc__gt=0)
             agg = qs.aggregate(
                 nb_tickets=Count("id"),
                 cout_total=Sum("cout_mouture"),
@@ -474,13 +482,30 @@ class MoutureStatsView(APIView):
                 "kg_apportee": str(agg["kg_apportee"] or "0.000"),
             }
 
-        return Response({
+        # Période personnalisée
+        debut_str = request.query_params.get("debut")
+        fin_str = request.query_params.get("fin")
+        source = (request.query_params.get("source") or "").strip().lower() or None
+        custom = None
+        if debut_str or fin_str:
+            from datetime import date as date_type
+            try:
+                d = date_type.fromisoformat(debut_str) if debut_str else today - timedelta(days=29)
+                f = date_type.fromisoformat(fin_str) if fin_str else today
+            except ValueError:
+                return Response({"detail": "Format date invalide (YYYY-MM-DD)."}, status=status.HTTP_400_BAD_REQUEST)
+            custom = {**_stats(d, f, source), "debut": str(d), "fin": str(f)}
+
+        payload = {
             "aujourd_hui": _stats(today, today),
             "7_jours": _stats(today - timedelta(days=6), today),
             "30_jours": _stats(today - timedelta(days=29), today),
             "prix_defaut": str(lieu.prix_mouture_defaut) if lieu.prix_mouture_defaut else None,
             "prix_max": str(lieu.prix_mouture_max) if lieu.prix_mouture_max else None,
-        })
+        }
+        if custom is not None:
+            payload["custom"] = custom
+        return Response(payload)
 
 
 class MoutureExportView(APIView):
@@ -561,4 +586,181 @@ class MoutureExportView(APIView):
                 f"{float(ticket.montant_total):.2f}",
             ])
 
+        return response
+
+
+class MouturePdfExportView(APIView):
+    """
+    GET /api/boutique/mouture-pdf/
+    Rapport PDF mouture : en-tête, résumé, tableau détaillé.
+
+    Params : ?debut=YYYY-MM-DD&fin=YYYY-MM-DD&source=seule|vente
+    """
+    permission_classes = [IsAuthenticated, IsBoutiqueRole | IsAdminRole]
+
+    def get(self, request):
+        from datetime import date as date_type
+        import io
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import mm
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable
+
+        lieu = get_lieu_boutique(request)
+        if not lieu:
+            return Response({"detail": "Lieu requis."}, status=status.HTTP_400_BAD_REQUEST)
+
+        today = timezone.now().date()
+        debut_str = request.query_params.get("debut")
+        fin_str = request.query_params.get("fin")
+        try:
+            debut = date_type.fromisoformat(debut_str) if debut_str else today - timedelta(days=29)
+            fin = date_type.fromisoformat(fin_str) if fin_str else today
+        except ValueError:
+            return Response({"detail": "Format date invalide (YYYY-MM-DD)."}, status=status.HTTP_400_BAD_REQUEST)
+
+        qs = (
+            Ticket.objects.filter(lieu=lieu, mouture=True, date__date__gte=debut, date__date__lte=fin)
+            .annotate(lignes_count=Count("lignes"))
+            .order_by("date")
+        )
+        source = (request.query_params.get("source") or "").strip().lower()
+        if source in {"seule", "mouture_seule"}:
+            qs = qs.filter(lignes_count=0)
+        elif source in {"vente", "vente_avec_mouture"}:
+            qs = qs.filter(lignes_count__gt=0)
+
+        tickets = list(qs)
+        total_cout = sum(float(t.cout_mouture or 0) for t in tickets)
+        total_kg = sum(float(t.quantite_apportee_client or 0) for t in tickets)
+
+        buf = io.BytesIO()
+        doc = SimpleDocTemplate(
+            buf, pagesize=A4,
+            leftMargin=15 * mm, rightMargin=15 * mm,
+            topMargin=18 * mm, bottomMargin=18 * mm,
+            title=f"Rapport Mouture — {lieu.nom}",
+        )
+        styles = getSampleStyleSheet()
+        GREEN = colors.HexColor("#16a34a")
+        LIGHT_GREEN = colors.HexColor("#dcfce7")
+        GREY_HEADER = colors.HexColor("#f3f4f6")
+        DARK = colors.HexColor("#111827")
+
+        title_style = ParagraphStyle("title", parent=styles["Heading1"], textColor=GREEN, fontSize=16, spaceAfter=4)
+        sub_style = ParagraphStyle("sub", parent=styles["Normal"], textColor=colors.HexColor("#6b7280"), fontSize=9)
+        label_style = ParagraphStyle("label", parent=styles["Normal"], fontSize=9, textColor=colors.HexColor("#374151"))
+        value_style = ParagraphStyle("value", parent=styles["Normal"], fontSize=14, textColor=DARK, fontName="Helvetica-Bold")
+
+        period_label = f"{debut.strftime('%d/%m/%Y')} → {fin.strftime('%d/%m/%Y')}"
+        source_label = {"seule": "Mouture seule", "vente": "Vente + mouture", "": "Tous types"}.get(source, "Tous types")
+
+        story = [
+            Paragraph("KONIS — Service Mouture", title_style),
+            Paragraph(f"{lieu.nom} | {period_label} | {source_label}", sub_style),
+            Spacer(1, 4 * mm),
+            HRFlowable(width="100%", thickness=1, color=GREEN),
+            Spacer(1, 4 * mm),
+        ]
+
+        # ── Résumé KPI ──
+        kpi_data = [
+            [
+                Paragraph("Tickets", label_style),
+                Paragraph("Revenus mouture", label_style),
+                Paragraph("Grain client apporté", label_style),
+            ],
+            [
+                Paragraph(str(len(tickets)), value_style),
+                Paragraph(f"{total_cout:,.0f} FCFA", value_style),
+                Paragraph(f"{total_kg:,.3f} kg", value_style),
+            ],
+        ]
+        kpi_table = Table(kpi_data, colWidths=["33%", "33%", "34%"])
+        kpi_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), GREY_HEADER),
+            ("BACKGROUND", (0, 1), (-1, 1), LIGHT_GREEN),
+            ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#d1d5db")),
+            ("INNERGRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#e5e7eb")),
+            ("TOPPADDING", (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ]))
+        story.append(kpi_table)
+        story.append(Spacer(1, 6 * mm))
+
+        if not tickets:
+            story.append(Paragraph("Aucune opération de mouture sur cette période.", sub_style))
+        else:
+            # ── Tableau détaillé ──
+            col_style = ParagraphStyle("col", parent=styles["Normal"], fontSize=7.5, textColor=DARK)
+            hdr_style = ParagraphStyle("hdr", parent=styles["Normal"], fontSize=7.5, textColor=colors.white, fontName="Helvetica-Bold")
+
+            headers = ["Date", "Ticket", "Type", "Grain", "Apporté\n(kg)", "Acheté\n(kg)", "Total\n(kg)", "Prix/kg\n(FCFA)", "Coût\n(FCFA)", "Montant\n(FCFA)"]
+            rows = [[Paragraph(h, hdr_style) for h in headers]]
+
+            for t in tickets:
+                apportee = float(t.quantite_apportee_client or 0)
+                prix = float(t.prix_mouture_kg or 0)
+                cout = float(t.cout_mouture or 0)
+                total_moudre = (cout / prix) if prix > 0 else apportee
+                achetee = max(0.0, total_moudre - apportee)
+                t_type = "Mouture seule" if t.lignes_count == 0 else "Vente+mouture"
+                rows.append([
+                    Paragraph(t.date.strftime("%d/%m/%y\n%H:%M"), col_style),
+                    Paragraph(t.numero.split("-")[-1] if "-" in t.numero else t.numero, col_style),
+                    Paragraph(t_type, col_style),
+                    Paragraph(t.produit_apporte or "—", col_style),
+                    Paragraph(f"{apportee:.2f}", col_style),
+                    Paragraph(f"{achetee:.2f}", col_style),
+                    Paragraph(f"{total_moudre:.2f}", col_style),
+                    Paragraph(f"{prix:.0f}", col_style),
+                    Paragraph(f"{cout:,.0f}", col_style),
+                    Paragraph(f"{float(t.montant_total):,.0f}", col_style),
+                ])
+
+            # Ligne total
+            total_row_style = ParagraphStyle("tot", parent=styles["Normal"], fontSize=7.5, textColor=GREEN, fontName="Helvetica-Bold")
+            rows.append([
+                Paragraph("TOTAL", total_row_style), Paragraph("", col_style),
+                Paragraph("", col_style), Paragraph("", col_style),
+                Paragraph(f"{total_kg:.2f}", total_row_style), Paragraph("", col_style),
+                Paragraph("", col_style), Paragraph("", col_style),
+                Paragraph(f"{total_cout:,.0f}", total_row_style),
+                Paragraph(f"{total_cout:,.0f}", total_row_style),
+            ])
+
+            page_w = A4[0] - 30 * mm
+            col_w = [22 * mm, 22 * mm, 22 * mm, 28 * mm, 16 * mm, 16 * mm, 16 * mm, 18 * mm, 22 * mm, 22 * mm]
+            detail_table = Table(rows, colWidths=col_w, repeatRows=1)
+            detail_table.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), GREEN),
+                ("BACKGROUND", (0, -1), (-1, -1), LIGHT_GREEN),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -2), [colors.white, GREY_HEADER]),
+                ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#d1d5db")),
+                ("INNERGRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#e5e7eb")),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                ("ALIGN", (4, 0), (-1, -1), "RIGHT"),
+                ("LINEABOVE", (0, -1), (-1, -1), 1, GREEN),
+            ]))
+            story.append(detail_table)
+
+        # Footer
+        story.append(Spacer(1, 8 * mm))
+        story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#d1d5db")))
+        story.append(Spacer(1, 2 * mm))
+        story.append(Paragraph(
+            f"Généré le {timezone.now().strftime('%d/%m/%Y à %H:%M')} — KONIS v2",
+            sub_style,
+        ))
+
+        doc.build(story)
+        buf.seek(0)
+        fname = f"mouture_{lieu.nom.replace(' ', '_')}_{debut}_{fin}.pdf"
+        response = HttpResponse(buf.read(), content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="{fname}"'
         return response
