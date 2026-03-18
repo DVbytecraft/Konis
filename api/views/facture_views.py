@@ -45,7 +45,7 @@ def _get_lieu_for_creation(user: CustomUser, data) -> Lieu | None:
         lieu = Lieu.objects.filter(pk=lieu_value).first()
     if not lieu:
         return None
-    if user.role == CustomUser.ROLE_COMPTABLE and user.entreprise_id and lieu.entreprise_id != user.entreprise_id:
+    if user.entreprise_id and lieu.entreprise_id != user.entreprise_id:
         return None
     return lieu
 

@@ -49,7 +49,7 @@ class SecurityTests(APITestCase):
             entreprise=entreprise,
             lieu=lieu_b2,
         )
-        cat = Categorie.objects.create(nom="Cat")
+        cat = Categorie.objects.create(nom="Cat", entreprise=entreprise)
         cls.produit = Produit.objects.create(
             categorie=cat, nom="P1", code="P001", unite="kg", entreprise=entreprise
         )

@@ -46,7 +46,7 @@ class FacturesApiTests(APITestCase):
             entreprise=entreprise,
             lieu=cls.factory,
         )
-        cat = Categorie.objects.create(nom="Cat test")
+        cat = Categorie.objects.create(nom="Cat test", entreprise=entreprise)
         cls.produit = Produit.objects.create(categorie=cat, nom="Produit test facture", code="FACT-001", unite="piece", entreprise=entreprise)
 
     def _auth_headers(self, user):

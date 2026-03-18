@@ -40,10 +40,10 @@ class TestsMetierProof(TestCase):
         cls.comptable = CustomUser.objects.create_user(
             username="compta", password="c", role=CustomUser.ROLE_COMPTABLE, entreprise=entreprise
         )
-        cat = Categorie.objects.create(nom="C")
+        cat = Categorie.objects.create(nom="C", entreprise=entreprise)
         cls.produit = Produit.objects.create(categorie=cat, nom="P1", code="P001", unite="kg", entreprise=entreprise)
         Stock.objects.create(produit=cls.produit, lieu=cls.usine, quantite=Decimal("100"))
-        CategorieDepense.objects.get_or_create(nom="Divers")
+        CategorieDepense.objects.get_or_create(nom="Divers", entreprise=entreprise)
 
     def _token(self, user):
         return str(RefreshToken.for_user(user).access_token)

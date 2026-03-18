@@ -125,7 +125,7 @@ class TestIdempotencyDepense(APITestCase):
         cls.ent = _make_entreprise("EntB")
         cls.lieu = _make_boutique(cls.ent, nom="Magasin B", code="MB")
         cls.user = _make_user(cls.ent, cls.lieu, username="admin_idem", role=CustomUser.ROLE_ADMIN)
-        cls.cat = CategorieDepense.objects.create(nom="Divers")
+        cls.cat = CategorieDepense.objects.create(nom="Divers", entreprise=cls.ent)
 
     def _post_depense(self, key=None):
         headers = _jwt(self.user)

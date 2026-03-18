@@ -75,7 +75,7 @@ class StockBoutiqueViewSet(ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        ser = BoutiqueStockReceiptSerializer(data=request.data)
+        ser = BoutiqueStockReceiptSerializer(data=request.data, context={"request": request})
         ser.is_valid(raise_exception=True)
         produit = ser.validated_data["produit"]
         quantite = ser.validated_data["quantity"]

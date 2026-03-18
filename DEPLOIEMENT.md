@@ -62,6 +62,10 @@ cp .env.prod.example .env.prod
 nano .env.prod
 ```
 
+**Important sécurité :** ne conservez jamais de secrets réels dans le repo local.
+Créez `.env.prod` uniquement sur le serveur de production (ou dans un gestionnaire de secrets),
+et gardez dans le repo uniquement `.env.prod.example`.
+
 **Variables obligatoires à remplir :**
 
 ```bash

@@ -41,12 +41,14 @@ class TicketPrintAuthTests(APITestCase):
             role=CustomUser.ROLE_COMPTABLE,
             entreprise=entreprise,
         )
-        cat = Categorie.objects.create(nom="Cat")
-        produit = Produit.objects.create(categorie=cat, nom="P1", code="P001", unite="kg", entreprise=entreprise)
+        cat_a = Categorie.objects.create(nom="Cat", entreprise=entreprise)
+        cat_b = Categorie.objects.create(nom="Cat", entreprise=entreprise_b)
+        produit = Produit.objects.create(categorie=cat_a, nom="P1", code="P001", unite="kg", entreprise=entreprise)
+        produit_b = Produit.objects.create(categorie=cat_b, nom="P2", code="P002", unite="kg", entreprise=entreprise_b)
         cls.ticket = Ticket.objects.create(lieu=cls.lieu, numero="KONIS-CENTRE-20260221-000001")
         LigneVente.objects.create(ticket=cls.ticket, produit=produit, quantite=Decimal("1"), prix_unitaire=Decimal("100"))
         cls.ticket_b = Ticket.objects.create(lieu=cls.lieu_b, numero="KONIS-EXT-20260221-000001")
-        LigneVente.objects.create(ticket=cls.ticket_b, produit=produit, quantite=Decimal("1"), prix_unitaire=Decimal("100"))
+        LigneVente.objects.create(ticket=cls.ticket_b, produit=produit_b, quantite=Decimal("1"), prix_unitaire=Decimal("100"))
 
     def test_ticket_print_requires_authentication(self):
         url = reverse("ticket-print", kwargs={"ticket_id": self.ticket.id})

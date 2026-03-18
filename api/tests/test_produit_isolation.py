@@ -61,23 +61,24 @@ class ProduitIsolationTests(APITestCase):
             role=CustomUser.ROLE_USINE, entreprise=cls.ent_b, lieu=cls.usine_b,
         )
 
-        cat = Categorie.objects.create(nom="Général")
+        cat_a = Categorie.objects.create(nom="Général", entreprise=cls.ent_a)
+        cat_b = Categorie.objects.create(nom="Général", entreprise=cls.ent_b)
 
         # Produits entreprise A
         cls.produit_fini_a = Produit.objects.create(
-            entreprise=cls.ent_a, categorie=cat,
+            entreprise=cls.ent_a, categorie=cat_a,
             nom="Anitche A", code="ANIT-A",
             category=Produit.CATEGORY_FINISHED, unite="kg",
         )
         cls.produit_mp_a = Produit.objects.create(
-            entreprise=cls.ent_a, categorie=cat,
+            entreprise=cls.ent_a, categorie=cat_a,
             nom="Mais A", code="MAIS-A",
             category=Produit.CATEGORY_RAW_MATERIAL, unite="kg",
         )
 
         # Produits entreprise B (même code que A pour tester l'unicité par entreprise)
         cls.produit_fini_b = Produit.objects.create(
-            entreprise=cls.ent_b, categorie=cat,
+            entreprise=cls.ent_b, categorie=cat_b,
             nom="Anitche B", code="ANIT-B",
             category=Produit.CATEGORY_FINISHED, unite="kg",
         )

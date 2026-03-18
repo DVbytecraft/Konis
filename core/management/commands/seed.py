@@ -154,7 +154,7 @@ class Command(BaseCommand):
         produits_created = []
         idx = 0
         for cat_nom, noms in categories_data:
-            cat = Categorie.objects.create(nom=cat_nom)
+            cat = Categorie.objects.create(nom=cat_nom, entreprise=entreprise)
             for _ in noms:
                 if idx >= 20:
                     break
@@ -163,16 +163,18 @@ class Command(BaseCommand):
                     nom=noms_20[idx],
                     code=f"P{idx + 1:03d}",
                     unite="kg",
+                    entreprise=entreprise,
                 )
                 produits_created.append(p)
                 idx += 1
-        cat_default = Categorie.objects.first()
+        cat_default = Categorie.objects.filter(entreprise=entreprise).first()
         while len(produits_created) < 20:
             p = Produit.objects.create(
                 categorie=cat_default,
                 nom=noms_20[len(produits_created)],
                 code=f"P{len(produits_created) + 1:03d}",
                 unite="kg",
+                entreprise=entreprise,
             )
             produits_created.append(p)
 
@@ -186,7 +188,7 @@ class Command(BaseCommand):
             "Autres",
         ]
         for nom in categories_depense:
-            CategorieDepense.objects.get_or_create(nom=nom)
+            CategorieDepense.objects.get_or_create(nom=nom, entreprise=entreprise)
 
         # 5. Stocks initiaux (usine uniquement)
         self.stdout.write("Création stocks initiaux à l'usine...")

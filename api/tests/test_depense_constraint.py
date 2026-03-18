@@ -19,7 +19,7 @@ class DepenseConstraintTests(TestCase):
         cls.lieu = Lieu.objects.create(
             entreprise=entreprise, nom="Boutique", type_lieu=Lieu.TYPE_MAGASIN
         )
-        cls.cat = CategorieDepense.objects.create(nom="Divers")
+        cls.cat = CategorieDepense.objects.create(nom="Divers", entreprise=entreprise)
 
     def test_depense_negative_refus(self):
         """Dépense avec montant négatif -> IntegrityError ou ValidationError."""

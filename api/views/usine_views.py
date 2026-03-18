@@ -70,6 +70,8 @@ class AchatUsineViewSet(ModelViewSet):
         ser.is_valid(raise_exception=True)
         d = ser.validated_data
         lieu = d["lieu"]
+        if request.user.entreprise_id and lieu.entreprise_id != request.user.entreprise_id:
+            return Response({"detail": "Accès interdit à une autre entreprise."}, status=status.HTTP_403_FORBIDDEN)
         if request.user.role == CustomUser.ROLE_USINE and request.user.lieu_id != lieu.id:
             return Response({"detail": "Acces limite a votre usine."}, status=status.HTTP_403_FORBIDDEN)
         try:
@@ -116,6 +118,8 @@ class LotProductionUsineViewSet(ModelViewSet):
         ser.is_valid(raise_exception=True)
         d = ser.validated_data
         lieu_usine = d["lieu_usine"]
+        if request.user.entreprise_id and lieu_usine.entreprise_id != request.user.entreprise_id:
+            return Response({"detail": "Accès interdit à une autre entreprise."}, status=status.HTTP_403_FORBIDDEN)
         if request.user.role == CustomUser.ROLE_USINE and request.user.lieu_id != lieu_usine.id:
             return Response({"detail": "Acces limite a votre usine."}, status=status.HTTP_403_FORBIDDEN)
         try:
@@ -163,6 +167,8 @@ class TransfertCessionUsineViewSet(ModelViewSet):
         ser.is_valid(raise_exception=True)
         d = ser.validated_data
         lot = d["lot"]
+        if request.user.entreprise_id and lot.lieu_usine.entreprise_id != request.user.entreprise_id:
+            return Response({"detail": "Accès interdit à une autre entreprise."}, status=status.HTTP_403_FORBIDDEN)
         if request.user.role == CustomUser.ROLE_USINE and request.user.lieu_id != lot.lieu_usine_id:
             return Response({"detail": "Acces limite a votre usine."}, status=status.HTTP_403_FORBIDDEN)
         if lot.lieu_usine.entreprise_id != d["boutique"].entreprise_id:
@@ -215,6 +221,8 @@ class TransfertInterUsineViewSet(ModelViewSet):
         ser.is_valid(raise_exception=True)
         d = ser.validated_data
         lot = d["lot"]
+        if request.user.entreprise_id and lot.lieu_usine.entreprise_id != request.user.entreprise_id:
+            return Response({"detail": "Accès interdit à une autre entreprise."}, status=status.HTTP_403_FORBIDDEN)
         if request.user.role == CustomUser.ROLE_USINE and request.user.lieu_id != lot.lieu_usine_id:
             return Response({"detail": "Acces limite a votre usine."}, status=status.HTTP_403_FORBIDDEN)
         if lot.lieu_usine.entreprise_id != d["usine_destination"].entreprise_id:
@@ -287,7 +295,10 @@ class FactoryFinishedProductsCatalogView(APIView):
             return Response({"detail": "Le nom est requis."}, status=status.HTTP_400_BAD_REQUEST)
         if code and Produit.objects.filter(entreprise=entreprise, code=code).exists():
             return Response({"detail": "Ce code existe deja."}, status=status.HTTP_400_BAD_REQUEST)
-        cat, _ = Categorie.objects.get_or_create(nom="Produits finis")
+        cat, _ = Categorie.objects.get_or_create(
+            nom="Produits finis",
+            entreprise=entreprise,
+        )
         p = Produit.objects.create(
             entreprise=entreprise, nom=name, code=code, unite=unit,
             categorie=cat, category=Produit.CATEGORY_FINISHED
@@ -485,7 +496,10 @@ class FactoryRawMaterialsCatalogView(APIView):
             return Response({"detail": "Le nom est requis."}, status=status.HTTP_400_BAD_REQUEST)
         if code and Produit.objects.filter(entreprise=entreprise, code=code).exists():
             return Response({"detail": "Ce code existe deja."}, status=status.HTTP_400_BAD_REQUEST)
-        cat, _ = Categorie.objects.get_or_create(nom="Matières premières")
+        cat, _ = Categorie.objects.get_or_create(
+            nom="Matières premières",
+            entreprise=entreprise,
+        )
         p = Produit.objects.create(
             entreprise=entreprise, nom=name, code=code, unite=unit,
             categorie=cat, category=Produit.CATEGORY_RAW_MATERIAL
@@ -749,6 +763,11 @@ class TransfertDirectUsineViewSet(ModelViewSet):
         from_lieu = d["from_lieu"]
         to_lieu = d["to_lieu"]
 
+        if request.user.entreprise_id and (
+            from_lieu.entreprise_id != request.user.entreprise_id
+            or to_lieu.entreprise_id != request.user.entreprise_id
+        ):
+            return Response({"detail": "Accès interdit à une autre entreprise."}, status=status.HTTP_403_FORBIDDEN)
         if request.user.role == CustomUser.ROLE_USINE and request.user.lieu_id != from_lieu.id:
             return Response(
                 {"detail": "Acces limite a votre usine."},

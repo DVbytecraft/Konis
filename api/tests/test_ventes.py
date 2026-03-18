@@ -31,7 +31,7 @@ class VenteBoutiqueTests(APITestCase):
             entreprise=entreprise,
             lieu=cls.lieu,
         )
-        cat = Categorie.objects.create(nom="Cat")
+        cat = Categorie.objects.create(nom="Cat", entreprise=entreprise)
         cls.produit = Produit.objects.create(
             categorie=cat, nom="Produit Test", code="P001", unite="kg",
             entreprise=entreprise,

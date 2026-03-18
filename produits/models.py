@@ -16,6 +16,13 @@ def _default_entreprise_id():
 
 class Categorie(models.Model):
     """Catégorie de produit."""
+    entreprise = models.ForeignKey(
+        "core.Entreprise",
+        on_delete=models.PROTECT,
+        related_name="categories_produits",
+        default=_default_entreprise_id,
+        db_index=True,
+    )
     nom = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -25,6 +32,9 @@ class Categorie(models.Model):
     class Meta:
         verbose_name = "Catégorie"
         verbose_name_plural = "Catégories"
+        indexes = [
+            models.Index(fields=["entreprise", "nom"]),
+        ]
 
 
 class Produit(models.Model):

@@ -25,11 +25,14 @@ def get_lieu_boutique(request) -> Lieu | None:
     - Rôle admin    : cherche ?lieu= (query param) ou body["lieu"].
     Retourne None si aucun lieu trouvable.
     """
-    if request.user.role == CustomUser.ROLE_ADMIN:
+    if request.user.role in (CustomUser.ROLE_ADMIN, CustomUser.ROLE_SUPREME_ADMIN):
         lieu_id = request.query_params.get("lieu") or request.data.get("lieu")
         if not lieu_id:
             return None
-        return Lieu.objects.filter(type_lieu=Lieu.TYPE_MAGASIN, pk=lieu_id).first()
+        qs = Lieu.objects.filter(type_lieu=Lieu.TYPE_MAGASIN, pk=lieu_id)
+        if request.user.entreprise_id:
+            qs = qs.filter(entreprise_id=request.user.entreprise_id)
+        return qs.first()
     return request.user.lieu
 
 
@@ -40,14 +43,17 @@ def get_lieu_usine(request) -> Lieu | None:
     - Rôle admin  : cherche ?lieu= ou body["lieu_usine"]/body["lieu"].
     Retourne None si aucun lieu trouvable.
     """
-    if request.user.role == CustomUser.ROLE_ADMIN:
+    if request.user.role in (CustomUser.ROLE_ADMIN, CustomUser.ROLE_SUPREME_ADMIN):
         lieu_id = (
             request.query_params.get("lieu")
             or request.data.get("lieu_usine")
             or request.data.get("lieu")
         )
         if lieu_id:
-            return Lieu.objects.filter(pk=lieu_id, type_lieu=Lieu.TYPE_USINE).first()
+            qs = Lieu.objects.filter(pk=lieu_id, type_lieu=Lieu.TYPE_USINE)
+            if request.user.entreprise_id:
+                qs = qs.filter(entreprise_id=request.user.entreprise_id)
+            return qs.first()
         return None
 
     if (
@@ -67,10 +73,13 @@ def get_lieu_mpsl(request) -> Lieu | None:
     L'utilisateur MPSL n'est PAS obligatoirement lié à un lieu — il opère sur tout dépôt MPSL de son entreprise.
     """
     ent = getattr(request.user, "entreprise_id", None)
-    if request.user.role == CustomUser.ROLE_ADMIN:
+    if request.user.role in (CustomUser.ROLE_ADMIN, CustomUser.ROLE_SUPREME_ADMIN):
         lieu_id = request.query_params.get("lieu") or request.data.get("lieu")
         if lieu_id:
-            return Lieu.objects.filter(pk=lieu_id, type_lieu=Lieu.TYPE_MPSL).first()
+            qs = Lieu.objects.filter(pk=lieu_id, type_lieu=Lieu.TYPE_MPSL)
+            if ent:
+                qs = qs.filter(entreprise_id=ent)
+            return qs.first()
         return Lieu.objects.filter(type_lieu=Lieu.TYPE_MPSL, entreprise_id=ent).first() if ent else None
     if request.user.role == CustomUser.ROLE_MPSL:
         if request.user.lieu_id and request.user.lieu and request.user.lieu.type_lieu == Lieu.TYPE_MPSL:

@@ -40,7 +40,7 @@ class FactoryEndpointsTests(APITestCase):
             role=CustomUser.ROLE_COMPTABLE,
             entreprise=entreprise,
         )
-        cat = Categorie.objects.create(nom="Cat")
+        cat = Categorie.objects.create(nom="Cat", entreprise=entreprise)
         cls.raw = Produit.objects.create(
             categorie=cat,
             nom="Mais brut",

@@ -39,7 +39,7 @@ class UsineModuleTests(APITestCase):
             role=CustomUser.ROLE_COMPTABLE,
             entreprise=entreprise,
         )
-        cat = Categorie.objects.create(nom="Cat")
+        cat = Categorie.objects.create(nom="Cat", entreprise=entreprise)
         cls.mp = Produit.objects.create(
             categorie=cat,
             nom="Maïs",
