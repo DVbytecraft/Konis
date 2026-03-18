@@ -15,7 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Pencil, Trash2, X } from "lucide-react";
 
-type Role = "admin" | "comptable" | "usine" | "boutique" | "mpsl";
+type Role = "supreme_admin" | "admin" | "daf" | "comptable" | "usine" | "boutique" | "mpsl";
 
 interface Lieu {
   id: number;
@@ -240,7 +240,7 @@ export default function AdminUsersPage() {
     }
   };
 
-  if (user?.role !== "admin") {
+  if (user?.role !== "admin" && user?.role !== "supreme_admin") {
     return (
       <div className="space-y-4">
         <h1 className="text-2xl font-semibold tracking-tight">Utilisateurs</h1>
@@ -293,7 +293,9 @@ export default function AdminUsersPage() {
             <div className="space-y-2">
               <Label htmlFor="role">Rôle</Label>
               <select id="role" value={form.role} onChange={handleRoleChange} className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm">
+                {user?.role === "supreme_admin" && <option value="supreme_admin">Supreme Admin</option>}
                 <option value="admin">Admin</option>
+                <option value="daf">DAF</option>
                 <option value="comptable">Comptable</option>
                 <option value="usine">Usine</option>
                 <option value="boutique">Boutique</option>
@@ -355,8 +357,12 @@ export default function AdminUsersPage() {
                       <td className="py-1.5 px-1">{u.first_name} {u.last_name}</td>
                       <td className="py-1.5 px-1">
                         <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                          u.role === "admin"
+                          u.role === "supreme_admin"
+                            ? "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300"
+                            : u.role === "admin"
                             ? "bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300"
+                            : u.role === "daf"
+                            ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300"
                             : u.role === "comptable"
                             ? "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300"
                             : u.role === "usine"
@@ -425,7 +431,9 @@ export default function AdminUsersPage() {
                   onChange={(e) => setEditForm((prev) => ({ ...prev, role: e.target.value as Role, lieuId: "" }))}
                   className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
                 >
+                  {user?.role === "supreme_admin" && <option value="supreme_admin">Supreme Admin</option>}
                   <option value="admin">Admin</option>
+                  <option value="daf">DAF</option>
                   <option value="comptable">Comptable</option>
                   <option value="usine">Usine</option>
                   <option value="boutique">Boutique</option>
