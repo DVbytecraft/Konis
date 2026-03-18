@@ -21,8 +21,8 @@ from core.models import CustomUser
 # Rôles avec accès admin opérationnel complet
 _ADMIN_ROLES = (CustomUser.ROLE_SUPREME_ADMIN, CustomUser.ROLE_ADMIN)
 
-# Rôles avec accès financier (DAF + admins)
-_FINANCE_ROLES = (CustomUser.ROLE_SUPREME_ADMIN, CustomUser.ROLE_ADMIN, CustomUser.ROLE_DAF)
+# Rôles avec accès financier complet (DAF + admins + comptable)
+_FINANCE_ROLES = (CustomUser.ROLE_SUPREME_ADMIN, CustomUser.ROLE_ADMIN, CustomUser.ROLE_DAF, CustomUser.ROLE_COMPTABLE)
 
 # Rôles avec accès financier en lecture (comptable + DAF + admins)
 _FINANCE_READ_ROLES = (CustomUser.ROLE_SUPREME_ADMIN, CustomUser.ROLE_ADMIN, CustomUser.ROLE_DAF, CustomUser.ROLE_COMPTABLE)
