@@ -50,6 +50,12 @@ class Produit(models.Model):
     code = models.CharField(max_length=50, null=True, blank=True)
     category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, default=CATEGORY_FINISHED)
     unite = models.CharField(max_length=20, default="kg", blank=True)
+    poids_par_sac = models.DecimalField(
+        max_digits=8, decimal_places=3,
+        null=True, blank=True,
+        verbose_name="Poids par sac (kg)",
+        help_text="Poids d'un sac de ce produit en kg. Requis si l'unité est 'sac' et que la mouture est utilisée.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

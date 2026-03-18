@@ -1,6 +1,11 @@
 """
 Services ventes KONIS : vente boutique, numéro de ticket automatique.
 Transaction atomique. Historique via Ticket + LigneVente.
+
+Mouture — formule unifiée (toutes unités normalisées en kg) :
+    quantite_kg_total = normaliser_quantite_en_kg(apportée) + normaliser_quantite_en_kg(achetée)
+    cout_mouture      = calculer_cout_mouture(quantite_kg_total, prix_par_kg)
+    montant_total     = products_total + cout_mouture
 """
 from decimal import Decimal
 
@@ -13,63 +18,99 @@ from inventaire.services import ErreurStock
 from produits.models import Produit
 from ventes.models import LigneVente, Ticket
 
-UNIT_KG = "kg"
-UNIT_TONNE = "tonne"
-UNIT_SAC = "sac"
+# ── Constantes de conversion ────────────────────────────────────────────────
+KG_PAR_TONNE = Decimal("1000")
 
 
-def _normalize_mouture_unit(raw_unit: str) -> str | None:
-    """Map product unit text to a mouture billing unit."""
-    unit = (raw_unit or "").strip().lower()
-    if "kg" in unit:
-        return UNIT_KG
-    if "tonne" in unit:
-        return UNIT_TONNE
-    if "sac" in unit:
-        return UNIT_SAC
-    return None
+# ── Fonctions centralisées mouture ──────────────────────────────────────────
 
+def normaliser_quantite_en_kg(
+    quantite: Decimal,
+    unite: str,
+    produit: Produit | None = None,
+) -> Decimal:
+    """
+    Convertit n'importe quelle quantité vers kg — unité interne unique.
+
+    unite : 'kg' | 'tonne' | 'sac'
+    produit : requis si unite='sac' (utilise produit.poids_par_sac)
+
+    Lève ErreurStock si la conversion est impossible.
+    """
+    u = (unite or "").strip().lower()
+    if u == "kg":
+        return quantite
+    if u == "tonne":
+        return quantite * KG_PAR_TONNE
+    if u == "sac":
+        if produit is None or produit.poids_par_sac is None:
+            nom = getattr(produit, "nom", "inconnu") if produit else "inconnu"
+            raise ErreurStock(
+                f"Mouture en sacs: poids_par_sac non défini pour le produit '{nom}'. "
+                "Configurez le poids par sac dans la fiche produit (administration)."
+            )
+        return quantite * produit.poids_par_sac
+    raise ErreurStock(
+        f"Unité mouture non supportée: '{unite}'. Utiliser kg, tonne ou sac."
+    )
+
+
+def calculer_cout_mouture(quantite_kg: Decimal, prix_par_kg: Decimal) -> Decimal:
+    """
+    Source unique de vérité pour le coût mouture.
+    Formule : cout = quantite_kg × prix_par_kg  (arrondi à 2 décimales).
+    """
+    return (quantite_kg * prix_par_kg).quantize(Decimal("0.01"))
+
+
+# ── Calcul totaux boutique ──────────────────────────────────────────────────
 
 def _compute_boutique_totals(
     lignes: list[tuple[Produit, Decimal, Decimal]],
     *,
     mouture: bool,
     prix_mouture_kg: Decimal | None,
-    prix_mouture_tonne: Decimal | None,
-    prix_mouture_sac: Decimal | None,
+    quantite_apportee_client_kg: Decimal = Decimal("0"),
 ) -> tuple[Decimal, Decimal, Decimal]:
     """
-    Single source of truth for boutique sale totals.
+    Source unique de vérité pour les totaux d'une vente boutique.
 
-    Returns (montant_produits, cout_mouture, montant_total).
+    Formule unifiée (mouture=True) :
+        qty_produits_kg  = Σ normaliser_quantite_en_kg(ligne.quantite, produit.unite, produit)
+        total_mouture_kg = qty_produits_kg + quantite_apportee_client_kg
+        cout_mouture     = calculer_cout_mouture(total_mouture_kg, prix_mouture_kg)
+        montant_total    = montant_produits + cout_mouture
+
+    Retourne (montant_produits, cout_mouture, montant_total).
     """
-    montant_produits = sum((quantite * prix_unitaire for _, quantite, prix_unitaire in lignes), Decimal("0"))
+    montant_produits = sum(
+        (quantite * prix_unitaire for _, quantite, prix_unitaire in lignes),
+        Decimal("0"),
+    )
 
     if not mouture:
         return montant_produits, Decimal("0"), montant_produits
 
-    prix_by_unit: dict[str, Decimal | None] = {
-        UNIT_KG: prix_mouture_kg,
-        UNIT_TONNE: prix_mouture_tonne,
-        UNIT_SAC: prix_mouture_sac,
-    }
-    cout_mouture = Decimal("0")
+    if prix_mouture_kg is None:
+        raise ErreurStock(
+            "Mouture demandée : prix_mouture_kg (FCFA/kg) est requis. "
+            "Toutes les unités sont normalisées en kg avant calcul."
+        )
 
+    # Normaliser toutes les lignes produits en kg
+    qty_produits_kg = Decimal("0")
     for produit, quantite, _ in lignes:
-        unit_key = _normalize_mouture_unit(produit.unite or "")
-        if unit_key is None:
-            raise ErreurStock(
-                f"Mouture demandee: unite produit non supportee pour {produit.nom} ({produit.unite})."
-            )
-        unit_price = prix_by_unit[unit_key]
-        if unit_price is None:
-            raise ErreurStock(
-                f"Mouture demandee: prix mouture manquant pour l'unite '{unit_key}' (produit {produit.nom})."
-            )
-        cout_mouture += quantite * unit_price
+        qty_produits_kg += normaliser_quantite_en_kg(
+            quantite, produit.unite or "kg", produit
+        )
+
+    total_mouture_kg = qty_produits_kg + quantite_apportee_client_kg
+    cout_mouture = calculer_cout_mouture(total_mouture_kg, prix_mouture_kg)
 
     return montant_produits, cout_mouture, montant_produits + cout_mouture
 
+
+# ── Numéro de ticket ────────────────────────────────────────────────────────
 
 def generer_numero_ticket(lieu: Lieu) -> str:
     """
@@ -79,15 +120,15 @@ def generer_numero_ticket(lieu: Lieu) -> str:
     Unicité garantie par verrouillage du lieu (select_for_update) dans la transaction.
     """
     today = timezone.now().date()
-    # Verrouiller le lieu pour sérialiser la génération du numéro (évite doublons concurrents)
     Lieu.objects.select_for_update().get(pk=lieu.pk)
     count = Ticket.objects.filter(lieu=lieu, date__date=today).count()
     seq = count + 1
     code = (lieu.code or "").strip().upper() or f"L{lieu.id}"
-    # Code alphanumérique uniquement (sécurité)
     code = "".join(c for c in code if c.isalnum())[:10] or f"L{lieu.id}"
     return f"KONIS-{code}-{today:%Y%m%d}-{seq:06d}"
 
+
+# ── Vente boutique (avec ou sans mouture) ───────────────────────────────────
 
 def vente_boutique(
     lieu: Lieu,
@@ -95,8 +136,7 @@ def vente_boutique(
     *,
     mouture: bool = False,
     prix_mouture_kg: Decimal | None = None,
-    prix_mouture_tonne: Decimal | None = None,
-    prix_mouture_sac: Decimal | None = None,
+    quantite_apportee_client_kg: Decimal = Decimal("0"),
 ) -> Ticket:
     """
     Enregistre une vente en boutique (ticket + lignes + mouture optionnelle).
@@ -104,9 +144,9 @@ def vente_boutique(
     Lève ErreurStock si stock insuffisant.
 
     lignes : liste de (produit, quantite, prix_unitaire)
-    mouture : True si le client demande l'écrasement (mouture)
-    prix_mouture_kg/tonne/sac : prix par unité selon l'unité du produit.
-      Coût mouture par ligne = quantite × prix_mouture_{unite_du_produit}
+    mouture : True si le client demande la mouture
+    prix_mouture_kg : prix FCFA/kg (toutes unités normalisées en kg avant calcul)
+    quantite_apportee_client_kg : grain supplémentaire apporté par le client (déjà en kg)
     """
     if lieu.type_lieu != Lieu.TYPE_MAGASIN:
         raise ErreurStock(f"Le lieu {lieu} n'est pas un magasin.")
@@ -132,8 +172,7 @@ def vente_boutique(
             lignes,
             mouture=mouture,
             prix_mouture_kg=prix_mouture_kg,
-            prix_mouture_tonne=prix_mouture_tonne,
-            prix_mouture_sac=prix_mouture_sac,
+            quantite_apportee_client_kg=quantite_apportee_client_kg,
         )
 
         ticket = None
@@ -145,14 +184,12 @@ def vente_boutique(
                     numero=numero,
                     mouture=mouture,
                     prix_mouture_kg=prix_mouture_kg if mouture else None,
-                    prix_mouture_tonne=prix_mouture_tonne if mouture else None,
-                    prix_mouture_sac=prix_mouture_sac if mouture else None,
                     cout_mouture=cout_mouture,
                     montant_total=montant_total,
+                    quantite_apportee_client=quantite_apportee_client_kg if mouture else Decimal("0"),
                 )
                 break
             except IntegrityError:
-                # Concurrence rare sur le numero : relancer la generation.
                 continue
         if ticket is None:
             raise ErreurStock("Impossible de generer un numero de ticket unique.")
@@ -164,30 +201,48 @@ def vente_boutique(
                 quantite=quantite,
                 prix_unitaire=prix_unitaire,
             )
-
-            stock = Stock.objects.select_for_update().get(
-                produit=produit, lieu=lieu
-            )
+            stock = Stock.objects.select_for_update().get(produit=produit, lieu=lieu)
             stock.quantite -= quantite
             stock.save(update_fields=["quantite"])
 
     return ticket
 
 
+# ── Mouture seule (sans vente de produits) ───────────────────────────────────
+
 def vente_mouture_seule(
     lieu: Lieu,
-    quantite: Decimal,
+    quantite_apportee: Decimal,
+    quantite_achetee: Decimal,
     unite: str,
-    prix_unitaire: Decimal,
+    prix_par_kg: Decimal,
     produit_apporte: str = "",
+    produit_ref: Produit | None = None,
     idempotency_key: str | None = None,
 ) -> tuple[Ticket, bool]:
     """
-    Ticket mouture-seule : aucun produit, aucune déduction de stock.
-    Pour les clients qui viennent uniquement faire moudre leur grain.
-    Fonctionne pour boutiques ET usines.
-    Retourne (ticket, created) où created=False indique un replay idempotent.
+    Ticket mouture-seule : aucune déduction de stock.
+    Gère 3 sous-scénarios :
+      1. Mouture seule   — quantite_achetee=0, grain apporté uniquement
+      2. Mouture étendue — grain apporté + grain acheté (hors stock)
+      3. Replay idempotent — même clé → retourne le ticket existant
+
+    Formule unifiée :
+        apportee_kg = normaliser_quantite_en_kg(quantite_apportee, unite, produit_ref)
+        achetee_kg  = normaliser_quantite_en_kg(quantite_achetee,  unite, produit_ref)
+        total_kg    = apportee_kg + achetee_kg
+        cout        = calculer_cout_mouture(total_kg, prix_par_kg)
+
+    Retourne (ticket, created). created=False → replay idempotent.
     """
+    apportee_kg = normaliser_quantite_en_kg(quantite_apportee, unite, produit_ref)
+    achetee_kg = normaliser_quantite_en_kg(quantite_achetee, unite, produit_ref)
+    total_kg = apportee_kg + achetee_kg
+
+    if total_kg <= Decimal("0"):
+        raise ErreurStock("La quantité totale à moudre doit être supérieure à 0.")
+
+    cout = calculer_cout_mouture(total_kg, prix_par_kg)
     key = (idempotency_key or "").strip() or None
 
     with transaction.atomic():
@@ -200,7 +255,6 @@ def vente_mouture_seule(
             if existing is not None:
                 return existing, False
 
-        cout = quantite * prix_unitaire
         ticket = None
         for _ in range(5):
             numero = generer_numero_ticket(lieu)
@@ -211,9 +265,8 @@ def vente_mouture_seule(
                     idempotency_key=key,
                     produit_apporte=produit_apporte,
                     mouture=True,
-                    prix_mouture_kg=prix_unitaire if "kg" in unite.lower() else None,
-                    prix_mouture_tonne=prix_unitaire if "tonne" in unite.lower() else None,
-                    prix_mouture_sac=prix_unitaire if "sac" in unite.lower() else None,
+                    prix_mouture_kg=prix_par_kg,
+                    quantite_apportee_client=apportee_kg,
                     cout_mouture=cout,
                     montant_total=cout,
                 )
@@ -221,9 +274,7 @@ def vente_mouture_seule(
             except IntegrityError:
                 if key:
                     existing = Ticket.objects.filter(
-                        lieu=lieu,
-                        idempotency_key=key,
-                        mouture=True,
+                        lieu=lieu, idempotency_key=key, mouture=True,
                     ).first()
                     if existing is not None:
                         return existing, False

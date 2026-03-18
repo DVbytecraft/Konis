@@ -662,14 +662,33 @@ class MoutureSeuleUsineView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         produit_nom = ser.validated_data.get("produit_nom", "")
-        ticket, created = vente_mouture_seule(
-            lieu=lieu,
-            quantite=ser.validated_data["quantite"],
-            unite=ser.validated_data["unite"],
-            prix_unitaire=ser.validated_data["prix_unitaire"],
-            produit_apporte=produit_nom,
-            idempotency_key=idempotency_key,
-        )
+        produit_ref = None
+        produit_id = ser.validated_data.get("produit_id")
+        if produit_id:
+            try:
+                produit_ref = Produit.objects.get(
+                    pk=produit_id, entreprise=request.user.entreprise
+                )
+            except Produit.DoesNotExist:
+                return Response(
+                    {"detail": f"Produit {produit_id} introuvable ou non autorisé."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        try:
+            ticket, created = vente_mouture_seule(
+                lieu=lieu,
+                quantite_apportee=ser.validated_data["quantite_apportee"],
+                quantite_achetee=ser.validated_data["quantite_achetee"],
+                unite=ser.validated_data["unite"],
+                prix_par_kg=ser.validated_data["prix_par_kg"],
+                produit_apporte=produit_nom,
+                produit_ref=produit_ref,
+                idempotency_key=idempotency_key,
+            )
+        except ErreurStock as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
         if created:
             audit_log(
                 user=request.user,

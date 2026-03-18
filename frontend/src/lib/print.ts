@@ -13,6 +13,12 @@ export interface TicketPrintData {
   montant_total: number;
   mouture?: boolean;
   cout_mouture?: number;
+  // Unified formula fields (new tickets)
+  prix_par_kg?: number | null;
+  quantite_apportee_kg?: number;   // grain apporté par le client (kg)
+  quantite_achetee_kg?: number;    // grain acheté / supplémentaire (kg)
+  total_mouture_kg?: number;       // total normalisé moudre (kg)
+  // Legacy display fields (old tickets — not used in calculation)
   prix_mouture_kg?: number | null;
   prix_mouture_tonne?: number | null;
   prix_mouture_sac?: number | null;
@@ -71,35 +77,27 @@ function buildTicketHtml(ticket: TicketPrintData): string {
           <span></span>
         </div>`;
 
+  // Unified mouture breakdown (new tickets have prix_par_kg + qty fields)
+  const prixKg = ticket.prix_par_kg ?? ticket.prix_mouture_kg ?? null;
+  const apporteeKg = ticket.quantite_apportee_kg ?? 0;
+  const acheteeKg = ticket.quantite_achetee_kg ?? 0;
+  const totalKg = ticket.total_mouture_kg ?? (apporteeKg + acheteeKg) || null;
+  const hasBreakdown = (apporteeKg + acheteeKg) > 0;
+
   const moutureSection = ticket.mouture
     ? `
         <div class="lignes">
           <div class="section-title">MOUTURE</div>
-          <div class="ligne"><span><b>MOUTURE : OUI</b></span></div>
-          ${
-            ticket.prix_mouture_kg != null
-              ? `<div class="ligne"><span>Mouture/kg</span><span>${formatNumber(
-                  ticket.prix_mouture_kg
-                )} FCFA/kg</span></div>`
-              : ""
-          }
-          ${
-            ticket.prix_mouture_tonne != null
-              ? `<div class="ligne"><span>Mouture/tonne</span><span>${formatNumber(
-                  ticket.prix_mouture_tonne
-                )} FCFA/t</span></div>`
-              : ""
-          }
-          ${
-            ticket.prix_mouture_sac != null
-              ? `<div class="ligne"><span>Mouture/sac</span><span>${formatNumber(
-                  ticket.prix_mouture_sac
-                )} FCFA/sac</span></div>`
-              : ""
-          }
-          <div class="ligne"><span>Coût mouture</span><span>${formatNumber(
+          ${ticket.produit_apporte ? `<div class="ligne"><span>${escapeHtml(ticket.produit_apporte)}</span></div>` : ""}
+          ${hasBreakdown ? `
+            <div class="ligne"><span>Apporté</span><span>${formatNumber(apporteeKg)} kg</span></div>
+            <div class="ligne"><span>Acheté</span><span>${formatNumber(acheteeKg)} kg</span></div>
+            <div class="ligne ligne-sep"><span><b>Total moudre</b></span><span><b>${formatNumber(totalKg ?? 0)} kg</b></span></div>
+          ` : ""}
+          ${prixKg != null ? `<div class="ligne"><span>Prix/kg</span><span>${formatNumber(prixKg)} FCFA</span></div>` : ""}
+          <div class="ligne"><span><b>Coût mouture</b></span><span><b>${formatNumber(
             ticket.cout_mouture
-          )} FCFA</span></div>
+          )} FCFA</b></span></div>
         </div>`
     : `<div class="muted">MOUTURE : NON</div>`;
 
@@ -128,6 +126,7 @@ function buildTicketHtml(ticket: TicketPrintData): string {
       .ligne { display: flex; justify-content: space-between; margin: 2px 0; gap: 8px; }
       .lignes { border-bottom: 1px dashed #000; padding-bottom: 4px; margin-bottom: 4px; }
       .section-title { text-align: center; font-weight: bold; margin: 2px 0; }
+      .ligne-sep { border-top: 1px dashed #000; margin-top: 2px; padding-top: 2px; }
       .total { font-weight: bold; text-align: right; font-size: 12px; }
       .footer { text-align: center; font-size: 9px; margin-top: 8px; }
       .muted { font-size: 9px; margin: 2px 0; }

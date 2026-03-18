@@ -19,18 +19,22 @@ interface Ticket58mmProps {
   mouture?: boolean;
   /** Coût total de la mouture (en FCFA) */
   coutMouture?: number;
-  /** Prix mouture par kg */
-  prixMoutureKg?: number;
-  /** Prix mouture par tonne */
-  prixMoutureTonne?: number;
-  /** Prix mouture par sac */
-  prixMoutureSac?: number;
+  /** Prix mouture par kg (formule unifiée) */
+  prixParKg?: number;
+  /** Quantité apportée par le client (kg, normalisé) */
+  quantiteApporteeKg?: number;
+  /** Quantité achetée / supplémentaire (kg, normalisé) */
+  quantiteAcheteeKg?: number;
   /** Produit apporté par le client (mouture-seule) */
   produitApporte?: string;
   /** Si true, applique les styles d'impression thermique 80mm */
   printStyle?: boolean;
   /** Si true, affiche un bandeau "COPIE" (ticket réimprimé) */
   copie?: boolean;
+  // Legacy props — kept for backward compat (old tickets)
+  prixMoutureKg?: number;
+  prixMoutureTonne?: number;
+  prixMoutureSac?: number;
 }
 
 export function Ticket58mm({
@@ -41,15 +45,20 @@ export function Ticket58mm({
   totalGeneral,
   mouture = false,
   coutMouture = 0,
-  prixMoutureKg,
-  prixMoutureTonne,
-  prixMoutureSac,
+  prixParKg,
+  quantiteApporteeKg = 0,
+  quantiteAcheteeKg = 0,
   produitApporte,
   printStyle = true,
   copie = false,
+  prixMoutureKg,
 }: Ticket58mmProps) {
   const moutureSeule = mouture && lignes.length === 0;
   const totalProduits = lignes.reduce((a, l) => a + Number(l.total), 0);
+  // Unified: use prix_par_kg; fall back to legacy prixMoutureKg for old tickets
+  const prixKgDisplay = prixParKg ?? prixMoutureKg ?? null;
+  const totalMoudreKg = quantiteApporteeKg + quantiteAcheteeKg;
+  const hasBreakdown = totalMoudreKg > 0;
 
   return (
     <div
@@ -109,27 +118,32 @@ export function Ticket58mm({
       <hr className="border-black border-dashed my-1" />
       {mouture ? (
         <div className="space-y-0.5">
-          {!moutureSeule && <div className="text-center text-[9px] font-bold">─── MOUTURE ───</div>}
-          {!moutureSeule && <div className="text-[10px] font-semibold">MOUTURE : OUI</div>}
-          {prixMoutureKg != null && prixMoutureKg > 0 && (
+          {!moutureSeule && (
+            <div className="text-center text-[9px] font-bold">─── MOUTURE ───</div>
+          )}
+          {hasBreakdown && (
+            <>
+              <div className="flex justify-between text-[9px]">
+                <span>Apporté</span>
+                <span>{fmt(quantiteApporteeKg, 3)} kg</span>
+              </div>
+              <div className="flex justify-between text-[9px]">
+                <span>Acheté</span>
+                <span>{fmt(quantiteAcheteeKg, 3)} kg</span>
+              </div>
+              <div className="flex justify-between text-[9px] font-semibold border-t border-dashed border-black pt-0.5 mt-0.5">
+                <span>Total moudre</span>
+                <span>{fmt(totalMoudreKg, 3)} kg</span>
+              </div>
+            </>
+          )}
+          {prixKgDisplay != null && prixKgDisplay > 0 && (
             <div className="flex justify-between text-[9px]">
-              <span>Mouture/kg</span>
-              <span>{fmt(prixMoutureKg)} FCFA/kg</span>
+              <span>Prix/kg</span>
+              <span>{fmt(prixKgDisplay)} FCFA</span>
             </div>
           )}
-          {prixMoutureTonne != null && prixMoutureTonne > 0 && (
-            <div className="flex justify-between text-[9px]">
-              <span>Mouture/tonne</span>
-              <span>{fmt(prixMoutureTonne)} FCFA/t</span>
-            </div>
-          )}
-          {prixMoutureSac != null && prixMoutureSac > 0 && (
-            <div className="flex justify-between text-[9px]">
-              <span>Mouture/sac</span>
-              <span>{fmt(prixMoutureSac)} FCFA/sac</span>
-            </div>
-          )}
-          <div className="flex justify-between text-[10px] font-medium">
+          <div className="flex justify-between text-[10px] font-semibold">
             <span>Coût mouture</span>
             <span>{fmt(coutMouture)} FCFA</span>
           </div>

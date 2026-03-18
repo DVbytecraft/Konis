@@ -40,6 +40,12 @@ class Ticket(models.Model):
         max_digits=12, decimal_places=2, null=True, blank=True,
         verbose_name="Prix mouture / sac",
     )
+    quantite_apportee_client = models.DecimalField(
+        max_digits=12, decimal_places=3,
+        default=Decimal("0"), blank=True,
+        verbose_name="Quantité grain apportée par le client (kg, normalisé)",
+        help_text="Toujours stocké en kg après normalisation.",
+    )
     cout_mouture = models.DecimalField(
         max_digits=12, decimal_places=2, default=Decimal("0"),
         verbose_name="Coût total mouture",

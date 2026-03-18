@@ -25,7 +25,10 @@ def _setup_base():
         mouture_enabled=True,
     )
     produit_kg = Produit.objects.create(nom="Maïs kg", code="MKG", unite="kg", entreprise=ent)
-    produit_sac = Produit.objects.create(nom="Mil sac", code="MSC", unite="sac", entreprise=ent)
+    produit_sac = Produit.objects.create(
+        nom="Mil sac", code="MSC", unite="sac", entreprise=ent,
+        poids_par_sac=Decimal("50.000"),  # 1 sac = 50 kg
+    )
     return ent, boutique, usine, produit_kg, produit_sac
 
 
@@ -125,7 +128,9 @@ class TestVenteBoutique(APITestCase):
         self.assertFalse(ticket.mouture)
 
     def test_vente_avec_mouture_multi_unites_total_exact(self):
-        """Le total inclut produit + mouture pour chaque unite vendue."""
+        """Vente mixte kg + sac : mouture calculée sur le total kg normalisé (formule unifiée)."""
+        # produit_kg : 10 × kg = 10 kg
+        # produit_sac : 3 × 50 kg/sac = 150 kg  →  total = 160 kg × 25 = 4000
         ticket = vente_boutique(
             self.boutique,
             [
@@ -134,30 +139,30 @@ class TestVenteBoutique(APITestCase):
             ],
             mouture=True,
             prix_mouture_kg=Decimal("25"),
-            prix_mouture_sac=Decimal("200"),
         )
-        montant_produits = Decimal("10") * Decimal("500") + Decimal("3") * Decimal("1000")
-        cout_mouture = Decimal("10") * Decimal("25") + Decimal("3") * Decimal("200")
+        montant_produits = Decimal("10") * Decimal("500") + Decimal("3") * Decimal("1000")  # 8000
+        total_kg = Decimal("10") + Decimal("3") * Decimal("50")  # 160 kg
+        cout_mouture = (total_kg * Decimal("25")).quantize(Decimal("0.01"))  # 4000
         self.assertEqual(ticket.cout_mouture, cout_mouture)
         self.assertEqual(ticket.montant_total, montant_produits + cout_mouture)
 
-    def test_vente_avec_mouture_refusee_si_prix_unite_manquant(self):
-        """Si une unite vendue n'a pas de tarif mouture, la vente est refusee."""
+    def test_vente_avec_mouture_produit_sac_sans_poids_leve_erreur(self):
+        """ErreurStock levée si produit.unite='sac' et poids_par_sac non défini."""
+        produit_sac_sans_poids = Produit.objects.create(
+            nom="Sac sans poids", code="SSP", unite="sac", entreprise=self.ent
+        )
+        Stock.objects.create(produit=produit_sac_sans_poids, lieu=self.boutique, quantite=Decimal("10"))
         with self.assertRaises(ErreurStock) as ctx:
             vente_boutique(
                 self.boutique,
-                [
-                    (self.produit_kg, Decimal("2"), Decimal("500")),
-                    (self.produit_sac, Decimal("1"), Decimal("1000")),
-                ],
+                [(produit_sac_sans_poids, Decimal("1"), Decimal("500"))],
                 mouture=True,
                 prix_mouture_kg=Decimal("50"),
-                prix_mouture_sac=None,
             )
-        self.assertIn("prix mouture manquant", str(ctx.exception).lower())
+        self.assertIn("poids_par_sac", str(ctx.exception).lower())
 
     def test_vente_avec_mouture_refusee_sur_unite_non_supportee(self):
-        """La mouture est refusee si l'unite produit ne correspond a aucun tarif."""
+        """La mouture est refusée si l'unité produit n'est pas kg/tonne/sac."""
         produit_piece = Produit.objects.create(nom="Bloc mineral", code="BMIN", unite="piece", entreprise=self.ent)
         Stock.objects.create(produit=produit_piece, lieu=self.boutique, quantite=Decimal("5"))
         with self.assertRaises(ErreurStock) as ctx:
@@ -167,7 +172,7 @@ class TestVenteBoutique(APITestCase):
                 mouture=True,
                 prix_mouture_kg=Decimal("10"),
             )
-        self.assertIn("unite produit non supportee", str(ctx.exception).lower())
+        self.assertIn("non support", str(ctx.exception).lower())
 
 
 class TestVenteMoutureSeule(APITestCase):
@@ -181,9 +186,10 @@ class TestVenteMoutureSeule(APITestCase):
         """Mouture-seule crée un ticket sans LigneVente et sans déduire stock."""
         ticket, created = vente_mouture_seule(
             lieu=self.boutique,
-            quantite=Decimal("50"),
+            quantite_apportee=Decimal("50"),
+            quantite_achetee=Decimal("0"),
             unite="kg",
-            prix_unitaire=Decimal("100"),
+            prix_par_kg=Decimal("100"),
         )
         self.assertTrue(created)
         self.assertEqual(ticket.lignes.count(), 0)
@@ -194,21 +200,23 @@ class TestVenteMoutureSeule(APITestCase):
         """Le champ produit_apporte est enregistré correctement."""
         ticket, created = vente_mouture_seule(
             lieu=self.boutique,
-            quantite=Decimal("100"),
+            quantite_apportee=Decimal("100"),
+            quantite_achetee=Decimal("0"),
             unite="kg",
-            prix_unitaire=Decimal("80"),
+            prix_par_kg=Decimal("80"),
             produit_apporte="Maïs local",
         )
         self.assertTrue(created)
         self.assertEqual(ticket.produit_apporte, "Maïs local")
 
     def test_mouture_seule_prix_mouture_kg_set(self):
-        """Si unite=kg, prix_mouture_kg est rempli."""
+        """prix_par_kg est toujours stocké dans prix_mouture_kg (champ unifié)."""
         ticket, created = vente_mouture_seule(
             lieu=self.boutique,
-            quantite=Decimal("30"),
+            quantite_apportee=Decimal("30"),
+            quantite_achetee=Decimal("0"),
             unite="kg",
-            prix_unitaire=Decimal("120"),
+            prix_par_kg=Decimal("120"),
         )
         self.assertTrue(created)
         self.assertEqual(ticket.prix_mouture_kg, Decimal("120"))
@@ -221,33 +229,38 @@ class TestVenteMoutureSeule(APITestCase):
         stock_avant = Stock.objects.get(produit=self.produit_kg, lieu=self.boutique).quantite
         vente_mouture_seule(
             lieu=self.boutique,
-            quantite=Decimal("50"),
+            quantite_apportee=Decimal("50"),
+            quantite_achetee=Decimal("0"),
             unite="kg",
-            prix_unitaire=Decimal("100"),
+            prix_par_kg=Decimal("100"),
         )
         stock_apres = Stock.objects.get(produit=self.produit_kg, lieu=self.boutique).quantite
         self.assertEqual(stock_avant, stock_apres)
 
     def test_mouture_seule_fonctionne_sur_usine(self):
-        """Mouture-seule fonctionne sur un lieu usine."""
+        """Mouture-seule fonctionne sur un lieu usine (unité tonne)."""
+        # 1 tonne @ 50 FCFA/kg = 1000 kg × 50 = 50 000 FCFA
         ticket, created = vente_mouture_seule(
             lieu=self.usine,
-            quantite=Decimal("1"),
+            quantite_apportee=Decimal("1"),
+            quantite_achetee=Decimal("0"),
             unite="tonne",
-            prix_unitaire=Decimal("50000"),
+            prix_par_kg=Decimal("50"),
         )
         self.assertTrue(created)
         self.assertEqual(ticket.lieu, self.usine)
-        self.assertEqual(ticket.montant_total, Decimal("50000"))
-        self.assertEqual(ticket.prix_mouture_tonne, Decimal("50000"))
+        self.assertEqual(ticket.montant_total, Decimal("50000.00"))
+        # prix_par_kg stocké dans le champ unifié prix_mouture_kg
+        self.assertEqual(ticket.prix_mouture_kg, Decimal("50"))
 
     def test_montant_total_coherent_avec_champs_db(self):
         """montant_total stocké == cout_mouture (aucun produit)."""
         ticket, created = vente_mouture_seule(
             lieu=self.boutique,
-            quantite=Decimal("200"),
+            quantite_apportee=Decimal("200"),
+            quantite_achetee=Decimal("0"),
             unite="kg",
-            prix_unitaire=Decimal("75"),
+            prix_par_kg=Decimal("75"),
         )
         self.assertTrue(created)
         self.assertEqual(ticket.montant_total, ticket.cout_mouture)
@@ -257,16 +270,18 @@ class TestVenteMoutureSeule(APITestCase):
         """Même idempotency_key => même ticket, sans duplication."""
         t1, created1 = vente_mouture_seule(
             lieu=self.boutique,
-            quantite=Decimal("10"),
+            quantite_apportee=Decimal("10"),
+            quantite_achetee=Decimal("0"),
             unite="kg",
-            prix_unitaire=Decimal("50"),
+            prix_par_kg=Decimal("50"),
             idempotency_key="mouture-uniq-1",
         )
         t2, created2 = vente_mouture_seule(
             lieu=self.boutique,
-            quantite=Decimal("10"),
+            quantite_apportee=Decimal("10"),
+            quantite_achetee=Decimal("0"),
             unite="kg",
-            prix_unitaire=Decimal("50"),
+            prix_par_kg=Decimal("50"),
             idempotency_key="mouture-uniq-1",
         )
         self.assertTrue(created1)

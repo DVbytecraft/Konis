@@ -37,7 +37,7 @@ from inventaire.models import Stock
 from inventaire.services import ErreurStock
 from produits.models import Produit
 from ventes.models import Ticket, TicketReprint
-from ventes.services import vente_boutique, vente_mouture_seule
+from ventes.services import normaliser_quantite_en_kg, vente_boutique, vente_mouture_seule
 
 
 class StockBoutiqueViewSet(ModelViewSet):
@@ -184,8 +184,31 @@ class VenteBoutiqueViewSet(ModelViewSet):
 
         mouture = ser.validated_data.get("mouture", False)
         prix_mouture_kg = ser.validated_data.get("prix_mouture_kg")
-        prix_mouture_tonne = ser.validated_data.get("prix_mouture_tonne")
-        prix_mouture_sac = ser.validated_data.get("prix_mouture_sac")
+
+        # Grain apporté par le client — normaliser en kg
+        quantite_apportee_client_kg = Decimal("0")
+        if mouture:
+            qty_apportee = ser.validated_data.get("quantite_apportee_mouture") or Decimal("0")
+            if qty_apportee > 0:
+                unite_apportee = ser.validated_data.get("unite_apportee_mouture", "kg")
+                produit_ref_apportee = None
+                produit_id_apportee = ser.validated_data.get("produit_id_apportee")
+                if produit_id_apportee:
+                    try:
+                        produit_ref_apportee = Produit.objects.get(
+                            pk=produit_id_apportee, entreprise=lieu.entreprise
+                        )
+                    except Produit.DoesNotExist:
+                        return Response(
+                            {"detail": f"Produit apportée {produit_id_apportee} introuvable."},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+                try:
+                    quantite_apportee_client_kg = normaliser_quantite_en_kg(
+                        qty_apportee, unite_apportee, produit_ref_apportee
+                    )
+                except ErreurStock as e:
+                    return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             ticket = vente_boutique(
@@ -193,8 +216,7 @@ class VenteBoutiqueViewSet(ModelViewSet):
                 lignes,
                 mouture=mouture,
                 prix_mouture_kg=prix_mouture_kg,
-                prix_mouture_tonne=prix_mouture_tonne,
-                prix_mouture_sac=prix_mouture_sac,
+                quantite_apportee_client_kg=quantite_apportee_client_kg,
             )
         except ErreurStock as e:
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
@@ -280,14 +302,32 @@ class MoutureSeuleView(APIView):
             )
 
         produit_nom = ser.validated_data.get("produit_nom", "")
-        ticket, created = vente_mouture_seule(
-            lieu=lieu,
-            quantite=ser.validated_data["quantite"],
-            unite=ser.validated_data["unite"],
-            prix_unitaire=ser.validated_data["prix_unitaire"],
-            produit_apporte=produit_nom,
-            idempotency_key=idempotency_key,
-        )
+        produit_ref = None
+        produit_id = ser.validated_data.get("produit_id")
+        if produit_id:
+            try:
+                produit_ref = Produit.objects.get(
+                    pk=produit_id, entreprise=request.user.entreprise
+                )
+            except Produit.DoesNotExist:
+                return Response(
+                    {"detail": f"Produit {produit_id} introuvable ou non autorisé."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        try:
+            ticket, created = vente_mouture_seule(
+                lieu=lieu,
+                quantite_apportee=ser.validated_data["quantite_apportee"],
+                quantite_achetee=ser.validated_data["quantite_achetee"],
+                unite=ser.validated_data["unite"],
+                prix_par_kg=ser.validated_data["prix_par_kg"],
+                produit_apporte=produit_nom,
+                produit_ref=produit_ref,
+                idempotency_key=idempotency_key,
+            )
+        except ErreurStock as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         if created:
             audit_log(

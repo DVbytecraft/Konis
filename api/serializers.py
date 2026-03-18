@@ -373,7 +373,9 @@ class TicketSerializer(serializers.ModelSerializer):
         fields = (
             "id", "lieu", "lieu_nom", "date", "numero", "lignes",
             # Mouture
-            "produit_apporte", "mouture", "prix_mouture_kg", "prix_mouture_tonne", "prix_mouture_sac",
+            "produit_apporte", "mouture",
+            "prix_mouture_kg", "prix_mouture_tonne", "prix_mouture_sac",
+            "quantite_apportee_client",
             "cout_mouture", "montant_total", "lignes_count", "mouture_source",
         )
 
@@ -383,19 +385,27 @@ class VenteBoutiqueCreateSerializer(serializers.Serializer):
         child=serializers.DictField(),
         help_text="[{produit: int, quantite: decimal, prix_unitaire: decimal}, ...]",
     )
-    # Champs mouture (tous optionnels)
+    # Champs mouture — formule unifiée en kg
     mouture = serializers.BooleanField(default=False)
     prix_mouture_kg = serializers.DecimalField(
         max_digits=12, decimal_places=2, min_value=Decimal("0"),
         required=False, allow_null=True, default=None,
+        help_text="Prix mouture FCFA/kg. Toutes les unités sont normalisées en kg.",
     )
-    prix_mouture_tonne = serializers.DecimalField(
-        max_digits=12, decimal_places=2, min_value=Decimal("0"),
-        required=False, allow_null=True, default=None,
+    # Grain supplémentaire apporté par le client (en plus des produits achetés)
+    quantite_apportee_mouture = serializers.DecimalField(
+        max_digits=12, decimal_places=3, min_value=Decimal("0"),
+        required=False, default=Decimal("0"),
+        help_text="Quantité grain apportée par le client (dans l'unité unite_apportee_mouture).",
     )
-    prix_mouture_sac = serializers.DecimalField(
-        max_digits=12, decimal_places=2, min_value=Decimal("0"),
+    unite_apportee_mouture = serializers.ChoiceField(
+        choices=["kg", "tonne", "sac"],
+        required=False, default="kg",
+        help_text="Unité de la quantité apportée.",
+    )
+    produit_id_apportee = serializers.IntegerField(
         required=False, allow_null=True, default=None,
+        help_text="ID produit pour conversion sac→kg (poids_par_sac). Requis si unite_apportee_mouture='sac'.",
     )
 
     def validate_lignes(self, value):
@@ -422,39 +432,69 @@ class VenteBoutiqueCreateSerializer(serializers.Serializer):
 
     def validate(self, data):
         if data.get("mouture"):
-            has_price = any(
-                value is not None
-                for value in (
-                    data.get("prix_mouture_kg"),
-                    data.get("prix_mouture_tonne"),
-                    data.get("prix_mouture_sac"),
-                )
-            )
-            if not has_price:
+            if not data.get("prix_mouture_kg"):
                 raise serializers.ValidationError(
-                    "Mouture demandée : au moins un prix (kg, tonne ou sac) est requis."
+                    "Mouture demandée : prix_mouture_kg (FCFA/kg) est requis. "
+                    "Toutes les unités (sac, tonne) sont normalisées en kg avant calcul."
                 )
+            if (data.get("quantite_apportee_mouture") or Decimal("0")) > 0:
+                if data.get("unite_apportee_mouture") == "sac" and not data.get("produit_id_apportee"):
+                    raise serializers.ValidationError(
+                        "unite_apportee_mouture='sac' : produit_id_apportee requis "
+                        "pour la conversion kg (poids_par_sac)."
+                    )
         return data
 
 
 class MoutureSeuleSerializer(serializers.Serializer):
-    """Sérialiseur pour le service mouture-seule (sans achat de produits)."""
-    quantite = serializers.DecimalField(
-        max_digits=12, decimal_places=3, min_value=Decimal("0.001"),
-        help_text="Quantité à moudre (ex: 50 pour 50 kg)"
+    """
+    Sérialiseur pour le service mouture-seule (sans déduction de stock).
+
+    Supporte 3 scénarios :
+      1. Mouture seule     — quantite_apportee > 0, quantite_achetee = 0
+      2. Mouture étendue   — quantite_apportee > 0, quantite_achetee > 0
+      3. Achat seul moudre — quantite_apportee = 0, quantite_achetee > 0
+
+    Formule : cout = (apportee_kg + achetee_kg) × prix_par_kg
+    """
+    quantite_apportee = serializers.DecimalField(
+        max_digits=12, decimal_places=3, min_value=Decimal("0"),
+        required=False, default=Decimal("0"),
+        help_text="Quantité apportée par le client (dans l'unité 'unite').",
+    )
+    quantite_achetee = serializers.DecimalField(
+        max_digits=12, decimal_places=3, min_value=Decimal("0"),
+        required=False, default=Decimal("0"),
+        help_text="Quantité achetée/additionnelle à moudre (dans l'unité 'unite').",
     )
     unite = serializers.ChoiceField(
         choices=["kg", "tonne", "sac"],
-        help_text="Unité de mesure : kg, tonne ou sac"
+        help_text="Unité de mesure commune aux deux quantités.",
     )
-    prix_unitaire = serializers.DecimalField(
+    prix_par_kg = serializers.DecimalField(
         max_digits=12, decimal_places=2, min_value=Decimal("0"),
-        help_text="Prix par unité (FCFA)"
+        help_text="Prix mouture FCFA/kg. Toutes les unités sont normalisées en kg.",
     )
     produit_nom = serializers.CharField(
         max_length=255, required=False, allow_blank=True, default="",
-        help_text="Nom du produit apporté par le client (ex: Maïs, Manioc…)"
+        help_text="Nom du grain apporté (ex: Maïs, Manioc…). Affiché sur le ticket.",
     )
+    produit_id = serializers.IntegerField(
+        required=False, allow_null=True, default=None,
+        help_text="ID produit pour conversion sac→kg (poids_par_sac). Requis si unite='sac'.",
+    )
+
+    def validate(self, data):
+        total = data.get("quantite_apportee", Decimal("0")) + data.get("quantite_achetee", Decimal("0"))
+        if total <= Decimal("0"):
+            raise serializers.ValidationError(
+                "La somme quantite_apportee + quantite_achetee doit être > 0."
+            )
+        if data.get("unite") == "sac" and not data.get("produit_id"):
+            raise serializers.ValidationError(
+                "unite='sac' : produit_id requis pour la conversion kg (poids_par_sac)."
+            )
+        return data
 
 
 class LigneFactureSerializer(serializers.ModelSerializer):

@@ -341,41 +341,53 @@ class TestMoutureSeuleSerializer(APITestCase):
 
     def test_donnees_valides_passent(self):
         """Données correctes passent la validation."""
-        ser = self._ser({"quantite": "50", "unite": "kg", "prix_unitaire": "100"})
+        ser = self._ser({"quantite_apportee": "50", "quantite_achetee": "0", "unite": "kg", "prix_par_kg": "100"})
         self.assertTrue(ser.is_valid(), ser.errors)
 
     def test_quantite_zero_rejetee(self):
-        """Quantité <= 0 est refusée (min_value=0.001)."""
-        ser = self._ser({"quantite": "0", "unite": "kg", "prix_unitaire": "100"})
+        """apportee=0 ET achetee=0 → refusé (total must be > 0)."""
+        ser = self._ser({"quantite_apportee": "0", "quantite_achetee": "0", "unite": "kg", "prix_par_kg": "100"})
         self.assertFalse(ser.is_valid())
 
     def test_unite_invalide_rejetee(self):
         """Une unité non autorisée est refusée."""
-        ser = self._ser({"quantite": "10", "unite": "litre", "prix_unitaire": "50"})
+        ser = self._ser({"quantite_apportee": "10", "quantite_achetee": "0", "unite": "litre", "prix_par_kg": "50"})
         self.assertFalse(ser.is_valid())
 
     def test_unites_autorisees(self):
-        """kg, tonne et sac sont les unités autorisées."""
-        for unite in ("kg", "tonne", "sac"):
-            ser = self._ser({"quantite": "10", "unite": unite, "prix_unitaire": "50"})
+        """kg et tonne sont validés sans produit_id ; sac requiert produit_id."""
+        for unite in ("kg", "tonne"):
+            ser = self._ser({"quantite_apportee": "10", "quantite_achetee": "0", "unite": unite, "prix_par_kg": "50"})
             self.assertTrue(ser.is_valid(), f"Échec pour unite={unite}: {ser.errors}")
+        # sac nécessite produit_id (n'importe quel entier passe la validation serializer)
+        ser_sac = self._ser({
+            "quantite_apportee": "2", "quantite_achetee": "0",
+            "unite": "sac", "prix_par_kg": "50", "produit_id": 1,
+        })
+        self.assertTrue(ser_sac.is_valid(), f"Échec pour unite=sac: {ser_sac.errors}")
+
+    def test_sac_sans_produit_id_rejete(self):
+        """unite=sac sans produit_id est refusé."""
+        ser = self._ser({"quantite_apportee": "2", "quantite_achetee": "0", "unite": "sac", "prix_par_kg": "50"})
+        self.assertFalse(ser.is_valid())
 
     def test_produit_nom_optionnel(self):
         """Le champ produit_nom est optionnel et a une valeur par défaut vide."""
-        ser = self._ser({"quantite": "30", "unite": "kg", "prix_unitaire": "75"})
+        ser = self._ser({"quantite_apportee": "30", "quantite_achetee": "0", "unite": "kg", "prix_par_kg": "75"})
         self.assertTrue(ser.is_valid(), ser.errors)
         self.assertEqual(ser.validated_data.get("produit_nom", ""), "")
 
     def test_produit_nom_enregistre(self):
         """produit_nom est bien présent dans validated_data si fourni."""
         ser = self._ser({
-            "quantite": "30", "unite": "kg", "prix_unitaire": "75",
+            "quantite_apportee": "30", "quantite_achetee": "0",
+            "unite": "kg", "prix_par_kg": "75",
             "produit_nom": "Maïs importé",
         })
         self.assertTrue(ser.is_valid(), ser.errors)
         self.assertEqual(ser.validated_data["produit_nom"], "Maïs importé")
 
-    def test_prix_unitaire_zero_accepte(self):
-        """Prix unitaire = 0 est autorisé pour la mouture (min_value=0)."""
-        ser = self._ser({"quantite": "10", "unite": "kg", "prix_unitaire": "0"})
+    def test_prix_par_kg_zero_accepte(self):
+        """prix_par_kg = 0 est autorisé (mouture offerte — min_value=0)."""
+        ser = self._ser({"quantite_apportee": "10", "quantite_achetee": "0", "unite": "kg", "prix_par_kg": "0"})
         self.assertTrue(ser.is_valid(), ser.errors)
