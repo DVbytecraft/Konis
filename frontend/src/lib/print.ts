@@ -81,7 +81,7 @@ function buildTicketHtml(ticket: TicketPrintData): string {
   const prixKg = ticket.prix_par_kg ?? ticket.prix_mouture_kg ?? null;
   const apporteeKg = ticket.quantite_apportee_kg ?? 0;
   const acheteeKg = ticket.quantite_achetee_kg ?? 0;
-  const totalKg = ticket.total_mouture_kg ?? (apporteeKg + acheteeKg) || null;
+  const totalKg = (ticket.total_mouture_kg ?? (apporteeKg + acheteeKg)) || null;
   const hasBreakdown = (apporteeKg + acheteeKg) > 0;
 
   const moutureSection = ticket.mouture
