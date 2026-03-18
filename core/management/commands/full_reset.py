@@ -35,6 +35,8 @@ Invalidation JWT immédiate (TokenRevocationEpoch) :
 ATTENTION : Cette opération est irréversible. Effectuez un backup complet avant.
 """
 
+import os
+
 from django.apps import apps
 from django.core.management.base import BaseCommand, CommandError
 from django.db import connection, transaction
@@ -241,6 +243,14 @@ class Command(BaseCommand):
             else:
                 self.stdout.write("  — core.Entreprise : vide")
 
+            # Étape 4b : recréer l'entreprise principale et lier le superadmin
+            entreprise_nom = os.environ.get("KONIS_ENTREPRISE_NOM", "KONIS")
+            entreprise = Entreprise.objects.create(nom=entreprise_nom)
+            CustomUser.objects.filter(pk=superadmin.pk).update(entreprise=entreprise)
+            self.stdout.write(
+                self.style.SUCCESS(f"  ✓ Entreprise '{entreprise_nom}' recréée (id={entreprise.pk})")
+            )
+
             # Étape 5 : réinitialiser les séquences PostgreSQL
             self._reset_sequences()
 
@@ -289,10 +299,9 @@ class Command(BaseCommand):
         self.stdout.write("")
         self.stdout.write("  Prochaines étapes :")
         self.stdout.write("  1. Connectez-vous avec le superadmin")
-        self.stdout.write("  2. Créez l'entreprise via Admin Django ou l'API")
-        self.stdout.write("  3. Créez les usines et boutiques")
-        self.stdout.write("  4. Créez les comptes utilisateurs opérationnels")
-        self.stdout.write("  5. Saisissez les catégories et produits")
+        self.stdout.write("  2. Créez les usines et boutiques")
+        self.stdout.write("  3. Créez les comptes utilisateurs opérationnels")
+        self.stdout.write("  4. Saisissez les catégories et produits")
         self.stdout.write("")
         self.stdout.write(
             "  Vérification base : python manage.py check_db --after-reset --sequences"
