@@ -8,6 +8,7 @@ export default function HomePage() {
   const { user, loading } = useAuth();
   const router = useRouter();
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (loading) return;
     if (!user) {
