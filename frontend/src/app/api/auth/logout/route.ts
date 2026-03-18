@@ -29,14 +29,14 @@ export async function POST(request: NextRequest) {
   res.cookies.set(COOKIE_ACCESS, "", {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
+    sameSite: "strict",
     path: "/",
     maxAge: 0,
   });
   res.cookies.set(COOKIE_REFRESH, "", {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
+    sameSite: "strict",
     path: "/",
     maxAge: 0,
   });

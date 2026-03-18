@@ -17,8 +17,9 @@ Règles d'intégrité :
 
 from decimal import Decimal
 
-from django.core.validators import MinValueValidator
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+from django.db.models import CheckConstraint, Q
 
 from core.models import CustomUser, Entreprise
 from produits.models import Produit
@@ -101,6 +102,10 @@ class JournalPayable(models.Model):
         verbose_name        = "Journal payable"
         verbose_name_plural = "Journaux payables"
         ordering            = ["-created_at"]
+        constraints         = [
+            CheckConstraint(condition=Q(montant_initial__gte=Decimal("0.01")), name="jpayable_montant_initial_min"),
+            CheckConstraint(condition=Q(montant_paye__gte=0), name="jpayable_montant_paye_non_negatif"),
+        ]
         indexes             = [
             models.Index(fields=["creancier", "statut"],       name="jpayable_creancier_statut_idx"),
             models.Index(fields=["statut", "date_echeance"],   name="jpayable_statut_echeance_idx"),
@@ -137,6 +142,9 @@ class PaiementPayable(models.Model):
         verbose_name        = "Paiement payable"
         verbose_name_plural = "Paiements payables"
         ordering            = ["-date", "-created_at"]
+        constraints         = [
+            CheckConstraint(condition=Q(montant__gte=Decimal("0.01")), name="paiement_payable_montant_min"),
+        ]
         indexes             = [
             models.Index(fields=["journal", "date"], name="paiement_payable_jrn_date_idx"),
         ]
@@ -198,6 +206,10 @@ class JournalCreance(models.Model):
         verbose_name        = "Journal de créance"
         verbose_name_plural = "Journaux de créances"
         ordering            = ["-created_at"]
+        constraints         = [
+            CheckConstraint(condition=Q(montant_initial__gte=Decimal("0.01")), name="jcreance_montant_initial_min"),
+            CheckConstraint(condition=Q(montant_paye__gte=0), name="jcreance_montant_paye_non_negatif"),
+        ]
         indexes             = [
             models.Index(fields=["client", "statut"],         name="jcreance_client_statut_idx"),
             models.Index(fields=["statut", "date_echeance"],  name="jcreance_statut_echeance_idx"),
@@ -233,6 +245,10 @@ class LigneCreance(models.Model):
     class Meta:
         verbose_name        = "Ligne de créance"
         verbose_name_plural = "Lignes de créances"
+        constraints         = [
+            CheckConstraint(condition=Q(quantite__gt=0), name="lignecreance_quantite_positive"),
+            CheckConstraint(condition=Q(prix_unitaire__gte=0), name="lignecreance_prix_non_negatif"),
+        ]
 
     @property
     def total(self) -> Decimal:
@@ -261,6 +277,9 @@ class PaiementCreance(models.Model):
         verbose_name        = "Paiement créance"
         verbose_name_plural = "Paiements créances"
         ordering            = ["-date", "-created_at"]
+        constraints         = [
+            CheckConstraint(condition=Q(montant__gte=Decimal("0.01")), name="paiement_creance_montant_min"),
+        ]
         indexes             = [
             models.Index(fields=["journal", "date"], name="paiement_creance_jrn_date_idx"),
         ]
@@ -294,8 +313,8 @@ class Emprunt(models.Model):
     )
     taux_interet      = models.DecimalField(
         max_digits=5, decimal_places=2, null=True, blank=True,
-        validators=[MinValueValidator(Decimal("0"))],
-        help_text="Taux annuel en %",
+        validators=[MinValueValidator(Decimal("0")), MaxValueValidator(Decimal("100"))],
+        help_text="Taux annuel en % (0–100)",
     )
     date_debut        = models.DateField()
     date_echeance     = models.DateField(null=True, blank=True)
@@ -309,6 +328,18 @@ class Emprunt(models.Model):
         verbose_name        = "Emprunt"
         verbose_name_plural = "Emprunts"
         ordering            = ["-created_at"]
+        constraints         = [
+            CheckConstraint(condition=Q(montant_initial__gte=Decimal("0.01")), name="emprunt_montant_initial_min"),
+            CheckConstraint(condition=Q(montant_rembourse__gte=0), name="emprunt_montant_rembourse_non_negatif"),
+            CheckConstraint(
+                condition=Q(taux_interet__isnull=True) | Q(taux_interet__gte=0),
+                name="emprunt_taux_non_negatif",
+            ),
+            CheckConstraint(
+                condition=Q(taux_interet__isnull=True) | Q(taux_interet__lte=100),
+                name="emprunt_taux_max_100",
+            ),
+        ]
         indexes             = [
             models.Index(fields=["entreprise", "statut"], name="emprunt_ent_statut_idx"),
         ]
@@ -343,6 +374,9 @@ class RemboursementEmprunt(models.Model):
         verbose_name        = "Remboursement d'emprunt"
         verbose_name_plural = "Remboursements d'emprunts"
         ordering            = ["-date", "-created_at"]
+        constraints         = [
+            CheckConstraint(condition=Q(montant__gte=Decimal("0.01")), name="remboursement_montant_min"),
+        ]
         indexes             = [
             models.Index(fields=["emprunt", "date"], name="remboursement_emprunt_date_idx"),
         ]
@@ -382,6 +416,9 @@ class CaisseSupremeTransaction(models.Model):
         verbose_name        = "Transaction caisse suprême"
         verbose_name_plural = "Transactions caisse suprême"
         ordering            = ["-date", "-created_at"]
+        constraints         = [
+            CheckConstraint(condition=Q(montant__gte=Decimal("0.01")), name="caisse_montant_min"),
+        ]
         indexes             = [
             models.Index(fields=["entreprise", "date"],             name="caisse_ent_date_idx"),
             models.Index(fields=["entreprise", "type_transaction"], name="caisse_ent_type_idx"),
@@ -409,7 +446,7 @@ class Projet(models.Model):
     description    = models.TextField(blank=True)
     budget_initial = models.DecimalField(
         max_digits=14, decimal_places=2,
-        validators=[MinValueValidator(Decimal("0"))],
+        validators=[MinValueValidator(Decimal("0.01"))],
     )
     statut         = models.CharField(max_length=10, choices=STATUT_CHOICES, default="en_cours")
     date_debut     = models.DateField()
@@ -422,6 +459,9 @@ class Projet(models.Model):
         verbose_name        = "Projet"
         verbose_name_plural = "Projets"
         ordering            = ["-created_at"]
+        constraints         = [
+            CheckConstraint(condition=Q(budget_initial__gte=Decimal("0.01")), name="projet_budget_initial_positif"),
+        ]
         indexes             = [
             models.Index(fields=["entreprise", "statut"], name="projet_ent_statut_idx"),
         ]
@@ -447,6 +487,9 @@ class DepenseProjet(models.Model):
         verbose_name        = "Dépense projet"
         verbose_name_plural = "Dépenses projets"
         ordering            = ["-date", "-created_at"]
+        constraints         = [
+            CheckConstraint(condition=Q(montant__gte=Decimal("0.01")), name="depense_projet_montant_min"),
+        ]
         indexes             = [
             models.Index(fields=["projet", "date"], name="depense_projet_date_idx"),
         ]
@@ -472,6 +515,9 @@ class DepotProjet(models.Model):
         verbose_name        = "Dépôt projet"
         verbose_name_plural = "Dépôts projets"
         ordering            = ["-date", "-created_at"]
+        constraints         = [
+            CheckConstraint(condition=Q(montant__gte=Decimal("0.01")), name="depot_projet_montant_min"),
+        ]
         indexes             = [
             models.Index(fields=["projet", "date"], name="depot_projet_date_idx"),
         ]

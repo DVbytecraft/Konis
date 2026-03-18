@@ -157,7 +157,18 @@ class LieuViewSet(ModelViewSet):
             )
 
     def perform_destroy(self, instance):
-        instance.delete()
+        # Soft-delete : is_active=False plutôt que suppression physique.
+        # Préserve l'intégrité des logs audit, tickets et mouvements historiques.
+        instance.is_active = False
+        instance.save(update_fields=["is_active", "updated_at"])
+        audit_log(
+            user=self.request.user,
+            action="lieu_desactive",
+            object_type="lieu",
+            object_id=instance.pk,
+            extra={"lieu_nom": instance.nom},
+            request=self.request,
+        )
         _bump_locations_cache_version()
 
     def get_queryset(self):
@@ -355,10 +366,9 @@ class LocationByTypeView(APIView):
             return Response(cached)
 
         qs = Lieu.objects.all().select_related("entreprise")
-        if request.user.role != CustomUser.ROLE_ADMIN and effective_ent is None:
+        if effective_ent is None:
             return Response([], status=status.HTTP_200_OK)
-        if effective_ent:
-            qs = qs.filter(entreprise_id=effective_ent)
+        qs = qs.filter(entreprise_id=effective_ent)
         if not include_inactive:
             qs = qs.filter(is_active=True)
         if type_param:
@@ -534,8 +544,21 @@ class DepenseViewSet(ModelViewSet):
             qs = qs.filter(lieu__entreprise_id=effective_id)
         return _filter_by_lieu(qs, self.request)
 
+    def create(self, request, *args, **kwargs):
+        key = (request.headers.get("Idempotency-Key") or "").strip()[:128] or None
+        if key:
+            existing = Depense.objects.filter(
+                lieu__entreprise=request.user.entreprise,
+                idempotency_key=key,
+            ).first()
+            if existing is not None:
+                serializer = self.get_serializer(existing)
+                return Response(serializer.data, status=status.HTTP_200_OK)
+        return super().create(request, *args, **kwargs)
+
     def perform_create(self, serializer):
-        depense = serializer.save()
+        key = (self.request.headers.get("Idempotency-Key") or "").strip()[:128] or None
+        depense = serializer.save(idempotency_key=key)
         audit_log(
             user=self.request.user,
             action="depense_ajoutee",

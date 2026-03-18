@@ -107,6 +107,7 @@ REST_FRAMEWORK = {
         "mouture_create": "60/minute",
         "facture_create": "30/minute",
         "usine_create": "30/minute",
+        "finance_create": "30/minute",
     },
     # Pagination par défaut : 50 items/page, paramètre ?page=N
     # Les vues qui veulent TOUT retourner doivent mettre pagination_class = None explicitement.

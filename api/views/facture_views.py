@@ -154,7 +154,7 @@ class FactureDetailView(APIView):
                 return None
             return facture
         if request.user.role == CustomUser.ROLE_COMPTABLE:
-            if request.user.entreprise_id and facture.lieu.entreprise_id != request.user.entreprise_id:
+            if not request.user.entreprise_id or facture.lieu.entreprise_id != request.user.entreprise_id:
                 return None
             return facture
         if request.user.lieu_id and facture.lieu_id == request.user.lieu_id:

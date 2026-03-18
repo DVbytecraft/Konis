@@ -97,9 +97,14 @@ class UserSerializer(serializers.ModelSerializer):
     def get_fields(self):
         fields = super().get_fields()
         request = self.context.get("request")
-        if request and request.user and request.user.entreprise_id:
-            # Scoper le queryset lieu à l'entreprise de l'admin — évite l'IDOR cross-tenant
-            fields["lieu"].queryset = Lieu.objects.filter(entreprise_id=request.user.entreprise_id)
+        user = getattr(request, "user", None)
+        entreprise_id = getattr(user, "entreprise_id", None)
+        # Fail-safe : .none() si pas d'entreprise identifiée — évite IDOR cross-tenant
+        fields["lieu"].queryset = (
+            Lieu.objects.filter(entreprise_id=entreprise_id)
+            if entreprise_id
+            else Lieu.objects.none()
+        )
         return fields
 
     def validate_username(self, value):
@@ -116,6 +121,12 @@ class UserSerializer(serializers.ModelSerializer):
         return data
 
     def _validate_role_lieu(self, *, role, lieu):
+        # Vérification cross-tenant : le lieu doit appartenir à l'entreprise de l'admin
+        request = self.context.get("request")
+        user_ent_id = getattr(getattr(request, "user", None), "entreprise_id", None)
+        if lieu and user_ent_id and lieu.entreprise_id != user_ent_id:
+            raise serializers.ValidationError({"lieu": "Lieu hors de votre entreprise."})
+
         if role in (CustomUser.ROLE_ADMIN, CustomUser.ROLE_COMPTABLE):
             return
         if role == CustomUser.ROLE_BOUTIQUE:
@@ -568,8 +579,12 @@ class BoutiqueStockReceiptSerializer(serializers.Serializer):
         fields = super().get_fields()
         request = self.context.get("request")
         entreprise = getattr(getattr(request, "user", None), "entreprise", None)
-        if entreprise:
-            fields["product_id"].queryset = Produit.objects.filter(entreprise=entreprise)
+        # Fail-safe : .none() si pas d'entreprise — évite IDOR cross-tenant
+        fields["product_id"].queryset = (
+            Produit.objects.filter(entreprise=entreprise)
+            if entreprise
+            else Produit.objects.none()
+        )
         return fields
 
 
@@ -599,7 +614,9 @@ class DepenseSerializer(serializers.ModelSerializer):
             "date",
             "libelle",
             "created_at",
+            "updated_at",
         )
+        read_only_fields = ("created_at", "updated_at")
 
     def validate_montant(self, value):
         if value is not None and value < 0:
@@ -660,10 +677,12 @@ class LotProductionCreateSerializer(serializers.Serializer):
         fields = super().get_fields()
         request = self.context.get("request")
         entreprise = getattr(getattr(request, "user", None), "entreprise", None)
-        if entreprise:
-            fields["produit_fini"].queryset = Produit.objects.filter(
-                entreprise=entreprise, category=Produit.CATEGORY_FINISHED
-            )
+        # Fail-safe : .none() si pas d'entreprise — évite IDOR cross-tenant
+        fields["produit_fini"].queryset = (
+            Produit.objects.filter(entreprise=entreprise, category=Produit.CATEGORY_FINISHED)
+            if entreprise
+            else Produit.objects.none()
+        )
         return fields
 
     def validate(self, attrs):

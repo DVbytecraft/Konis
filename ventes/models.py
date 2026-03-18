@@ -1,7 +1,7 @@
 from decimal import Decimal
 
 from django.db import models
-from django.db.models import Q, UniqueConstraint
+from django.db.models import CheckConstraint, Q, UniqueConstraint
 
 from core.models import CustomUser, Lieu
 from produits.models import Produit
@@ -67,6 +67,21 @@ class Ticket(models.Model):
                 condition=Q(idempotency_key__isnull=False),
                 name="unique_ticket_lieu_idempotency_key",
             ),
+            CheckConstraint(condition=Q(montant_total__gte=0), name="ticket_montant_total_positif"),
+            CheckConstraint(condition=Q(cout_mouture__gte=0), name="ticket_cout_mouture_positif"),
+            CheckConstraint(condition=Q(quantite_apportee_client__gte=0), name="ticket_quantite_apportee_positif"),
+            CheckConstraint(
+                condition=Q(prix_mouture_kg__isnull=True) | Q(prix_mouture_kg__gte=0),
+                name="ticket_prix_mouture_kg_positif",
+            ),
+            CheckConstraint(
+                condition=Q(prix_mouture_tonne__isnull=True) | Q(prix_mouture_tonne__gte=0),
+                name="ticket_prix_mouture_tonne_positif",
+            ),
+            CheckConstraint(
+                condition=Q(prix_mouture_sac__isnull=True) | Q(prix_mouture_sac__gte=0),
+                name="ticket_prix_mouture_sac_positif",
+            ),
         ]
         indexes = [
             models.Index(fields=["lieu", "date"]),
@@ -109,7 +124,7 @@ class TicketReprint(models.Model):
 class LigneVente(models.Model):
     """Ligne d'une vente : produit, quantité, prix unitaire."""
     ticket = models.ForeignKey(
-        Ticket, on_delete=models.CASCADE, related_name="lignes"
+        Ticket, on_delete=models.PROTECT, related_name="lignes"
     )
     produit = models.ForeignKey(
         Produit, on_delete=models.PROTECT, related_name="lignes_vente"
@@ -120,6 +135,10 @@ class LigneVente(models.Model):
     class Meta:
         verbose_name = "Ligne de vente"
         verbose_name_plural = "Lignes de vente"
+        constraints = [
+            CheckConstraint(condition=Q(quantite__gt=0), name="lignevente_quantite_positive"),
+            CheckConstraint(condition=Q(prix_unitaire__gte=0), name="lignevente_prix_unitaire_positif"),
+        ]
 
     def __str__(self):
         return f"{self.produit} x {self.quantite} @ {self.prix_unitaire}"
@@ -164,6 +183,7 @@ class Facture(models.Model):
         ordering = ["-date"]
         constraints = [
             UniqueConstraint(fields=["lieu", "numero"], name="unique_facture_lieu_numero"),
+            CheckConstraint(condition=Q(total__gte=0), name="facture_total_positif"),
         ]
         indexes = [
             models.Index(fields=["lieu", "date"]),
@@ -176,7 +196,7 @@ class Facture(models.Model):
 
 class LigneFacture(models.Model):
     """Ligne d'une facture (produit optionnel pour lignes libres)."""
-    facture = models.ForeignKey(Facture, on_delete=models.CASCADE, related_name="lignes")
+    facture = models.ForeignKey(Facture, on_delete=models.PROTECT, related_name="lignes")
     produit = models.ForeignKey(
         Produit,
         on_delete=models.PROTECT,
@@ -191,6 +211,10 @@ class LigneFacture(models.Model):
     class Meta:
         verbose_name = "Ligne de facture"
         verbose_name_plural = "Lignes de facture"
+        constraints = [
+            CheckConstraint(condition=Q(quantite__gt=0), name="lignefacture_quantite_positive"),
+            CheckConstraint(condition=Q(prix_unitaire__gte=0), name="lignefacture_prix_unitaire_positif"),
+        ]
 
     def __str__(self):
         return f"{self.description} x {self.quantite} @ {self.prix_unitaire}"

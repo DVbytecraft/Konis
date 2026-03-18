@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser
 from django.db import models
+from django.db.models import CheckConstraint, Q
 
 
 class TokenRevocationEpoch(models.Model):
@@ -109,6 +110,16 @@ class Lieu(models.Model):
     class Meta:
         verbose_name = "Lieu"
         verbose_name_plural = "Lieux"
+        constraints = [
+            CheckConstraint(
+                condition=Q(prix_mouture_defaut__isnull=True) | Q(prix_mouture_defaut__gt=0),
+                name="lieu_prix_mouture_defaut_positif",
+            ),
+            CheckConstraint(
+                condition=Q(prix_mouture_max__isnull=True) | Q(prix_mouture_max__gt=0),
+                name="lieu_prix_mouture_max_positif",
+            ),
+        ]
 
 
 class CustomUser(AbstractUser):

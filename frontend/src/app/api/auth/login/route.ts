@@ -38,7 +38,8 @@ export async function POST(request: NextRequest) {
       headers: {
         "Content-Type": "application/json",
         // Secret partagé Django↔Next.js — vérifié côté Django via INTERNAL_API_SECRET
-        "X-Proxy": process.env.INTERNAL_API_SECRET || "",
+        // Fail-fast si absent : une chaîne vide désactiverait silencieusement l'authentification proxy.
+        "X-Proxy": process.env.INTERNAL_API_SECRET ?? (() => { throw new Error("INTERNAL_API_SECRET non configuré"); })(),
       },
       body: JSON.stringify({ username, password }),
     });

@@ -464,6 +464,9 @@ def enregistrer_transaction_caisse(
     - verifier_solde : si True, lève SoldeInsuffisantError si retrait > solde disponible
     """
     if type_transaction == "retrait" and verifier_solde:
+        # Verrouiller la ligne entreprise pour sérialiser les retraits concurrents
+        # et éviter la race condition (double retrait simultané → découvert).
+        Entreprise.objects.select_for_update().get(pk=entreprise.pk)
         solde_actuel = get_solde_caisse(entreprise)
         if montant > solde_actuel:
             raise SoldeInsuffisantError(

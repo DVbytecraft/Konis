@@ -112,7 +112,7 @@ class LotProductionUsineViewSet(ModelViewSet):
 
     def create(self, request, *args, **kwargs):
         data = request.data
-        ser = LotProductionCreateSerializer(data=data)
+        ser = LotProductionCreateSerializer(data=data, context={"request": request})
         ser.is_valid(raise_exception=True)
         d = ser.validated_data
         lieu_usine = d["lieu_usine"]

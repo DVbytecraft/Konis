@@ -153,14 +153,21 @@ class TestLotProductionCreateSerializer(APITestCase):
 
     @classmethod
     def setUpTestData(cls):
-        ent = Entreprise.objects.create(nom="ENT Lot")
+        cls.ent = Entreprise.objects.create(nom="ENT Lot")
         cls.usine = Lieu.objects.create(
-            entreprise=ent, nom="Usine Lot", code="ULT", type_lieu=Lieu.TYPE_USINE
+            entreprise=cls.ent, nom="Usine Lot", code="ULT", type_lieu=Lieu.TYPE_USINE
         )
-        cls.produit = Produit.objects.create(nom="P Lot", code="PLOT", unite="sac", entreprise=ent)
+        cls.produit = Produit.objects.create(
+            nom="P Lot", code="PLOT", unite="sac",
+            entreprise=cls.ent, category=Produit.CATEGORY_FINISHED,
+        )
 
     def _ser(self, data):
-        return LotProductionCreateSerializer(data=data)
+        from unittest.mock import MagicMock
+        request = MagicMock()
+        request.user.entreprise = self.ent
+        request.user.entreprise_id = self.ent.pk
+        return LotProductionCreateSerializer(data=data, context={"request": request})
 
     def _base(self, **extra):
         data = {

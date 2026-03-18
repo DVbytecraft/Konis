@@ -83,3 +83,16 @@ class UsineCreateRateThrottle(SimpleRateThrottle):
             "scope": self.scope,
             "ident": str(request.user.pk),
         }
+
+
+class FinanceCreateRateThrottle(SimpleRateThrottle):
+    """Limite les opérations de création finance (journaux, paiements, emprunts) par utilisateur."""
+    scope = "finance_create"
+
+    def get_cache_key(self, request, view):
+        if not (request.user and request.user.is_authenticated):
+            return None
+        return self.cache_format % {
+            "scope": self.scope,
+            "ident": str(request.user.pk),
+        }

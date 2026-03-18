@@ -1,5 +1,5 @@
 from django.db import models
-from django.db.models import CheckConstraint, Q
+from django.db.models import CheckConstraint, Q, UniqueConstraint
 
 from core.models import Lieu
 from inventaire.models import Transfert
@@ -16,7 +16,7 @@ class LotProduction(models.Model):
         (UNITE_TONNES, "Tonnes"),
     ]
 
-    nom_lot = models.CharField(max_length=100, unique=True)
+    nom_lot = models.CharField(max_length=100)
     lieu_usine = models.ForeignKey(Lieu, on_delete=models.PROTECT, related_name="lots_production")
     produit_fini = models.ForeignKey(Produit, on_delete=models.PROTECT, related_name="lots_production")
     created_by = models.ForeignKey(
@@ -36,6 +36,7 @@ class LotProduction(models.Model):
         constraints = [
             CheckConstraint(condition=Q(quantite_sacs__gt=0), name="lot_quantite_sacs_positive"),
             CheckConstraint(condition=Q(poids__gte=0), name="lot_poids_non_negatif"),
+            UniqueConstraint(fields=["lieu_usine", "nom_lot"], name="unique_nom_lot_par_usine"),
         ]
         indexes = [
             models.Index(fields=["lieu_usine", "created_at"]),

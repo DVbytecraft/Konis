@@ -13,6 +13,7 @@ from rest_framework.viewsets import GenericViewSet
 from rest_framework.mixins import ListModelMixin, RetrieveModelMixin, CreateModelMixin
 
 from api.permissions import IsDafRole
+from api.throttling import FinanceCreateRateThrottle
 from api.serializers_finance import (
     CaisseTransactionCreateSerializer,
     CaisseTransactionSerializer,
@@ -99,6 +100,7 @@ class CreancierViewSet(ListModelMixin, RetrieveModelMixin, CreateModelMixin, Gen
     PATCH  /api/finance/creanciers/{id}/  — modifier nom/contact/notes
     """
     permission_classes = [IsDafRole]
+    throttle_classes = [FinanceCreateRateThrottle]
 
     def get_queryset(self):
         ent_id = self.request.user.entreprise_id
@@ -146,6 +148,7 @@ class JournalPayableViewSet(ListModelMixin, RetrieveModelMixin, CreateModelMixin
     POST /api/finance/journaux-payables/{id}/solder/   — solder manuellement
     """
     permission_classes = [IsDafRole]
+    throttle_classes = [FinanceCreateRateThrottle]
 
     def get_queryset(self):
         ent_id = self.request.user.entreprise_id
@@ -236,6 +239,7 @@ class JournalPayableViewSet(ListModelMixin, RetrieveModelMixin, CreateModelMixin
 
 class ClientFinanceViewSet(ListModelMixin, RetrieveModelMixin, CreateModelMixin, GenericViewSet):
     permission_classes = [IsDafRole]
+    throttle_classes = [FinanceCreateRateThrottle]
 
     def get_queryset(self):
         ent_id = self.request.user.entreprise_id
@@ -283,6 +287,7 @@ class JournalCreanceViewSet(ListModelMixin, RetrieveModelMixin, CreateModelMixin
     POST /api/finance/journaux-creances/{id}/solder/   — solder manuellement
     """
     permission_classes = [IsDafRole]
+    throttle_classes = [FinanceCreateRateThrottle]
 
     def get_queryset(self):
         ent_id = self.request.user.entreprise_id
@@ -383,6 +388,7 @@ class EmpruntViewSet(ListModelMixin, RetrieveModelMixin, CreateModelMixin, Gener
     POST /api/finance/emprunts/{id}/remboursement/ — enregistrer remboursement
     """
     permission_classes = [IsDafRole]
+    throttle_classes = [FinanceCreateRateThrottle]
 
     def get_queryset(self):
         ent_id = self.request.user.entreprise_id
@@ -448,6 +454,7 @@ class CaisseSupremeViewSet(ListModelMixin, CreateModelMixin, GenericViewSet):
     POST /api/finance/caisse/ — enregistrer dépôt ou retrait
     """
     permission_classes = [IsDafRole]
+    throttle_classes = [FinanceCreateRateThrottle]
 
     def get_queryset(self):
         ent_id = self.request.user.entreprise_id
@@ -519,6 +526,7 @@ class ProjetViewSet(ListModelMixin, RetrieveModelMixin, CreateModelMixin, Generi
     PATCH /api/finance/projets/{id}/statut/  — changer statut (en_cours/termine/suspendu)
     """
     permission_classes = [IsDafRole]
+    throttle_classes = [FinanceCreateRateThrottle]
 
     def get_queryset(self):
         ent_id = self.request.user.entreprise_id

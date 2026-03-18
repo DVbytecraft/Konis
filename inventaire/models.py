@@ -17,6 +17,7 @@ class Stock(models.Model):
     quantite = models.DecimalField(
         max_digits=12, decimal_places=2, default=0
     )
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         verbose_name = "Stock"
@@ -69,7 +70,7 @@ class Transfert(models.Model):
 class MouvementStock(models.Model):
     """Ligne d'un transfert : produit et quantité déplacée."""
     transfert = models.ForeignKey(
-        Transfert, on_delete=models.CASCADE, related_name="mouvements"
+        Transfert, on_delete=models.PROTECT, related_name="mouvements"
     )
     produit = models.ForeignKey(
         Produit, on_delete=models.PROTECT, related_name="mouvements_transfert"

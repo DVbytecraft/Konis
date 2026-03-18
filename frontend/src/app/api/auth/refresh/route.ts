@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
     res.cookies.set(COOKIE_ACCESS, access, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
+      sameSite: "strict",
       path: "/",
       maxAge: MAX_AGE_ACCESS,
     });
@@ -46,7 +46,7 @@ export async function POST(request: NextRequest) {
       res.cookies.set(COOKIE_REFRESH, data.refresh, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
+        sameSite: "strict",
         path: "/",
         maxAge: MAX_AGE_REFRESH,
       });

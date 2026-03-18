@@ -1,5 +1,5 @@
 from django.db import models
-from django.db.models import CheckConstraint, Q
+from django.db.models import CheckConstraint, Q, UniqueConstraint
 
 from core.models import Lieu
 
@@ -36,6 +36,11 @@ class Depense(models.Model):
     date = models.DateField()
     libelle = models.CharField(max_length=500, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    idempotency_key = models.CharField(
+        max_length=128, null=True, blank=True, db_index=True,
+        help_text="Clé idempotente de création (anti double soumission).",
+    )
 
     class Meta:
         verbose_name = "Dépense"
@@ -43,6 +48,11 @@ class Depense(models.Model):
         ordering = ["-date"]
         constraints = [
             CheckConstraint(condition=Q(montant__gte=0), name="depense_montant_positive"),
+            UniqueConstraint(
+                fields=["lieu", "idempotency_key"],
+                condition=Q(idempotency_key__isnull=False),
+                name="unique_depense_lieu_idempotency_key",
+            ),
         ]
         indexes = [
             models.Index(fields=["lieu", "date"]),

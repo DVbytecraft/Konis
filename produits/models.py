@@ -1,4 +1,5 @@
 from django.db import models
+from django.db.models import CheckConstraint, Q
 
 
 def _default_entreprise_id():
@@ -70,7 +71,11 @@ class Produit(models.Model):
             models.UniqueConstraint(
                 fields=["entreprise", "code"],
                 name="unique_produit_code_par_entreprise",
-            )
+            ),
+            CheckConstraint(
+                condition=Q(poids_par_sac__isnull=True) | Q(poids_par_sac__gt=0),
+                name="produit_poids_par_sac_positif",
+            ),
         ]
         indexes = [
             models.Index(fields=["nom"]),
