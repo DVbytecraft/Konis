@@ -204,11 +204,19 @@ class Command(BaseCommand):
             Lieu = apps.get_model("core", "Lieu")
             Entreprise = apps.get_model("core", "Entreprise")
 
-            # Détacher le superadmin de son lieu et entreprise AVANT de les supprimer.
+            # Détacher le superadmin de son lieu et entreprise AVANT de les supprimer,
+            # et assigner le rôle supreme_admin (createsuperuser laisse role=boutique par défaut).
             # On utilise QuerySet.update() et non instance.save() pour contourner le
             # override CustomUser.save() qui, en mode SINGLE_ENTREPRISE, réassignerait
             # immédiatement l'entreprise primaire (→ ProtectedError à l'étape 4).
-            CustomUser.objects.filter(pk=superadmin.pk).update(lieu=None, entreprise=None)
+            CustomUser.objects.filter(pk=superadmin.pk).update(
+                lieu=None,
+                entreprise=None,
+                role=CustomUser.ROLE_SUPREME_ADMIN,
+            )
+            self.stdout.write(
+                self.style.SUCCESS(f"  ✓ Rôle superadmin → supreme_admin")
+            )
 
             # Supprimer tous les autres utilisateurs
             deleted_users, _ = CustomUser.objects.exclude(pk=superadmin.pk).delete()
