@@ -1,6 +1,7 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Poppins } from "next/font/google";
 import { AuthProvider } from "@/contexts/auth-context";
+import { PwaRegister } from "@/components/pwa-register";
 import "./globals.css";
 
 const poppins = Poppins({
@@ -12,7 +13,20 @@ const poppins = Poppins({
 
 export const metadata: Metadata = {
   title: "KONIS – Gestion provenderie",
-  description: "Application de gestion KONIS",
+  description: "Application de gestion AGRO KONIS",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "KONIS",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#16a34a",
+  width: "device-width",
+  initialScale: 1,
+  minimumScale: 1,
 };
 
 export default function RootLayout({
@@ -22,11 +36,15 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="fr" className="overflow-x-hidden">
-      <head><meta charSet="utf-8" /></head>
+      <head>
+        <meta charSet="utf-8" />
+        <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+      </head>
       <body
         className={`${poppins.variable} min-h-screen bg-background font-sans antialiased text-base`}
       >
         <AuthProvider>{children}</AuthProvider>
+        <PwaRegister />
       </body>
     </html>
   );
