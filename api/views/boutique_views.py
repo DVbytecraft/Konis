@@ -7,11 +7,13 @@ Règles d'accès :
   - Stock : lecture seule pour boutique (alimentation via cessions usine uniquement)
   - Ventes : création + lecture pour boutique et admin
 """
+import csv
 from datetime import timedelta
 from decimal import Decimal
 
 from django.db import transaction
 from django.db.models import Count, Sum
+from django.http import HttpResponse
 from django.utils import timezone
 
 from rest_framework import status
@@ -479,3 +481,84 @@ class MoutureStatsView(APIView):
             "prix_defaut": str(lieu.prix_mouture_defaut) if lieu.prix_mouture_defaut else None,
             "prix_max": str(lieu.prix_mouture_max) if lieu.prix_mouture_max else None,
         })
+
+
+class MoutureExportView(APIView):
+    """
+    GET /api/boutique/mouture-export/
+    Export CSV de l'historique mouture du lieu.
+
+    Paramètres :
+      ?debut=YYYY-MM-DD   date de début (défaut : 30 derniers jours)
+      ?fin=YYYY-MM-DD     date de fin   (défaut : aujourd'hui)
+      ?source=seule|vente filtre par type (optionnel)
+
+    Colonnes CSV :
+      Date, Ticket, Lieu, Type, Grain, Apporté(kg), Achet&#233;(kg), Total(kg),
+      Prix/kg (FCFA), Coût mouture (FCFA), Montant total (FCFA)
+    """
+    permission_classes = [IsAuthenticated, IsBoutiqueRole | IsAdminRole]
+
+    def get(self, request):
+        lieu = get_lieu_boutique(request)
+        if not lieu:
+            return Response({"detail": "Lieu requis."}, status=status.HTTP_400_BAD_REQUEST)
+
+        today = timezone.now().date()
+        debut_str = request.query_params.get("debut")
+        fin_str = request.query_params.get("fin")
+        try:
+            from datetime import date
+            debut = date.fromisoformat(debut_str) if debut_str else today - timedelta(days=29)
+            fin = date.fromisoformat(fin_str) if fin_str else today
+        except ValueError:
+            return Response({"detail": "Format date invalide (YYYY-MM-DD)."}, status=status.HTTP_400_BAD_REQUEST)
+
+        qs = (
+            Ticket.objects.filter(lieu=lieu, mouture=True, date__date__gte=debut, date__date__lte=fin)
+            .annotate(lignes_count=Count("lignes"))
+            .order_by("date")
+        )
+        source = (request.query_params.get("source") or "").strip().lower()
+        if source in {"seule", "mouture_seule"}:
+            qs = qs.filter(lignes_count=0)
+        elif source in {"vente", "vente_avec_mouture"}:
+            qs = qs.filter(lignes_count__gt=0)
+
+        filename = f"mouture_{lieu.nom.replace(' ', '_')}_{debut}_{fin}.csv"
+        response = HttpResponse(content_type="text/csv; charset=utf-8")
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        # BOM UTF-8 pour compatibilité Excel
+        response.write("\ufeff")
+
+        writer = csv.writer(response, delimiter=";")
+        writer.writerow([
+            "Date", "Ticket", "Lieu", "Type", "Grain",
+            "Apporté (kg)", "Acheté (kg)", "Total (kg)",
+            "Prix/kg (FCFA)", "Coût mouture (FCFA)", "Montant total (FCFA)",
+        ])
+
+        for ticket in qs:
+            apportee_kg = float(ticket.quantite_apportee_client or 0)
+            prix_kg = float(ticket.prix_mouture_kg or 0)
+            cout = float(ticket.cout_mouture or 0)
+            total_kg = (cout / prix_kg) if prix_kg > 0 else apportee_kg
+            achetee_kg = max(0.0, total_kg - apportee_kg)
+            t_type = (
+                "Mouture seule" if ticket.lignes_count == 0 else "Vente + mouture"
+            )
+            writer.writerow([
+                ticket.date.strftime("%d/%m/%Y %H:%M"),
+                ticket.numero,
+                lieu.nom,
+                t_type,
+                ticket.produit_apporte or "",
+                f"{apportee_kg:.3f}",
+                f"{achetee_kg:.3f}",
+                f"{total_kg:.3f}",
+                f"{prix_kg:.2f}",
+                f"{cout:.2f}",
+                f"{float(ticket.montant_total):.2f}",
+            ])
+
+        return response

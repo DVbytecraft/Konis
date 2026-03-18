@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Calculator, Printer, RotateCcw, Wheat } from "lucide-react";
+import { AlertTriangle, Calculator, Download, Printer, RotateCcw, Wheat } from "lucide-react";
 
 import { Ticket58mm } from "@/components/caisse/ticket-58mm";
 import { Button } from "@/components/ui/button";
@@ -52,6 +52,7 @@ interface MoutureConsoleProps {
   submitPath: "/boutique/mouture-seule/" | "/factory/mouture-seule/";
   historyPath: "/boutique/mouture-seule/" | "/factory/mouture-seule/";
   statsPath?: "/boutique/mouture-stats/";
+  exportPath?: "/boutique/mouture-export/";
   roleGuard: "boutique" | "usine";
   lieuLabel: "Boutique" | "Usine";
 }
@@ -78,6 +79,7 @@ export function MoutureConsole({
   submitPath,
   historyPath,
   statsPath,
+  exportPath,
   roleGuard,
   lieuLabel,
 }: MoutureConsoleProps) {
@@ -499,6 +501,16 @@ export function MoutureConsole({
             <CardTitle className="text-base flex items-center justify-between">
               <span>Historique Mouture</span>
               <div className="flex items-center gap-2">
+                {exportPath && (
+                  <a
+                    href={`/api${exportPath}`}
+                    download
+                    className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-muted transition-colors"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    CSV
+                  </a>
+                )}
                 <Button variant="outline" size="sm" onClick={refetch}>
                   Rafraîchir
                 </Button>

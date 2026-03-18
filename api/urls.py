@@ -6,7 +6,7 @@ from rest_framework.routers import DefaultRouter
 
 from api.views.auth_views import LoginView, RefreshView, LogoutView, MeView
 from api.views.health_views import HealthView, HealthCheckView
-from api.views.boutique_views import StockBoutiqueViewSet, ProduitBoutiqueViewSet, VenteBoutiqueViewSet, MoutureSeuleView, MoutureStatsView, TicketReprintView
+from api.views.boutique_views import StockBoutiqueViewSet, ProduitBoutiqueViewSet, VenteBoutiqueViewSet, MoutureSeuleView, MoutureStatsView, MoutureExportView, TicketReprintView
 from api.views.admin_views import (
     EntrepriseViewSet,
     FactoryViewSet,
@@ -140,6 +140,7 @@ urlpatterns = [
     path("locations/by-type/", LocationByTypeView.as_view(), name="locations-by-type"),
     path("boutique/mouture-seule/", MoutureSeuleView.as_view(), name="boutique-mouture-seule"),
     path("boutique/mouture-stats/", MoutureStatsView.as_view(), name="boutique-mouture-stats"),
+    path("boutique/mouture-export/", MoutureExportView.as_view(), name="boutique-mouture-export"),
     path("boutique/tickets/<int:ticket_id>/reimprimer/", TicketReprintView.as_view(), name="boutique-ticket-reimprimer"),
     path("boutique/", include(router_boutique.urls)),
     path("admin/", include(router_admin.urls)),

@@ -8,6 +8,7 @@ export default function BoutiqueMouturePage() {
       submitPath="/boutique/mouture-seule/"
       historyPath="/boutique/mouture-seule/"
       statsPath="/boutique/mouture-stats/"
+      exportPath="/boutique/mouture-export/"
       roleGuard="boutique"
       lieuLabel="Boutique"
     />

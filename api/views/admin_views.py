@@ -124,8 +124,35 @@ class LieuViewSet(ModelViewSet):
         _bump_locations_cache_version()
 
     def perform_update(self, serializer):
-        serializer.save()
+        # Audit des changements de prix mouture
+        instance = serializer.instance
+        old_defaut = instance.prix_mouture_defaut
+        old_max = instance.prix_mouture_max
+        updated = serializer.save()
         _bump_locations_cache_version()
+        prix_changes = {}
+        if updated.prix_mouture_defaut != old_defaut:
+            prix_changes["prix_mouture_defaut"] = {
+                "avant": str(old_defaut) if old_defaut is not None else None,
+                "apres": str(updated.prix_mouture_defaut) if updated.prix_mouture_defaut is not None else None,
+            }
+        if updated.prix_mouture_max != old_max:
+            prix_changes["prix_mouture_max"] = {
+                "avant": str(old_max) if old_max is not None else None,
+                "apres": str(updated.prix_mouture_max) if updated.prix_mouture_max is not None else None,
+            }
+        if prix_changes:
+            audit_log(
+                user=self.request.user,
+                action="lieu_prix_mouture_modifié",
+                object_type="lieu",
+                object_id=updated.pk,
+                extra={
+                    "lieu_nom": updated.nom,
+                    "operateur": self.request.user.username,
+                    **prix_changes,
+                },
+            )
 
     def perform_destroy(self, instance):
         instance.delete()
