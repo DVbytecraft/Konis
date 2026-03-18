@@ -31,9 +31,9 @@ nom = '${KONIS_ENTREPRISE_NOM:-KONIS}'
 e, created = Entreprise.objects.get_or_create(nom=nom)
 if created:
     print(f'==> [KONIS] Entreprise creee : {nom}')
-updated = User.objects.filter(is_superuser=True).exclude(role='admin').update(role='admin', entreprise=e)
+updated = User.objects.filter(is_superuser=True).exclude(role='supreme_admin').update(role='supreme_admin', entreprise=e)
 User.objects.filter(is_superuser=True, entreprise__isnull=True).update(entreprise=e)
-print(f'==> [KONIS] Superuser(s) mis a jour : role=admin, entreprise={nom}')
+print(f'==> [KONIS] Superuser(s) mis a jour : role=supreme_admin, entreprise={nom}')
 " || true
 fi
 

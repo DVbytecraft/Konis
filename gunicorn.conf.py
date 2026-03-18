@@ -29,7 +29,7 @@ threads = int(os.environ.get("GUNICORN_THREADS", 2))
 # ── Timeouts ──────────────────────────────────────────────────────────────────
 # 30s : toute requête web normale doit répondre en < 30s.
 # Les migrations sont gérées dans entrypoint.sh AVANT le démarrage de Gunicorn.
-timeout          = 30    # Worker tué si pas de réponse après 30s
+timeout          = 60    # Worker tué si pas de réponse après 60s (PDF ReportLab + lente DB)
 graceful_timeout = 20    # Temps pour finir les requêtes en cours au restart
 keepalive        = 5     # HTTP keep-alive (secondes)
 
