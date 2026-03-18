@@ -243,16 +243,17 @@ class Command(BaseCommand):
             else:
                 self.stdout.write("  — core.Entreprise : vide")
 
-            # Étape 4b : recréer l'entreprise principale et lier le superadmin
+            # Étape 5 : réinitialiser les séquences PostgreSQL
+            self._reset_sequences()
+
+            # Étape 5b : recréer l'entreprise principale APRÈS le reset des séquences
+            # (si fait avant, la séquence serait réinitialisée à 1 → conflit d'id au prochain reset)
             entreprise_nom = os.environ.get("KONIS_ENTREPRISE_NOM", "KONIS")
             entreprise = Entreprise.objects.create(nom=entreprise_nom)
             CustomUser.objects.filter(pk=superadmin.pk).update(entreprise=entreprise)
             self.stdout.write(
                 self.style.SUCCESS(f"  ✓ Entreprise '{entreprise_nom}' recréée (id={entreprise.pk})")
             )
-
-            # Étape 5 : réinitialiser les séquences PostgreSQL
-            self._reset_sequences()
 
             # Étape 6 : repositionner la séquence des utilisateurs au-delà du superadmin.
             # _reset_sequences() remet tout à 1, mais le superadmin conserve son id
