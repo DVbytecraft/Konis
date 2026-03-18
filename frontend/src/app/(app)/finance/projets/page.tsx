@@ -40,10 +40,9 @@ function toList<T>(data: Paginated<T> | T[]): T[] {
 
 function StatutBadge({ statut, label }: { statut: string; label: string }) {
   const cls =
-    statut === "actif" ? "bg-blue-100 text-blue-800" :
+    statut === "en_cours" ? "bg-blue-100 text-blue-800" :
     statut === "suspendu" ? "bg-yellow-100 text-yellow-800" :
     statut === "termine" ? "bg-green-100 text-green-800" :
-    statut === "annule" ? "bg-gray-100 text-gray-600" :
     "bg-gray-100 text-gray-600";
   return (
     <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${cls}`}>
@@ -53,10 +52,9 @@ function StatutBadge({ statut, label }: { statut: string; label: string }) {
 }
 
 const STATUT_OPTIONS = [
-  { value: "actif", label: "Actif" },
+  { value: "en_cours", label: "En cours" },
   { value: "suspendu", label: "Suspendu" },
   { value: "termine", label: "Terminé" },
-  { value: "annule", label: "Annulé" },
 ];
 
 const emptyProjetForm = {
@@ -91,7 +89,7 @@ export default function ProjetsPage() {
 
   const [activeAction, setActiveAction] = useState<ActiveAction | null>(null);
   const [actionForm, setActionForm] = useState(emptyMontantForm);
-  const [newStatut, setNewStatut] = useState("actif");
+  const [newStatut, setNewStatut] = useState("en_cours");
   const [actionSubmitting, setActionSubmitting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
