@@ -696,6 +696,7 @@ class MoutureSeuleUsineView(APIView):
                 object_type="ticket",
                 object_id=ticket.pk,
                 extra={"numero": ticket.numero, "montant_total": str(ticket.montant_total), "lieu": lieu.nom},
+                request=request,
             )
         else:
             audit_log(
@@ -704,6 +705,7 @@ class MoutureSeuleUsineView(APIView):
                 object_type="ticket",
                 object_id=ticket.pk,
                 extra={"numero": ticket.numero, "idempotency_key": idempotency_key, "lieu": lieu.nom},
+                request=request,
             )
         return Response(
             TicketSerializer(ticket).data,
@@ -791,5 +793,6 @@ class TransfertDirectUsineViewSet(ModelViewSet):
                 "to_lieu": to_lieu.nom,
                 "nb_lignes": len(lignes),
             },
+            request=request,
         )
         return Response(TransfertSerializer(transfert).data, status=status.HTTP_201_CREATED)

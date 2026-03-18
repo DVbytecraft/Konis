@@ -152,6 +152,7 @@ class LieuViewSet(ModelViewSet):
                     "operateur": self.request.user.username,
                     **prix_changes,
                 },
+                request=self.request,
             )
 
     def perform_destroy(self, instance):
@@ -254,6 +255,7 @@ class FactoryViewSet(ModelViewSet):
             object_type="lieu",
             object_id=factory.pk,
             extra={"factory_id": factory.pk, "factory_user_id": user.pk},
+            request=request,
         )
         return Response(FactorySerializer(factory).data, status=status.HTTP_201_CREATED)
 
@@ -296,6 +298,7 @@ class FactoryViewSet(ModelViewSet):
             object_type="lieu",
             object_id=factory.pk,
             extra={"factory_id": factory.pk},
+            request=request,
         )
         return Response(FactorySerializer(factory).data)
 
@@ -317,6 +320,7 @@ class FactoryViewSet(ModelViewSet):
             object_type="lieu",
             object_id=factory.pk,
             extra={"factory_id": factory.pk},
+            request=request,
         )
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -405,6 +409,7 @@ class UserViewSet(ModelViewSet):
             object_type="user",
             object_id=user.pk,
             extra=extra,
+            request=self.request,
         )
 
     def perform_destroy(self, instance):
@@ -414,6 +419,7 @@ class UserViewSet(ModelViewSet):
             object_type="user",
             object_id=instance.pk,
             extra={"username": instance.username, "role": instance.role},
+            request=self.request,
         )
         instance.delete()
 
@@ -522,4 +528,5 @@ class DepenseViewSet(ModelViewSet):
             object_type="depense",
             object_id=depense.pk,
             extra={"lieu_id": depense.lieu_id, "montant": str(depense.montant)},
+            request=self.request,
         )

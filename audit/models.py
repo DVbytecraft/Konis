@@ -17,6 +17,7 @@ class AuditLog(models.Model):
     object_type = models.CharField(max_length=64, blank=True)
     object_id = models.PositiveIntegerField(null=True, blank=True)
     extra = models.JSONField(default=dict, blank=True)
+    ip_address = models.GenericIPAddressField(null=True, blank=True, verbose_name="Adresse IP")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

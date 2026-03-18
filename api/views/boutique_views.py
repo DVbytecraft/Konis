@@ -96,6 +96,7 @@ class StockBoutiqueViewSet(ModelViewSet):
             object_type="stock",
             object_id=stock.pk,
             extra={"lieu_id": lieu.pk, "produit_id": produit.pk, "quantite": str(quantite)},
+            request=request,
         )
         return Response(StockSerializer(stock).data, status=status.HTTP_201_CREATED)
 
@@ -257,6 +258,7 @@ class VenteBoutiqueViewSet(ModelViewSet):
                 "operateur": request.user.username,
                 **mouture_extra,
             },
+            request=request,
         )
         return Response(TicketSerializer(ticket).data, status=status.HTTP_201_CREATED)
 
@@ -384,6 +386,7 @@ class MoutureSeuleView(APIView):
                     "lieu_id": lieu.pk,
                     "operateur": request.user.username,
                 },
+                request=request,
             )
         else:
             audit_log(
@@ -396,6 +399,7 @@ class MoutureSeuleView(APIView):
                     "idempotency_key": idempotency_key,
                     "operateur": request.user.username,
                 },
+                request=request,
             )
 
         return Response(
@@ -439,6 +443,7 @@ class TicketReprintView(APIView):
             object_type="ticket",
             object_id=ticket.pk,
             extra={"numero": ticket.numero, "lieu_id": lieu.pk},
+            request=request,
         )
         return Response(TicketSerializer(ticket).data, status=status.HTTP_200_OK)
 

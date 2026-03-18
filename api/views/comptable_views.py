@@ -119,6 +119,7 @@ class DepenseComptableViewSet(ModelViewSet):
             object_type="depense",
             object_id=depense.pk,
             extra={"lieu_id": depense.lieu_id, "montant": str(depense.montant), "source": "comptable"},
+            request=self.request,
         )
 
     def perform_update(self, serializer):
@@ -129,6 +130,7 @@ class DepenseComptableViewSet(ModelViewSet):
             object_type="depense",
             object_id=depense.pk,
             extra={"lieu_id": depense.lieu_id, "montant": str(depense.montant), "source": "comptable"},
+            request=self.request,
         )
 
     def perform_destroy(self, instance):
@@ -138,6 +140,7 @@ class DepenseComptableViewSet(ModelViewSet):
             object_type="depense",
             object_id=instance.pk,
             extra={"lieu_id": instance.lieu_id, "montant": str(instance.montant), "source": "comptable"},
+            request=self.request,
         )
         instance.delete()
 

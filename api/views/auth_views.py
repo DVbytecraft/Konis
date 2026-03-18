@@ -136,7 +136,7 @@ class LoginView(APIView):
         })
         
         _set_jwt_cookies(response, access, refresh)
-        audit_log(user=user, action="connexion", object_type="user", object_id=user.pk)
+        audit_log(user=user, action="connexion", object_type="user", object_id=user.pk, request=request)
         
         # Si appel depuis Next.js SSR (proxy interne), inclure les tokens pour que Next les place en cookies.
         # Authentifié par secret partagé INTERNAL_API_SECRET — jamais une valeur hardcodée.

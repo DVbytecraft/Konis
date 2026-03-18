@@ -108,6 +108,7 @@ class AchatMPSLViewSet(ModelViewSet):
                 "quantite": str(achat.quantite),
                 "prix_total": str(achat.prix_total),
             },
+            request=request,
         )
         return Response(AchatMPSLSerializer(achat).data, status=status.HTTP_201_CREATED)
 
@@ -189,6 +190,7 @@ class TransfertMPSLViewSet(ModelViewSet):
                 "to_lieu": to_lieu.nom,
                 "nb_lignes": len(lignes),
             },
+            request=request,
         )
         return Response(TransfertSerializer(transfert).data, status=status.HTTP_201_CREATED)
 
