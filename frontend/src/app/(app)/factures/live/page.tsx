@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/contexts/auth-context";
 import { apiFetch, apiUrl } from "@/lib/api";
+import { printFacture } from "@/lib/print";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -255,9 +256,21 @@ export default function FacturesPage() {
   }, [fetchInvoicePdfBlob]);
 
   const printInvoice = useCallback((facture: FactureItem) => {
-    setSelected(facture);
-    // Laisse le temps au DOM de rendre la modale avant d'imprimer
-    setTimeout(() => window.print(), 150);
+    printFacture({
+      numero: facture.numero,
+      date: new Date(facture.date).toLocaleString("fr-FR"),
+      lieu_nom: facture.lieu_nom,
+      client_nom: facture.client_nom,
+      client_contact: facture.client_contact,
+      notes: facture.notes,
+      lignes: facture.lignes.map((l) => ({
+        description: l.description,
+        quantite: l.quantite,
+        prix_unitaire: l.prix_unitaire,
+        total: l.total,
+      })),
+      total: facture.total,
+    });
   }, []);
 
   return (
@@ -435,8 +448,8 @@ export default function FacturesPage() {
             <p className="mt-4 text-right text-lg font-semibold">Total: {Number(selected.total).toFixed(2)}</p>
           </div>
 
-          <div className="print:hidden absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2">
-            <Button type="button" onClick={() => window.print()}>Imprimer A4</Button>
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2">
+            <Button type="button" onClick={() => printInvoice(selected)}>Imprimer A4</Button>
             <Button type="button" variant="outline" onClick={() => downloadInvoice(selected.id)}>Télécharger PDF</Button>
             <Button type="button" variant="outline" onClick={() => setSelected(null)}>Fermer</Button>
           </div>
