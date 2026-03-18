@@ -610,7 +610,8 @@ class MouturePdfExportView(APIView):
         from reportlab.lib.pagesizes import A4
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
         from reportlab.lib.units import mm
-        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable, Image as RLImage
+        from core.branding import KONIS_BRAND
 
         lieu = get_lieu_boutique(request)
         if not lieu:
@@ -661,8 +662,16 @@ class MouturePdfExportView(APIView):
         period_label = f"{debut.strftime('%d/%m/%Y')} → {fin.strftime('%d/%m/%Y')}"
         source_label = {"seule": "Mouture seule", "vente": "Vente + mouture", "": "Tous types"}.get(source, "Tous types")
 
-        story = [
-            Paragraph("KONIS — Service Mouture", title_style),
+        logo_path = (KONIS_BRAND.get("logo_path") or "").strip()
+        story = []
+        if logo_path:
+            try:
+                story.append(RLImage(logo_path, width=28 * mm, height=28 * mm, kind="proportional"))
+                story.append(Spacer(1, 2 * mm))
+            except Exception:
+                pass
+        story += [
+            Paragraph("AGRO KONIS — Service Mouture", title_style),
             Paragraph(f"{lieu.nom} | {period_label} | {source_label}", sub_style),
             Spacer(1, 4 * mm),
             HRFlowable(width="100%", thickness=1, color=GREEN),

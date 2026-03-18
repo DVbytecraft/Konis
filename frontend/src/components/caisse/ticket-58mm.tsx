@@ -76,6 +76,12 @@ export function Ticket58mm({
       }
     >
       {/* En-tête */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src="/logo-konis.png"
+        alt="AGRO KONIS"
+        style={{ width: "40mm", height: "auto", display: "block", margin: "0 auto 2px" }}
+      />
       <div className="text-center font-semibold text-xs uppercase tracking-wider">
         {lieuNom}
       </div>
