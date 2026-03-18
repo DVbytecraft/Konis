@@ -70,9 +70,11 @@ def _get_effective_entreprise_id(request) -> int | None:
         return Entreprise.get_primary().id
     if request.user and request.user.entreprise_id:
         return request.user.entreprise_id
-    entreprise_id = request.query_params.get("entreprise")
-    if entreprise_id and str(entreprise_id).isdigit():
-        return int(entreprise_id)
+    # Fallback explicite : uniquement le supreme_admin peut cibler une entreprise via query param.
+    if request.user and request.user.role == CustomUser.ROLE_SUPREME_ADMIN:
+        entreprise_id = request.query_params.get("entreprise")
+        if entreprise_id and str(entreprise_id).isdigit():
+            return int(entreprise_id)
     return None
 
 
@@ -453,6 +455,19 @@ class CategorieViewSet(ModelViewSet):
     serializer_class = CategorieSerializer
     permission_classes = [IsAdminRole]
 
+    def get_queryset(self):
+        qs = super().get_queryset().order_by("nom")
+        effective_id = _get_effective_entreprise_id(self.request)
+        if effective_id:
+            qs = qs.filter(entreprise_id=effective_id)
+        else:
+            qs = qs.none()
+        return qs
+
+    def perform_create(self, serializer):
+        entreprise = _ensure_user_entreprise(self.request.user)
+        serializer.save(entreprise=entreprise)
+
 
 class ProduitViewSet(ModelViewSet):
     """Admin supervision: lecture seule des produits (filtrés par entreprise de l'admin)."""
@@ -531,6 +546,19 @@ class CategorieDepenseViewSet(ModelViewSet):
     serializer_class = CategorieDepenseSerializer
     permission_classes = [IsAdminRole]
 
+    def get_queryset(self):
+        qs = super().get_queryset().order_by("nom")
+        effective_id = _get_effective_entreprise_id(self.request)
+        if effective_id:
+            qs = qs.filter(entreprise_id=effective_id)
+        else:
+            qs = qs.none()
+        return qs
+
+    def perform_create(self, serializer):
+        entreprise = _ensure_user_entreprise(self.request.user)
+        serializer.save(entreprise=entreprise)
+
 
 class DepenseViewSet(ModelViewSet):
     queryset = Depense.objects.all().select_related("lieu", "categorie")
@@ -541,14 +569,14 @@ class DepenseViewSet(ModelViewSet):
         qs = super().get_queryset()
         effective_id = _get_effective_entreprise_id(self.request)
         if effective_id:
-            qs = qs.filter(lieu__entreprise_id=effective_id)
+            qs = qs.filter(entreprise_id=effective_id)
         return _filter_by_lieu(qs, self.request)
 
     def create(self, request, *args, **kwargs):
         key = (request.headers.get("Idempotency-Key") or "").strip()[:128] or None
         if key:
             existing = Depense.objects.filter(
-                lieu__entreprise=request.user.entreprise,
+                entreprise=request.user.entreprise,
                 idempotency_key=key,
             ).first()
             if existing is not None:
@@ -558,12 +586,17 @@ class DepenseViewSet(ModelViewSet):
 
     def perform_create(self, serializer):
         key = (self.request.headers.get("Idempotency-Key") or "").strip()[:128] or None
-        depense = serializer.save(idempotency_key=key)
+        entreprise = self.request.user.entreprise
+        depense = serializer.save(idempotency_key=key, entreprise=entreprise)
         audit_log(
             user=self.request.user,
             action="depense_ajoutee",
             object_type="depense",
             object_id=depense.pk,
-            extra={"lieu_id": depense.lieu_id, "montant": str(depense.montant)},
+            extra={
+                "lieu_id": depense.lieu_id,
+                "lieu_nom": depense.lieu.nom if depense.lieu_id else "Autre",
+                "montant": str(depense.montant),
+            },
             request=self.request,
         )

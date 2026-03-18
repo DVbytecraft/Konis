@@ -103,8 +103,11 @@ class DepenseComptableViewSet(ModelViewSet):
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
 
     def get_queryset(self):
-        qs = super().get_queryset().filter(lieu__entreprise=self.request.user.entreprise)
-        qs = _filter_by_lieu(qs, self.request)
+        qs = super().get_queryset().filter(entreprise=self.request.user.entreprise)
+        if self.request.query_params.get("lieu_null") == "1":
+            qs = qs.filter(lieu__isnull=True)
+        else:
+            qs = _filter_by_lieu(qs, self.request)
         qs = _filter_by_date(qs, self.request)
         categorie_id = self.request.query_params.get("categorie")
         if categorie_id:
@@ -112,13 +115,18 @@ class DepenseComptableViewSet(ModelViewSet):
         return qs
 
     def perform_create(self, serializer):
-        depense = serializer.save()
+        depense = serializer.save(entreprise=self.request.user.entreprise)
         audit_log(
             user=self.request.user,
             action="depense_ajoutee",
             object_type="depense",
             object_id=depense.pk,
-            extra={"lieu_id": depense.lieu_id, "montant": str(depense.montant), "source": "comptable"},
+            extra={
+                "lieu_id": depense.lieu_id,
+                "lieu_nom": depense.lieu.nom if depense.lieu_id else "Autre",
+                "montant": str(depense.montant),
+                "source": "comptable",
+            },
             request=self.request,
         )
 
@@ -129,7 +137,12 @@ class DepenseComptableViewSet(ModelViewSet):
             action="depense_modifiee",
             object_type="depense",
             object_id=depense.pk,
-            extra={"lieu_id": depense.lieu_id, "montant": str(depense.montant), "source": "comptable"},
+            extra={
+                "lieu_id": depense.lieu_id,
+                "lieu_nom": depense.lieu.nom if depense.lieu_id else "Autre",
+                "montant": str(depense.montant),
+                "source": "comptable",
+            },
             request=self.request,
         )
 
@@ -139,7 +152,12 @@ class DepenseComptableViewSet(ModelViewSet):
             action="depense_supprimee",
             object_type="depense",
             object_id=instance.pk,
-            extra={"lieu_id": instance.lieu_id, "montant": str(instance.montant), "source": "comptable"},
+            extra={
+                "lieu_id": instance.lieu_id,
+                "lieu_nom": instance.lieu.nom if instance.lieu_id else "Autre",
+                "montant": str(instance.montant),
+                "source": "comptable",
+            },
             request=self.request,
         )
         instance.delete()
@@ -149,6 +167,13 @@ class CategorieDepenseComptableViewSet(ReadOnlyModelViewSet):
     queryset = CategorieDepense.objects.all().order_by("nom")
     serializer_class = CategorieDepenseSerializer
     permission_classes = [IsComptableRole]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        ent_id = self.request.user.entreprise_id
+        if not ent_id:
+            return qs.none()
+        return qs.filter(entreprise_id=ent_id)
 
 
 class AchatUsineComptableViewSet(ReadOnlyModelViewSet):

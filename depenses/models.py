@@ -4,8 +4,26 @@ from django.db.models import CheckConstraint, Q, UniqueConstraint
 from core.models import Lieu
 
 
+def _default_entreprise_id():
+    from core.models import Entreprise
+
+    ent = Entreprise.objects.order_by("id").first()
+    if ent:
+        return ent.id
+    raise ValueError(
+        "Aucune entreprise trouvée. Créez une entreprise avant de créer des catégories de dépense."
+    )
+
+
 class CategorieDepense(models.Model):
     """Catégorie de dépense."""
+    entreprise = models.ForeignKey(
+        "core.Entreprise",
+        on_delete=models.PROTECT,
+        related_name="categories_depenses",
+        default=_default_entreprise_id,
+        db_index=True,
+    )
     nom = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -15,12 +33,24 @@ class CategorieDepense(models.Model):
     class Meta:
         verbose_name = "Catégorie de dépense"
         verbose_name_plural = "Catégories de dépense"
+        indexes = [
+            models.Index(fields=["entreprise", "nom"]),
+        ]
 
 
 class Depense(models.Model):
-    """Dépense saisie par lieu."""
+    """Dépense — rattachée à un lieu ou sans lieu (Autre)."""
+    entreprise = models.ForeignKey(
+        "core.Entreprise",
+        on_delete=models.PROTECT,
+        related_name="depenses",
+        null=True,
+        blank=True,
+        db_index=True,
+    )
     lieu = models.ForeignKey(
-        Lieu, on_delete=models.PROTECT, related_name="depenses"
+        Lieu, on_delete=models.PROTECT, related_name="depenses",
+        null=True, blank=True,
     )
     categorie = models.ForeignKey(
         CategorieDepense, on_delete=models.PROTECT, related_name="depenses"
@@ -49,15 +79,17 @@ class Depense(models.Model):
         constraints = [
             CheckConstraint(condition=Q(montant__gte=0), name="depense_montant_positive"),
             UniqueConstraint(
-                fields=["lieu", "idempotency_key"],
+                fields=["entreprise", "idempotency_key"],
                 condition=Q(idempotency_key__isnull=False),
-                name="unique_depense_lieu_idempotency_key",
+                name="unique_depense_entreprise_idempotency_key",
             ),
         ]
         indexes = [
+            models.Index(fields=["entreprise", "date"]),
             models.Index(fields=["lieu", "date"]),
             models.Index(fields=["date"]),
         ]
 
     def __str__(self):
-        return f"{self.lieu} - {self.montant} ({self.date})"
+        lieu_label = self.lieu.nom if self.lieu_id else "Autre"
+        return f"{lieu_label} - {self.montant} ({self.date})"

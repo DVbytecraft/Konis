@@ -11,7 +11,7 @@ import { Pencil, Trash2, X } from "lucide-react";
 
 interface Depense {
   id: number;
-  lieu: number;
+  lieu: number | null;
   lieu_nom: string;
   categorie: number;
   categorie_nom: string;
@@ -97,7 +97,8 @@ export default function ComptableDepensesPage() {
 
   const buildQuery = useCallback((p: typeof filters) => {
     const params = new URLSearchParams();
-    if (p.lieuId) params.set("lieu", p.lieuId);
+    if (p.lieuId === "none") params.set("lieu_null", "1");
+    else if (p.lieuId) params.set("lieu", p.lieuId);
     if (p.categorieId) params.set("categorie", p.categorieId);
     if (p.debut) params.set("debut", p.debut);
     if (p.fin) params.set("fin", p.fin);
@@ -190,7 +191,7 @@ export default function ComptableDepensesPage() {
   const openEdit = (d: Depense) => {
     setEditDepense(d);
     setEditForm({
-      lieuId: String(d.lieu),
+      lieuId: d.lieu != null ? String(d.lieu) : "",
       categorieId: String(d.categorie),
       montant: String(d.montant ?? ""),
       date: d.date,
@@ -204,8 +205,8 @@ export default function ComptableDepensesPage() {
     setEditSubmitting(true);
     setEditError(null);
     try {
-      const payload = {
-        lieu: Number(editForm.lieuId),
+      const payload: Record<string, unknown> = {
+        lieu: editForm.lieuId ? Number(editForm.lieuId) : null,
         categorie: Number(editForm.categorieId),
         montant: editForm.montant,
         date: editForm.date,
@@ -241,15 +242,15 @@ export default function ComptableDepensesPage() {
     setError(null);
     setSuccess(null);
 
-    if (!form.lieuId || !form.categorieId || !form.montant || !form.date) {
-      setError("Lieu, catégorie, montant et date sont obligatoires.");
+    if (!form.categorieId || !form.montant || !form.date) {
+      setError("Catégorie, montant et date sont obligatoires.");
       return;
     }
 
     try {
       setSubmitting(true);
-      const payload = {
-        lieu: Number(form.lieuId),
+      const payload: Record<string, unknown> = {
+        lieu: form.lieuId ? Number(form.lieuId) : null,
         categorie: Number(form.categorieId),
         montant: form.montant,
         date: form.date,
@@ -300,13 +301,13 @@ export default function ComptableDepensesPage() {
         <CardContent>
           <form onSubmit={handleSubmit} className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
-              <Label>Lieu</Label>
+              <Label>Lieu <span className="text-xs text-muted-foreground">(optionnel)</span></Label>
               <select
                 value={form.lieuId}
                 onChange={handleChange("lieuId")}
                 className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
               >
-                <option value="">Sélectionner...</option>
+                <option value="">Autre (sans lieu)</option>
                 {lieux.map((l) => (
                   <option key={l.id} value={l.id}>
                     {l.nom} {l.type_lieu_raw ? `(${l.type_lieu_raw})` : ""}
@@ -390,6 +391,7 @@ export default function ComptableDepensesPage() {
                 className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
               >
                 <option value="">Tous</option>
+                <option value="none">Autre (sans lieu)</option>
                 {lieux.map((l) => (
                   <option key={l.id} value={l.id}>
                     {l.nom} {l.type_lieu_raw ? `(${l.type_lieu_raw})` : ""}
@@ -498,13 +500,13 @@ export default function ComptableDepensesPage() {
                 <p className="text-sm text-destructive bg-destructive/10 px-3 py-2 rounded">{editError}</p>
               )}
               <div className="space-y-1.5">
-                <Label>Lieu</Label>
+                <Label>Lieu <span className="text-xs text-muted-foreground">(optionnel)</span></Label>
                 <select
                   value={editForm.lieuId}
                   onChange={(e) => setEditForm((prev) => ({ ...prev, lieuId: e.target.value }))}
                   className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
                 >
-                  <option value="">Sélectionner...</option>
+                  <option value="">Autre (sans lieu)</option>
                   {lieux.map((l) => (
                     <option key={l.id} value={l.id}>
                       {l.nom} {l.type_lieu_raw ? `(${l.type_lieu_raw})` : ""}
