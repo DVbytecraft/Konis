@@ -26,7 +26,7 @@ export default function LoginPage() {
     if (user) {
       router.replace("/");
     }
-  }, [user, router]);
+  }, [user]); // router exclu : stable par définition, l'inclure cause une boucle infinie
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

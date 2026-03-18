@@ -104,7 +104,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     if (!hasAccess) {
       router.replace(allowedPaths[0] ?? "/login");
     }
-  }, [user, loading, router, pathname]);
+  }, [user, loading, pathname]); // router exclu : stable par définition, l'inclure cause une boucle infinie
 
   if (loading || !user) {
     return (

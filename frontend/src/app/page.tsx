@@ -38,7 +38,7 @@ export default function HomePage() {
       default:
         router.replace("/login");
     }
-  }, [user, loading, router]);
+  }, [user, loading]); // router exclu : stable par définition, l'inclure cause une boucle infinie
 
   return (
     <div className="flex min-h-screen items-center justify-center">
