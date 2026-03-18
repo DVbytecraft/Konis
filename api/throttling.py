@@ -96,3 +96,19 @@ class FinanceCreateRateThrottle(SimpleRateThrottle):
             "scope": self.scope,
             "ident": str(request.user.pk),
         }
+
+
+class RefreshRateThrottle(SimpleRateThrottle):
+    """
+    Rate limit strict sur /auth/refresh — s'applique TOUJOURS par IP,
+    même si l'utilisateur est authentifié (access_token valide en cache).
+    Empêche le spam de refresh avec un token volé.
+    """
+    scope = "refresh"
+
+    def get_cache_key(self, request, view):
+        # Jamais d'exemption — toujours par IP
+        return self.cache_format % {
+            "scope": self.scope,
+            "ident": self.get_ident(request),
+        }

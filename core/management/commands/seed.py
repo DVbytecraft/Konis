@@ -8,7 +8,8 @@ Script seed KONIS V0 :
 """
 from decimal import Decimal
 
-from django.core.management.base import BaseCommand
+from django.conf import settings
+from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
 from core.models import CustomUser, Entreprise, Lieu
@@ -30,6 +31,11 @@ class Command(BaseCommand):
 
     @transaction.atomic
     def handle(self, *args, **options):
+        if not settings.DEBUG:
+            raise CommandError(
+                "seed.py est réservé au développement (DEBUG=True uniquement).\n"
+                "En production, utilisez : python manage.py full_reset --superuser=admin --confirm"
+            )
         no_input = options["no_input"]
 
         if Entreprise.objects.exists() and not no_input:

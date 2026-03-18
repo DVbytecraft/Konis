@@ -108,6 +108,7 @@ REST_FRAMEWORK = {
         "facture_create": "30/minute",
         "usine_create": "30/minute",
         "finance_create": "30/minute",
+        "refresh": "10/minute",         # Anti-spam refresh token par IP (strict, toujours appliqué)
     },
     # Pagination par défaut : 50 items/page, paramètre ?page=N
     # Les vues qui veulent TOUT retourner doivent mettre pagination_class = None explicitement.

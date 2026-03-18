@@ -13,7 +13,7 @@ from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from api.serializers import UserMinimalSerializer
-from api.throttling import LoginIPRateThrottle, LoginRateThrottle
+from api.throttling import LoginIPRateThrottle, LoginRateThrottle, RefreshRateThrottle
 from audit.services import audit_log
 from core.models import CustomUser, Entreprise
 
@@ -151,7 +151,7 @@ class LoginView(APIView):
 class RefreshView(TokenRefreshView):
     """POST /api/auth/refresh/ : refresh token (cookie) -> nouveau access en cookie."""
     permission_classes = [AllowAny]
-    throttle_classes = [LoginRateThrottle]  # Anti-bruteforce refresh tokens (10/min par IP)
+    throttle_classes = [RefreshRateThrottle]  # 10/min par IP, toujours appliqué (pas d'exemption auth)
 
     def post(self, request, *args, **kwargs):
         refresh_name = getattr(settings, "SIMPLE_JWT_COOKIE_REFRESH_NAME", "refresh_token")
