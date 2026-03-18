@@ -14,31 +14,19 @@ export default function HomePage() {
       router.replace("/login");
       return;
     }
-    switch (user.role) {
-      case "supreme_admin":
-      case "admin":
-        router.replace("/admin");
-        break;
-      case "daf":
-        router.replace("/finance");
-        break;
-      case "comptable":
-        router.replace("/comptable");
-        break;
-      case "factory":
-      case "usine":
-        router.replace("/factory");
-        break;
-      case "boutique":
-        router.replace("/boutique/caisse");
-        break;
-      case "mpsl":
-        router.replace("/mpsl");
-        break;
-      default:
-        router.replace("/login");
-    }
-  }, [user, loading]); // router exclu : stable par définition, l'inclure cause une boucle infinie
+    const targets: Record<string, string> = {
+      supreme_admin: "/admin",
+      admin: "/admin",
+      daf: "/finance",
+      comptable: "/comptable",
+      factory: "/factory",
+      usine: "/factory",
+      boutique: "/boutique/caisse",
+      mpsl: "/mpsl",
+    };
+    const target = targets[user.role] ?? "/login";
+    router.replace(target);
+  }, [user, loading]); // router exclu intentionnellement (stable, l'inclure cause une boucle)
 
   return (
     <div className="flex min-h-screen items-center justify-center">

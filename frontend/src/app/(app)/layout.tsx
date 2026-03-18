@@ -103,16 +103,20 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (loading) return;
-    if (!user) { router.replace("/login"); return; }
+    if (!user) {
+      if (pathname !== "/login") router.replace("/login");
+      return;
+    }
     // Route protection: redirect if current path is not accessible for the user's role
     const allowedPaths = (navByRole[user.role] ?? []).map(n => n.href);
     const hasAccess = allowedPaths.some(
       p => pathname === p || pathname.startsWith(p + "/")
     );
     if (!hasAccess) {
-      router.replace(allowedPaths[0] ?? "/login");
+      const target = allowedPaths[0] ?? "/login";
+      if (pathname !== target) router.replace(target);
     }
-  }, [user, loading, pathname]); // router exclu : stable par définition, l'inclure cause une boucle infinie
+  }, [user, loading, pathname]); // router exclu intentionnellement (stable, l'inclure cause une boucle)
 
   if (loading || !user) {
     return (
