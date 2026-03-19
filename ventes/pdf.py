@@ -80,6 +80,10 @@ def build_facture_pdf(facture: Facture) -> bytes:
         c.drawCentredString(logo_x + logo_w / 2, logo_y + 16, logo_text)
 
     # Company block
+    entreprise = facture.lieu.entreprise if facture.lieu else None
+    nif = (entreprise.nif or "") if entreprise else ""
+    quitus = (entreprise.quitus_fiscal or "") if entreprise else ""
+
     c.setFillColor(text_color)
     c.setFont("Helvetica-Bold", 15)
     c.drawString(logo_x + 56, y - 18, company_name)
@@ -87,6 +91,11 @@ def build_facture_pdf(facture: Facture) -> bytes:
     c.setFillColor(muted)
     c.drawString(logo_x + 56, y - 32, facture.lieu.nom or "-")
     c.drawString(logo_x + 56, y - 45, (facture.lieu.adresse or "-")[:72])
+    if nif:
+        c.drawString(logo_x + 56, y - 58, f"NIF : {nif}")
+    if quitus:
+        nif_offset = 11 if nif else 0
+        c.drawString(logo_x + 56, y - 58 - nif_offset, f"Quitus fiscal : {quitus}")
 
     # Invoice meta panel
     panel_w = 240

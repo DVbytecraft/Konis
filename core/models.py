@@ -39,6 +39,8 @@ class TokenRevocationEpoch(models.Model):
 class Entreprise(models.Model):
     """Entreprise (KONIS en V0)."""
     nom = models.CharField(max_length=255)
+    nif = models.CharField(max_length=50, blank=True, default="", verbose_name="NIF")
+    quitus_fiscal = models.CharField(max_length=100, blank=True, default="", verbose_name="Quitus fiscal")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

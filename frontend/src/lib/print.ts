@@ -42,6 +42,8 @@ export interface FacturePrintData {
   notes?: string;
   lignes: FacturePrintLine[];
   total: number | string;
+  entreprise_nif?: string;
+  entreprise_quitus_fiscal?: string;
 }
 
 // ── Utilitaires ────────────────────────────────────────────────────────────
@@ -203,7 +205,7 @@ function buildFactureHtml(facture: FacturePrintData): string {
     body { font-family: Arial, sans-serif; font-size: 12px; color: #111; background: #fff; }
     .header { display: flex; justify-content: space-between; border-bottom: 2px solid #16a34a; padding-bottom: 12px; margin-bottom: 16px; }
     .header-left h1 { font-size: 24px; font-weight: 700; color: #16a34a; margin-bottom: 4px; }
-    .header-left p { font-size: 11px; color: #555; }
+    .header-left p { font-size: 11px; color: #555; margin-top: 2px; }
     .header-right { text-align: right; font-size: 11px; }
     .header-right .numero { font-family: monospace; font-size: 14px; font-weight: 700; }
     .meta { display: flex; gap: 32px; margin-bottom: 20px; }
@@ -221,7 +223,6 @@ function buildFactureHtml(facture: FacturePrintData): string {
     .total-row .total-label { font-size: 13px; font-weight: 700; margin-right: 16px; }
     .total-row .total-value { font-size: 16px; font-weight: 700; color: #16a34a; }
     .notes { margin-top: 20px; font-size: 11px; color: #555; border-top: 1px solid #e5e7eb; padding-top: 8px; }
-    .footer { margin-top: 32px; text-align: center; font-size: 10px; color: #aaa; border-top: 1px dashed #e5e7eb; padding-top: 8px; }
     @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
   </style>
 </head>
@@ -230,6 +231,8 @@ function buildFactureHtml(facture: FacturePrintData): string {
     <div class="header-left">
       <h1>FACTURE</h1>
       <p>${escapeHtml(facture.lieu_nom)}</p>
+      ${facture.entreprise_nif ? `<p>NIF : ${escapeHtml(facture.entreprise_nif)}</p>` : ""}
+      ${facture.entreprise_quitus_fiscal ? `<p>Quitus fiscal : ${escapeHtml(facture.entreprise_quitus_fiscal)}</p>` : ""}
     </div>
     <div class="header-right">
       <div class="numero">${escapeHtml(facture.numero)}</div>
@@ -265,7 +268,6 @@ function buildFactureHtml(facture: FacturePrintData): string {
     <span class="total-value">${formatNumber(facture.total)} FCFA</span>
   </div>
   ${facture.notes ? `<div class="notes"><b>Notes :</b> ${escapeHtml(facture.notes)}</div>` : ""}
-  <div class="footer">Document généré par KONIS</div>
 </body>
 </html>`;
 }

@@ -65,6 +65,8 @@ interface FactureItem {
   notes: string;
   total: string | number;
   lignes: FactureLine[];
+  entreprise_nif?: string;
+  entreprise_quitus_fiscal?: string;
 }
 
 type DraftLine = {
@@ -270,6 +272,8 @@ export default function FacturesPage() {
         total: l.total,
       })),
       total: facture.total,
+      entreprise_nif: facture.entreprise_nif,
+      entreprise_quitus_fiscal: facture.entreprise_quitus_fiscal,
     });
   }, []);
 

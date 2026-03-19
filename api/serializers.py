@@ -28,7 +28,7 @@ class LieuMinimalSerializer(serializers.ModelSerializer):
 class EntrepriseSerializer(serializers.ModelSerializer):
     class Meta:
         model = Entreprise
-        fields = ("id", "nom", "created_at", "updated_at")
+        fields = ("id", "nom", "nif", "quitus_fiscal", "created_at", "updated_at")
 
 
 class LieuSerializer(serializers.ModelSerializer):
@@ -523,6 +523,8 @@ class FactureSerializer(serializers.ModelSerializer):
     lignes = LigneFactureSerializer(many=True, read_only=True)
     lieu_nom = serializers.CharField(source="lieu.nom", read_only=True)
     created_by_username = serializers.CharField(source="created_by.username", read_only=True)
+    entreprise_nif = serializers.CharField(source="lieu.entreprise.nif", read_only=True, default="")
+    entreprise_quitus_fiscal = serializers.CharField(source="lieu.entreprise.quitus_fiscal", read_only=True, default="")
 
     class Meta:
         model = Facture
@@ -540,6 +542,8 @@ class FactureSerializer(serializers.ModelSerializer):
             "notes",
             "total",
             "lignes",
+            "entreprise_nif",
+            "entreprise_quitus_fiscal",
         )
 
 
