@@ -10,9 +10,8 @@ from .models import CustomUser, Entreprise, Lieu
 
 @admin.register(Entreprise)
 class EntrepriseAdmin(admin.ModelAdmin):
-    list_display = ("id", "nom", "nif", "quitus_fiscal", "created_at")
-    search_fields = ("nom", "nif")
-    fields = ("nom", "nif", "quitus_fiscal")
+    list_display = ("id", "nom", "created_at")
+    search_fields = ("nom",)
 
 
 @admin.register(Lieu)
