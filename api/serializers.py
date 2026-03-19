@@ -544,10 +544,19 @@ class FactureSerializer(serializers.ModelSerializer):
 
 
 class FactureCreateSerializer(serializers.Serializer):
-    lieu = serializers.PrimaryKeyRelatedField(queryset=Lieu.objects.all(), required=False)
+    lieu = serializers.PrimaryKeyRelatedField(queryset=Lieu.objects.none(), required=False)
     client_nom = serializers.CharField(required=False, allow_blank=True, default="")
     client_contact = serializers.CharField(required=False, allow_blank=True, default="")
     notes = serializers.CharField(required=False, allow_blank=True, default="")
+
+    def get_fields(self):
+        fields = super().get_fields()
+        request = self.context.get("request")
+        ent_id = getattr(getattr(request, "user", None), "entreprise_id", None)
+        fields["lieu"].queryset = (
+            Lieu.objects.filter(entreprise_id=ent_id) if ent_id else Lieu.objects.none()
+        )
+        return fields
     lignes = serializers.ListField(
         child=serializers.DictField(),
         allow_empty=False,

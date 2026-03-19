@@ -94,7 +94,7 @@ class FactureListCreateView(APIView):
     def post(self, request):
         if request.user.role not in ALLOWED_ROLES and not request.user.is_factory():
             return Response({"detail": "Role non autorise."}, status=status.HTTP_403_FORBIDDEN)
-        ser = FactureCreateSerializer(data=request.data)
+        ser = FactureCreateSerializer(data=request.data, context={"request": request})
         ser.is_valid(raise_exception=True)
 
         lieu = _get_lieu_for_creation(request.user, ser.validated_data)

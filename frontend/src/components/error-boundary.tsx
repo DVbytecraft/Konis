@@ -46,7 +46,9 @@ export class ErrorBoundary extends Component<Props, State> {
               Une erreur inattendue est survenue
             </h1>
             <p className="text-sm text-muted-foreground">
-              {this.state.error?.message || "Erreur inconnue"}
+              {process.env.NODE_ENV === "development"
+                ? (this.state.error?.message || "Erreur inconnue")
+                : "Une erreur interne est survenue. Veuillez recharger la page."}
             </p>
             <div className="flex gap-2 justify-center">
               <button

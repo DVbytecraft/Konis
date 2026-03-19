@@ -91,11 +91,14 @@ async function proxy(
     // no body
   }
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 20_000);
   try {
     const backendRes = await fetch(backendUrl, {
       method,
       headers,
       body: body || undefined,
+      signal: controller.signal,
     });
     const contentType = backendRes.headers.get("content-type") ?? "application/octet-stream";
     const isJson = contentType.includes("application/json");
@@ -112,7 +115,13 @@ async function proxy(
       status: backendRes.status,
       headers: { "Content-Type": contentType },
     });
-  } catch {
-    return jsonResponse({ detail: "Service backend indisponible." }, 503);
+  } catch (err) {
+    const isTimeout = err instanceof Error && err.name === "AbortError";
+    return jsonResponse(
+      { detail: isTimeout ? "Délai d'attente dépassé." : "Service backend indisponible." },
+      503,
+    );
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
