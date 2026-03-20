@@ -1,0 +1,94 @@
+name: Frontend Tests
+
+# ── Déclencheurs ─────────────────────────────────────────────────────────────
+# Même stratégie que le job backend dans tests.yml :
+# • push sur toutes les branches → feedback immédiat
+# • pull_request vers main/master → bloque le merge si échec
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main, master]
+
+# ── Variable runner ───────────────────────────────────────────────────────────
+# Force GitHub Actions à utiliser Node.js 24 pour exécuter ses propres actions
+# JavaScript (checkout, setup-node…). Supprime les warnings de dépréciation
+# Node.js 20 qui apparaissent depuis début 2025 dans les logs CI.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  # ════════════════════════════════════════════════════════════════════════════
+  # JOB — Frontend Next.js
+  # Ce workflow est indépendant de tests.yml et tourne en parallèle avec
+  # le job backend automatiquement (deux fichiers workflow = deux runs séparés).
+  # ════════════════════════════════════════════════════════════════════════════
+  frontend:
+    name: Frontend (Next.js + Vitest)
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        # Toutes les commandes run: s'exécutent dans le dossier frontend/
+        working-directory: frontend
+
+    steps:
+      # ── 1. Checkout ─────────────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── 2. Node.js 24 ───────────────────────────────────────────────────────
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          # Le cache est indexé sur le contenu du lock file.
+          # Si package-lock.json change → cache invalidé → npm ci repart de zéro.
+          cache-dependency-path: frontend/package-lock.json
+
+      # ── 3. Installation des dépendances ─────────────────────────────────────
+      # npm ci installe exactement ce qui est dans package-lock.json (pas de résolution).
+      # C'est plus rapide et déterministe que npm install — idéal pour CI.
+      #
+      # ⚠️  Si cette étape échoue avec "npm ci can only install packages when..."
+      #     c'est que package-lock.json est désynchronisé avec package.json.
+      #     Corriger localement :
+      #       npm install                  ← régénère package-lock.json
+      #       git add package-lock.json
+      #       git commit -m "chore: sync package-lock.json"
+      #       git push
+      - name: Install dependencies
+        run: |
+          npm ci || {
+            echo ""
+            echo "════════════════════════════════════════════════════════"
+            echo "  ❌  npm ci a échoué"
+            echo "  package-lock.json est désynchronisé avec package.json"
+            echo ""
+            echo "  Corriger localement :"
+            echo "    npm install"
+            echo "    git add package-lock.json"
+            echo "    git commit -m 'chore: sync package-lock.json'"
+            echo "    git push"
+            echo "════════════════════════════════════════════════════════"
+            exit 1
+          }
+
+      # ── 4. Vérification TypeScript ──────────────────────────────────────────
+      # --noEmit : vérifie les types sans écrire de fichiers de sortie.
+      # Détecte les erreurs de type introduites par un commit sans avoir à builder.
+      - name: TypeScript check
+        run: npx tsc --noEmit
+
+      # ── 5. ESLint ────────────────────────────────────────────────────────────
+      # Détecte les erreurs de code, imports manquants, règles React/Next.js.
+      # Le workflow bloque si ESLint retourne des erreurs (exit code != 0).
+      - name: Lint
+        run: npm run lint
+
+      # ── 6. Tests unitaires Vitest ────────────────────────────────────────────
+      # test:run = mode non-interactif (pas de --watch), conçu pour CI.
+      # Le workflow bloque si au moins un test échoue.
+      - name: Unit tests (Vitest)
+        run: npm run test:run
