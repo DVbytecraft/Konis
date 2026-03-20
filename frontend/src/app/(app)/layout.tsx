@@ -101,7 +101,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (loading) return;
     if (!user) {
@@ -117,6 +116,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       const target = allowedPaths[0] ?? "/login";
       if (pathname !== target) router.replace(target);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, loading, pathname]); // router exclu intentionnellement (stable, l'inclure cause une boucle)
 
   if (loading || !user) {

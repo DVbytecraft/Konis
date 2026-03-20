@@ -8,7 +8,6 @@ export default function HomePage() {
   const { user, loading } = useAuth();
   const router = useRouter();
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (loading) return;
     if (!user) {
@@ -27,6 +26,7 @@ export default function HomePage() {
     };
     const target = targets[user.role] ?? "/login";
     router.replace(target);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, loading]); // router exclu intentionnellement (stable, l'inclure cause une boucle)
 
   return (

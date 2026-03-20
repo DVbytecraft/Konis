@@ -23,9 +23,9 @@ export default function LoginPage() {
   const { login, user } = useAuth();
   const router = useRouter();
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (user) router.replace("/");
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]); // router exclu intentionnellement (stable, l'inclure cause une boucle)
 
   const handleSubmit = async (e: React.FormEvent) => {
