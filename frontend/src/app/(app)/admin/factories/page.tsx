@@ -6,6 +6,7 @@ import { apiFetch } from "@/lib/api";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import { KeyRound, Trash2, X } from "lucide-react";
 
@@ -215,11 +216,11 @@ export default function AdminFactoriesPage() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="user_password">Mot de passe</Label>
-              <Input id="user_password" type="password" value={form.user_password} onChange={onChange("user_password")} required className="h-9" />
+              <PasswordInput id="user_password" value={form.user_password} onChange={onChange("user_password")} required className="h-9" />
             </div>
             <div className="space-y-2">
               <Label htmlFor="user_password_confirm">Confirmer mot de passe</Label>
-              <Input id="user_password_confirm" type="password" value={form.user_password_confirm} onChange={onChange("user_password_confirm")} required className="h-9" />
+              <PasswordInput id="user_password_confirm" value={form.user_password_confirm} onChange={onChange("user_password_confirm")} required className="h-9" />
             </div>
 
             <div className="sm:col-span-2 flex flex-col gap-2">
@@ -317,8 +318,7 @@ export default function AdminFactoriesPage() {
               )}
               <div className="space-y-1.5">
                 <Label>Nouveau mot de passe</Label>
-                <Input
-                  type="password"
+                <PasswordInput
                   placeholder="Nouveau mot de passe"
                   value={nouveauMdp}
                   onChange={(e) => setNouveauMdp(e.target.value)}

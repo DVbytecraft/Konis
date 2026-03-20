@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import { Pencil, Trash2, X } from "lucide-react";
 
@@ -276,7 +277,7 @@ export default function AdminUsersPage() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="password">Mot de passe</Label>
-              <Input id="password" type="password" value={form.password} onChange={handleChange("password")} required className="h-9" />
+              <PasswordInput id="password" value={form.password} onChange={handleChange("password")} required className="h-9" />
             </div>
             <div className="space-y-2">
               <Label htmlFor="first_name">Prénom</Label>
@@ -416,8 +417,7 @@ export default function AdminUsersPage() {
               )}
               <div className="space-y-1.5">
                 <Label>Nouveau mot de passe</Label>
-                <Input
-                  type="password"
+                <PasswordInput
                   placeholder="Laisser vide pour ne pas changer"
                   value={editForm.password}
                   onChange={(e) => setEditForm((prev) => ({ ...prev, password: e.target.value }))}
