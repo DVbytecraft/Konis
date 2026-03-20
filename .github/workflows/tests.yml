@@ -9,6 +9,13 @@ on:
   pull_request:
     branches: [main, master]
 
+# ── Variable globale runner ───────────────────────────────────────────────────
+# Force le runner GitHub à utiliser Node.js 24 pour exécuter les actions
+# JavaScript (checkout, setup-node…). Évite les avertissements de dépréciation
+# Node.js 20 qui apparaissent depuis début 2025.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 # ── Jobs parallèles ───────────────────────────────────────────────────────────
 # backend et frontend tournent en même temps pour réduire le temps total.
 jobs:
@@ -95,11 +102,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 2. Installer Node.js 20 LTS
-      - name: Setup Node.js 20
+      # 2. Installer Node.js 24
+      - name: Setup Node.js 24
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
