@@ -11,6 +11,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from api.pagination import KonisPagination
 from api.serializers import FactureCreateSerializer, FactureSerializer
 from api.throttling import FactureCreateRateThrottle
 from core.models import CustomUser, Lieu
@@ -88,8 +89,12 @@ class FactureListCreateView(APIView):
         return qs.filter(lieu_id=request.user.lieu_id)
 
     def get(self, request):
-        data = FactureSerializer(self.get_queryset(request), many=True).data
-        return Response(data)
+        qs = self.get_queryset(request)
+        paginator = KonisPagination()
+        page = paginator.paginate_queryset(qs, request, view=self)
+        if page is not None:
+            return paginator.get_paginated_response(FactureSerializer(page, many=True).data)
+        return Response(FactureSerializer(qs, many=True).data)
 
     def post(self, request):
         if request.user.role not in ALLOWED_ROLES and not request.user.is_factory():

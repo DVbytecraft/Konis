@@ -14,6 +14,7 @@ from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet
 
 from audit.services import audit_log
+from api.pagination import KonisPagination
 from api.permissions import IsAdminRole
 from api.serializers import (
     AchatUsineSerializer,
@@ -499,6 +500,7 @@ class TransfertViewSet(ModelViewSet):
     queryset = Transfert.objects.all().select_related("from_lieu", "to_lieu").prefetch_related("mouvements__produit")
     serializer_class = TransfertSerializer
     permission_classes = [IsAdminRole]
+    pagination_class = KonisPagination
     http_method_names = ["get", "head", "options"]
 
     def get_queryset(self):
@@ -531,6 +533,7 @@ class TicketAdminViewSet(ModelViewSet):
     queryset = Ticket.objects.all().select_related("lieu").prefetch_related("lignes__produit").order_by("-date")
     serializer_class = TicketSerializer
     permission_classes = [IsAdminRole]
+    pagination_class = KonisPagination
     http_method_names = ["get", "head", "options"]
 
     def get_queryset(self):

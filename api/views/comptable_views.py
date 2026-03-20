@@ -16,6 +16,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 
+from api.pagination import KonisPagination
 from api.permissions import IsComptableRole
 from api.serializers import (
     AchatUsineSerializer,
@@ -74,6 +75,7 @@ class TransfertComptableViewSet(ReadOnlyModelViewSet):
     queryset = Transfert.objects.all().select_related("from_lieu", "to_lieu").prefetch_related("mouvements__produit").order_by("-date")
     serializer_class = TransfertSerializer
     permission_classes = [IsComptableRole]
+    pagination_class = KonisPagination
 
     def get_queryset(self):
         qs = super().get_queryset().filter(from_lieu__entreprise=self.request.user.entreprise)
@@ -88,6 +90,7 @@ class TicketComptableViewSet(ReadOnlyModelViewSet):
     queryset = Ticket.objects.all().select_related("lieu").prefetch_related("lignes__produit").order_by("-date")
     serializer_class = TicketSerializer
     permission_classes = [IsComptableRole]
+    pagination_class = KonisPagination
 
     def get_queryset(self):
         qs = super().get_queryset().filter(lieu__entreprise=self.request.user.entreprise)

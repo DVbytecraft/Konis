@@ -24,6 +24,7 @@ from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 
 from audit.services import audit_log
+from api.pagination import KonisPagination
 from api.permissions import IsAdminRole, IsBoutiqueRole
 from api.throttling import MoutureCreateRateThrottle, VenteCreateRateThrottle
 from api.utils import get_lieu_boutique
@@ -131,6 +132,7 @@ class VenteBoutiqueViewSet(ModelViewSet):
     serializer_class = TicketSerializer
     permission_classes = [IsAuthenticated, IsBoutiqueRole | IsAdminRole]
     throttle_classes = [VenteCreateRateThrottle]
+    pagination_class = KonisPagination
     http_method_names = ["get", "post", "head", "options"]
 
     def get_queryset(self):

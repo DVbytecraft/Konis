@@ -141,7 +141,8 @@ export default function FacturesPage() {
 
       const results = await Promise.all(reqs);
       const [facturesRes, ...rest] = results;
-      setFactures((facturesRes as FactureItem[]) ?? []);
+      const fr = facturesRes as { results?: FactureItem[] } | FactureItem[] | null;
+      setFactures(Array.isArray(fr) ? fr : (fr?.results ?? []));
 
       let cursor = 0;
       if (canChooseLieu) {
