@@ -1,0 +1,123 @@
+name: Tests & Migrations
+
+# ── Déclencheurs ─────────────────────────────────────────────────────────────
+# • Chaque push (toutes branches) → feedback immédiat sur les branches de dev
+# • Pull request vers main → bloque le merge si un job échoue
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main, master]
+
+# ── Jobs parallèles ───────────────────────────────────────────────────────────
+# backend et frontend tournent en même temps pour réduire le temps total.
+jobs:
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # JOB 1 — Backend Django
+  # ════════════════════════════════════════════════════════════════════════════
+  backend:
+    name: Backend (Django + PostgreSQL)
+    runs-on: ubuntu-latest
+
+    # ── Service PostgreSQL ────────────────────────────────────────────────────
+    # Identique à la prod : même moteur, mêmes contraintes, même comportement
+    # pour select_for_update et les CheckConstraints personnalisées.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: konis_test
+          POSTGRES_USER: konis
+          POSTGRES_PASSWORD: konis_ci
+        ports:
+          - 5432:5432
+        # Attendre que PostgreSQL soit prêt avant de lancer les étapes
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    # ── Variables d'environnement Django ─────────────────────────────────────
+    env:
+      DJANGO_SETTINGS_MODULE: konis.settings.dev
+      DATABASE_URL: postgres://konis:konis_ci@localhost:5432/konis_test
+      # SECRET_KEY et INTERNAL_API_SECRET ont des fallbacks dans dev.py —
+      # pas besoin de secrets GitHub pour les tests.
+
+    steps:
+      # 1. Récupérer le code source
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 2. Installer Python 3.12
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip                  # Met en cache ~/.cache/pip entre les runs
+
+      # 3. Installer les dépendances backend
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # 4. Vérifier que toutes les migrations sont committées
+      # --check retourne exit code 1 si makemigrations aurait généré un fichier.
+      # Bloque le merge si un développeur a modifié un modèle sans créer la migration.
+      - name: Check migrations are up to date
+        run: python manage.py makemigrations --check --dry-run
+        # Si cette étape échoue : lancer `python manage.py makemigrations` en local
+        # puis committer le fichier généré.
+
+      # 5. Appliquer les migrations sur la base de test CI
+      - name: Apply migrations
+        run: python manage.py migrate --run-syncdb
+
+      # 6. Lancer tous les tests Django
+      # --verbosity=2 : affiche chaque test pour localiser les échecs rapidement
+      - name: Run Django tests
+        run: python manage.py test api.tests --verbosity=2
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # JOB 2 — Frontend Next.js
+  # ════════════════════════════════════════════════════════════════════════════
+  frontend:
+    name: Frontend (Next.js + Vitest)
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend   # Toutes les commandes s'exécutent dans /frontend
+
+    steps:
+      # 1. Récupérer le code source
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 2. Installer Node.js 20 LTS
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # 3. Installer les dépendances frontend
+      # npm ci est plus strict que npm install : respecte exactement package-lock.json
+      - name: Install dependencies
+        run: npm ci
+
+      # 4. Vérifier le typage TypeScript
+      # Détecte les erreurs de type sans générer de fichiers build.
+      - name: TypeScript check
+        run: npx tsc --noEmit
+
+      # 5. ESLint — détecte les erreurs de code et les mauvaises pratiques
+      - name: Lint
+        run: npm run lint
+
+      # 6. Tests unitaires Vitest
+      # test:run = mode non-interactif (pas de watch), idéal pour CI
+      - name: Unit tests (Vitest)
+        run: npm run test:run
