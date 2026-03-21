@@ -39,8 +39,8 @@ export default function BoutiqueStockPage() {
     setLoading(true);
     setError(null);
     try {
-      const data = await apiFetch<StockItem[]>("/boutique/stock/");
-      setStocks(data);
+      const raw = await apiFetch<StockItem[] | { results?: StockItem[] }>("/boutique/stock/");
+      setStocks(Array.isArray(raw) ? raw : (raw.results ?? []));
     } catch {
       setError("Impossible de charger le stock.");
     } finally {

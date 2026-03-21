@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { AlertCircle, CheckCircle2, RefreshCw, Users, CreditCard } from "lucide-react";
+import { AlertCircle, CheckCircle2, RefreshCw, Search, Users, CreditCard } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -57,6 +57,14 @@ export default function CreancesBoutiquePage() {
   const [loading, setLoading] = useState(true);
   const [erreur, setErreur] = useState("");
   const [filtre, setFiltre] = useState<"en_cours" | "solde" | "tous">("en_cours");
+  const [searchClient, setSearchClient] = useState("");
+
+  // Pré-remplir la recherche depuis ?client= (ex: lien depuis la caisse)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const client = params.get("client");
+    if (client) { setSearchClient(client); setFiltre("tous"); }
+  }, []);
 
   // ── Modal paiement ─────────────────────────────────────────────────────────
   const [selected, setSelected] = useState<Creance | null>(null);
@@ -137,7 +145,13 @@ export default function CreancesBoutiquePage() {
     }
   };
 
-  const totalRestant = creances
+  const creancesFiltrees = searchClient.trim()
+    ? creances.filter((c) =>
+        c.client_nom.toLowerCase().includes(searchClient.toLowerCase())
+      )
+    : creances;
+
+  const totalRestant = creancesFiltrees
     .filter((c) => c.statut === "en_cours")
     .reduce((a, c) => a + parseFloat(c.montant_restant), 0);
 
@@ -181,6 +195,17 @@ export default function CreancesBoutiquePage() {
         ))}
       </div>
 
+      {/* Recherche client */}
+      <div className="relative max-w-xs">
+        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+        <Input
+          placeholder="Filtrer par client…"
+          value={searchClient}
+          onChange={(e) => setSearchClient(e.target.value)}
+          className="pl-8 h-8 text-sm"
+        />
+      </div>
+
       {/* Total restant */}
       {filtre !== "solde" && totalRestant > 0 && (
         <div className="flex items-center gap-2 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-md px-4 py-2">
@@ -199,14 +224,18 @@ export default function CreancesBoutiquePage() {
       {/* Liste */}
       {loading ? (
         <p className="text-sm text-muted-foreground">Chargement…</p>
-      ) : creances.length === 0 ? (
+      ) : creancesFiltrees.length === 0 ? (
         <div className="text-center py-12 text-muted-foreground">
           <CheckCircle2 className="h-8 w-8 mx-auto mb-2 text-green-400" />
-          <p className="text-sm">Aucune créance {filtre === "en_cours" ? "en cours" : filtre === "solde" ? "soldée" : ""}.</p>
+          <p className="text-sm">
+            {searchClient.trim()
+              ? `Aucune créance pour "${searchClient}".`
+              : `Aucune créance ${filtre === "en_cours" ? "en cours" : filtre === "solde" ? "soldée" : ""}.`}
+          </p>
         </div>
       ) : (
         <div className="space-y-3">
-          {creances.map((c) => {
+          {creancesFiltrees.map((c) => {
             const restant = parseFloat(c.montant_restant);
             const initial = parseFloat(c.montant_initial);
             const pct = initial > 0 ? Math.min(100, ((initial - restant) / initial) * 100) : 100;

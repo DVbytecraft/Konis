@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useAuth } from "@/contexts/auth-context";
 import { apiFetch } from "@/lib/api";
 import { openTicketPrintWindow } from "@/lib/print";
@@ -214,6 +215,15 @@ export default function BoutiqueCaissePage() {
   useEffect(() => {
     setSelectedIndex(0);
   }, [search]);
+
+  // Pré-remplir le prix mouture/kg depuis le défaut configuré sur le lieu (identique à la console mouture)
+  useEffect(() => {
+    const defaut = user?.lieu?.prix_mouture_defaut;
+    if (defaut && !prixMoutureKg) {
+      setPrixMoutureKg(String(defaut));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.lieu?.prix_mouture_defaut]);
 
   // Charger clients quand la recherche change (crédit / partiel)
   useEffect(() => {
@@ -560,6 +570,17 @@ export default function BoutiqueCaissePage() {
             >
               Nouvelle vente
             </Button>
+            {(ticketImprimer.type_vente === "credit" || ticketImprimer.type_vente === "partiel") &&
+              ticketImprimer.client_nom && (
+                <Button variant="outline" className="w-full" asChild>
+                  <Link
+                    href={`/boutique/creances?client=${encodeURIComponent(ticketImprimer.client_nom)}`}
+                  >
+                    <CreditCard className="h-4 w-4 mr-2" />
+                    Journal de {ticketImprimer.client_nom}
+                  </Link>
+                </Button>
+            )}
           </div>
           <Button variant="ghost" size="sm" onClick={fermerTicket}>
             Fermer
