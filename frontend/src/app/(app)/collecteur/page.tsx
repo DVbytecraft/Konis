@@ -145,6 +145,7 @@ export default function CollecteurPage() {
     try {
       await apiFetch("/finance/collectes/", {
         method: "POST",
+        headers: { "Idempotency-Key": crypto.randomUUID() },
         body: JSON.stringify({
           lieu_id:           parseInt(createForm.lieu_id),
           date_collecte:     createForm.date_collecte,
