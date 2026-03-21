@@ -1058,8 +1058,8 @@ class ConvertirSacEnKgView(APIView):
 
 class ClientsBoutiqueView(APIView):
     """
-    GET /api/boutique/clients/?search=...
-    Recherche de clients pour la caisse boutique (lecture seule, scoped entreprise).
+    GET  /api/boutique/clients/?search=... — recherche clients (scoped entreprise)
+    POST /api/boutique/clients/            — créer un nouveau client
     """
     permission_classes = [IsAuthenticated, IsBoutiqueRole | IsAdminRole]
 
@@ -1078,6 +1078,31 @@ class ClientsBoutiqueView(APIView):
             qs = qs.filter(Q(nom__icontains=search) | Q(contact__icontains=search))
 
         return Response(ClientFinanceSerializer(qs[:20], many=True).data)
+
+    def post(self, request):
+        from finance.models import ClientFinance
+        from api.serializers_finance import ClientFinanceSerializer
+
+        ent_id = request.user.entreprise_id
+        if not ent_id:
+            return Response({"detail": "Entreprise non définie."}, status=400)
+
+        nom = str(request.data.get("nom", "")).strip()
+        if not nom:
+            return Response({"detail": "Le nom du client est requis."}, status=400)
+
+        # Retourner le client existant si même nom (insensible à la casse)
+        existing = ClientFinance.objects.filter(entreprise_id=ent_id, nom__iexact=nom).first()
+        if existing:
+            return Response(ClientFinanceSerializer(existing).data, status=200)
+
+        client = ClientFinance.objects.create(
+            entreprise_id=ent_id,
+            nom=nom,
+            contact=str(request.data.get("contact", "")).strip(),
+        )
+        audit_log(request.user, "client_finance_create", {"client_id": client.pk, "nom": client.nom})
+        return Response(ClientFinanceSerializer(client).data, status=201)
 
 
 # ─── Créances boutique ────────────────────────────────────────────────────────

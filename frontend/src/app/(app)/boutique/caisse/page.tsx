@@ -103,6 +103,12 @@ export default function BoutiqueCaissePage() {
   const [ventesDuJour, setVentesDuJour] = useState<
     Array<{ id: number; numero: string; date: string; total: number }>
   >([]);
+
+  // ── Conversion sacs → kg (depuis le stock local de la caisse) ─────────────
+  const [stockConvertTarget, setStockConvertTarget] = useState<ProduitWithStock | null>(null);
+  const [stockNombreSacs, setStockNombreSacs] = useState("");
+  const [stockConverting, setStockConverting] = useState(false);
+
   const searchInputRef = useRef<HTMLInputElement>(null);
   const isPayingRef = useRef(false); // Guard synchrone anti double-submit (F4 répété)
 
@@ -323,6 +329,42 @@ export default function BoutiqueCaissePage() {
   }, 0);
 
   const totalGeneral = totalPanier + (mouture ? coutMouture : 0);
+
+  const creerClient = useCallback(async (nom: string) => {
+    if (!nom.trim()) return;
+    try {
+      const res = await apiFetch<ClientFinance>("/boutique/clients/", {
+        method: "POST",
+        body: JSON.stringify({ nom: nom.trim() }),
+      });
+      setClientId(res.id);
+      setClientSearch(res.nom);
+      setShowClientDropdown(false);
+    } catch (e) {
+      setErreur(e instanceof Error ? e.message : "Erreur création client");
+    }
+  }, []);
+
+  const handleStockConvert = useCallback(async () => {
+    if (!stockConvertTarget) return;
+    const n = parseInt(stockNombreSacs, 10);
+    if (isNaN(n) || n <= 0) return;
+    setStockConverting(true);
+    try {
+      await apiFetch(`/boutique/stock/${stockConvertTarget.id}/convertir/`, {
+        method: "POST",
+        headers: { "Idempotency-Key": buildIdempotencyKey("conversion") },
+        body: JSON.stringify({ nombre_sacs: n }),
+      });
+      setStockConvertTarget(null);
+      setStockNombreSacs("");
+      chargerDonnees();
+    } catch (e) {
+      setErreur(e instanceof Error ? e.message : "Erreur conversion");
+    } finally {
+      setStockConverting(false);
+    }
+  }, [stockConvertTarget, stockNombreSacs, chargerDonnees]);
 
   const payer = useCallback(async () => {
     // Guard synchrone : évite le double-submit si F4 est pressé rapidement avant re-render
@@ -648,6 +690,7 @@ export default function BoutiqueCaissePage() {
                   <tr className="border-b bg-muted/30">
                     <th className="text-left py-1">Produit</th>
                     <th className="text-right py-1">Qté</th>
+                    <th className="py-1"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -656,9 +699,21 @@ export default function BoutiqueCaissePage() {
                     .slice(0, 10)
                     .map((p) => (
                       <tr key={p.id} className="border-b">
-                        <td className="py-0.5 truncate max-w-[140px]">{p.nom}</td>
+                        <td className="py-0.5 truncate max-w-[120px]">{p.nom}</td>
                         <td className={`py-0.5 text-right font-mono font-medium ${p.quantite_sac < 5 ? "text-red-600 dark:text-red-400" : "text-green-700 dark:text-green-300"}`}>
                           {p.stock_label}
+                        </td>
+                        <td className="py-0.5 pl-1">
+                          {(p.poids_par_sac ?? 0) > 0 && p.quantite_sac > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => { setStockConvertTarget(p); setStockNombreSacs(""); }}
+                              className="text-[10px] text-blue-600 dark:text-blue-400 hover:underline whitespace-nowrap"
+                              title="Convertir sacs → kg"
+                            >
+                              ⇄ kg
+                            </button>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -988,26 +1043,34 @@ export default function BoutiqueCaissePage() {
                           ✓ {clientSearch}
                         </p>
                       )}
-                      {showClientDropdown && clients.length > 0 && !clientId && (
+                      {showClientDropdown && !clientId && clientSearch.trim() && (
                         <ul className="absolute z-50 top-full left-0 right-0 mt-0.5 border rounded-md bg-popover shadow-md max-h-40 overflow-y-auto">
                           {clientsLoading ? (
                             <li className="px-3 py-2 text-xs text-muted-foreground">Chargement…</li>
                           ) : (
-                            clients.map((c) => (
+                            <>
+                              {clients.map((c) => (
+                                <li
+                                  key={c.id}
+                                  className="px-3 py-1.5 text-xs hover:bg-muted cursor-pointer"
+                                  onMouseDown={(e) => {
+                                    e.preventDefault();
+                                    setClientId(c.id);
+                                    setClientSearch(c.nom);
+                                    setShowClientDropdown(false);
+                                  }}
+                                >
+                                  <span className="font-medium">{c.nom}</span>
+                                  {c.contact && <span className="text-muted-foreground ml-2">{c.contact}</span>}
+                                </li>
+                              ))}
                               <li
-                                key={c.id}
-                                className="px-3 py-1.5 text-xs hover:bg-muted cursor-pointer"
-                                onMouseDown={(e) => {
-                                  e.preventDefault();
-                                  setClientId(c.id);
-                                  setClientSearch(c.nom);
-                                  setShowClientDropdown(false);
-                                }}
+                                className="px-3 py-1.5 text-xs text-green-700 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-950/20 cursor-pointer border-t font-medium"
+                                onMouseDown={(e) => { e.preventDefault(); creerClient(clientSearch); }}
                               >
-                                <span className="font-medium">{c.nom}</span>
-                                {c.contact && <span className="text-muted-foreground ml-2">{c.contact}</span>}
+                                + Créer « {clientSearch} »
                               </li>
-                            ))
+                            </>
                           )}
                         </ul>
                       )}
@@ -1054,6 +1117,47 @@ export default function BoutiqueCaissePage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* ── Modal conversion sacs → kg (stock caisse) ──────────────────────── */}
+      {stockConvertTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white dark:bg-card rounded-lg shadow-xl w-full max-w-sm mx-4 p-6 space-y-4">
+            <h2 className="text-base font-semibold">Convertir sacs → kg</h2>
+            <p className="text-sm text-muted-foreground">
+              <span className="font-medium">{stockConvertTarget.nom}</span>{" "}
+              — {stockConvertTarget.quantite_sac} sac(s) disponible(s)
+              {stockConvertTarget.poids_par_sac && (
+                <> · {stockConvertTarget.poids_par_sac} kg/sac</>
+              )}
+            </p>
+            {stockNombreSacs && !isNaN(parseInt(stockNombreSacs, 10)) && parseInt(stockNombreSacs, 10) > 0 && stockConvertTarget.poids_par_sac && (
+              <p className="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded p-2">
+                → {(parseInt(stockNombreSacs, 10) * stockConvertTarget.poids_par_sac).toFixed(3)} kg générés
+              </p>
+            )}
+            <div className="space-y-1">
+              <label className="text-sm font-medium">Nombre de sacs à convertir</label>
+              <Input
+                type="number"
+                min={1}
+                max={stockConvertTarget.quantite_sac}
+                value={stockNombreSacs}
+                onChange={(e) => setStockNombreSacs(e.target.value)}
+                placeholder="ex : 5"
+                autoFocus
+              />
+            </div>
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" onClick={() => setStockConvertTarget(null)} disabled={stockConverting}>
+                Annuler
+              </Button>
+              <Button onClick={handleStockConvert} disabled={stockConverting || !stockNombreSacs}>
+                {stockConverting ? "Conversion…" : "Confirmer"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

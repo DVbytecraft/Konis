@@ -177,10 +177,11 @@ class DepenseComptableViewSet(ModelViewSet):
         instance.delete()
 
 
-class CategorieDepenseComptableViewSet(ReadOnlyModelViewSet):
+class CategorieDepenseComptableViewSet(ModelViewSet):
     queryset = CategorieDepense.objects.all().order_by("nom")
     serializer_class = CategorieDepenseSerializer
     permission_classes = [IsComptableRole]
+    http_method_names = ["get", "post", "head", "options"]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -188,6 +189,18 @@ class CategorieDepenseComptableViewSet(ReadOnlyModelViewSet):
         if not ent_id:
             return qs.none()
         return qs.filter(entreprise_id=ent_id)
+
+    def perform_create(self, serializer):
+        ent_id = self.request.user.entreprise_id
+        if not ent_id:
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("Entreprise non définie.")
+        nom = serializer.validated_data.get("nom", "").strip()
+        # Éviter les doublons insensibles à la casse
+        if CategorieDepense.objects.filter(entreprise_id=ent_id, nom__iexact=nom).exists():
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError({"nom": "Cette catégorie existe déjà."})
+        serializer.save(entreprise_id=ent_id)
 
 
 class AchatUsineComptableViewSet(ReadOnlyModelViewSet):

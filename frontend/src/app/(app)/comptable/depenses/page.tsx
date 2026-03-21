@@ -95,6 +95,10 @@ export default function ComptableDepensesPage() {
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
 
+  const [newCatNom, setNewCatNom] = useState("");
+  const [savingCat, setSavingCat] = useState(false);
+  const [catError, setCatError] = useState<string | null>(null);
+
   const buildQuery = useCallback((p: typeof filters) => {
     const params = new URLSearchParams();
     if (p.lieuId === "none") params.set("lieu_null", "1");
@@ -185,6 +189,24 @@ export default function ComptableDepensesPage() {
       setError(e instanceof Error ? e.message : "Erreur de chargement");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const creerCategorie = async () => {
+    if (!newCatNom.trim()) return;
+    setSavingCat(true);
+    setCatError(null);
+    try {
+      const cat = await apiFetch<Categorie>("/comptable/categories-depense/", {
+        method: "POST",
+        body: JSON.stringify({ nom: newCatNom.trim() }),
+      });
+      setCategories((prev) => [...prev, cat].sort((a, b) => a.nom.localeCompare(b.nom)));
+      setNewCatNom("");
+    } catch (e) {
+      setCatError(e instanceof Error ? e.message : "Erreur création catégorie");
+    } finally {
+      setSavingCat(false);
     }
   };
 
@@ -316,7 +338,27 @@ export default function ComptableDepensesPage() {
               </select>
             </div>
             <div className="space-y-2">
-              <Label>Catégorie</Label>
+              <div className="flex items-center justify-between">
+                <Label>Catégorie</Label>
+                <div className="flex items-center gap-1.5">
+                  <Input
+                    value={newCatNom}
+                    onChange={(e) => { setNewCatNom(e.target.value); setCatError(null); }}
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); creerCategorie(); } }}
+                    placeholder="Nouvelle catégorie…"
+                    className="h-7 text-xs w-36"
+                  />
+                  <button
+                    type="button"
+                    onClick={creerCategorie}
+                    disabled={savingCat || !newCatNom.trim()}
+                    className="h-7 px-2 text-xs rounded border border-input bg-background hover:bg-muted disabled:opacity-50"
+                  >
+                    {savingCat ? "…" : "+ Créer"}
+                  </button>
+                </div>
+              </div>
+              {catError && <p className="text-xs text-destructive">{catError}</p>}
               <select
                 value={form.categorieId}
                 onChange={handleChange("categorieId")}
