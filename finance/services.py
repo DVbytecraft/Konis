@@ -886,6 +886,7 @@ def get_dashboard_global(entreprise: Entreprise) -> dict:
       total_depenses        : Σ montant des Depense (toutes boutiques, entreprise)
       solde_caisse          : solde CaisseSupremeTransaction
       argent_theorique      : total_cash + total_credit (= total_ventes)
+      total_achats_mpsl     : Σ prix_total des AchatMPSL (seule source d'achat active)
       benefice_brut         : total_ventes - total_achats_mpsl
       benefice_net          : benefice_brut - total_depenses
     """
@@ -931,12 +932,6 @@ def get_dashboard_global(entreprise: Entreprise) -> dict:
         total=Sum("prix_total")
     )
 
-    # Achats usine (intrants — comptabilité uniquement, sans impact stock direct)
-    from inventaire.models import AchatUsine
-    achats_usine = AchatUsine.objects.filter(lieu__entreprise=entreprise).aggregate(
-        total=Sum("prix_total")
-    )
-
     # Dépenses
     depenses = Depense.objects.filter(entreprise=entreprise).aggregate(
         total=Sum("montant")
@@ -972,16 +967,14 @@ def get_dashboard_global(entreprise: Entreprise) -> dict:
     total_mouture = tickets["total_mouture"]       or Decimal("0")
     creances_restantes = creances["total"]    or Decimal("0")
     dettes_restantes   = dettes["total"]      or Decimal("0")
-    total_achats_mpsl  = achats["total"]        or Decimal("0")
-    total_achats_usine = achats_usine["total"]  or Decimal("0")
-    total_achats       = total_achats_mpsl + total_achats_usine
-    total_dep          = depenses["total"]      or Decimal("0")
+    total_achats_mpsl  = achats["total"]  or Decimal("0")
+    total_dep          = depenses["total"] or Decimal("0")
     pcc_global         = paiements_creances_global["total"] or Decimal("0")
     total_collecte_pris   = collectes_agg["total_pris"]   or Decimal("0")
     total_collecte_laisse = collectes_agg["total_laisse"] or Decimal("0")
     solde              = get_solde_caisse(entreprise)
     caisse_reelle      = tc + pcc_global
-    ben_brut           = tv - total_achats
+    ben_brut           = tv - total_achats_mpsl
     ben_net            = ben_brut - total_dep
     # Montant fictif = ce qu'on aurait si tous les clients payaient et toutes les dettes réglées
     montant_fictif     = caisse_reelle + creances_restantes - dettes_restantes - total_dep
@@ -1002,7 +995,6 @@ def get_dashboard_global(entreprise: Entreprise) -> dict:
         "total_mouture":         total_mouture,
         "total_ventes_produits": tv - total_mouture,
         "total_achats_mpsl":     total_achats_mpsl,
-        "total_achats_usine":    total_achats_usine,
         "total_collecte_pris":   total_collecte_pris,
         "total_collecte_laisse": total_collecte_laisse,
         "collectes_par_boutique": [

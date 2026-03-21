@@ -29,6 +29,17 @@ interface CollecteParBoutique {
   total_laisse: string;
 }
 
+interface VenteBoutique {
+  lieu_id: number;
+  lieu_nom: string;
+  nb_tickets: number;
+  total_ventes: string;
+  total_mouture: string;
+  total_creances: string;
+  caisse_reelle: string;
+  nb_produits_en_stock: number;
+}
+
 interface DashboardGlobal {
   total_ventes: string;
   total_cash: string;
@@ -56,17 +67,20 @@ export default function FinanceDashboardPage() {
   const [error, setError]         = useState<string | null>(null);
   const [resume, setResume]       = useState<Resume | null>(null);
   const [global, setGlobal]       = useState<DashboardGlobal | null>(null);
+  const [ventesBoutiques, setVentesBoutiques] = useState<VenteBoutique[]>([]);
 
   const load = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      const [resumeData, globalData] = await Promise.all([
+      const [resumeData, globalData, boutiquesData] = await Promise.all([
         apiFetch<Resume>("/finance/resume/"),
         apiFetch<DashboardGlobal>("/finance/dashboard/"),
+        apiFetch<VenteBoutique[]>("/comptable/rapport-boutiques/").catch(() => [] as VenteBoutique[]),
       ]);
       setResume(resumeData);
       setGlobal(globalData);
+      setVentesBoutiques(Array.isArray(boutiquesData) ? boutiquesData : []);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erreur de chargement");
     } finally {
@@ -222,16 +236,30 @@ export default function FinanceDashboardPage() {
             const mfPositif = mf >= 0;
             return (
               <div className="space-y-3">
+                {/* Trésorerie (caisse suprême) — source unique de vérité */}
+                <div className="rounded-lg border-2 border-emerald-400 bg-emerald-50 dark:bg-emerald-950/20 p-3 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-400 flex items-center gap-1">
+                      <Banknote className="h-3.5 w-3.5" /> Trésorerie (banque / caisse suprême)
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Σ dépôts − Σ retraits · inclut les collectes boutiques
+                    </p>
+                  </div>
+                  <p className="text-2xl font-bold text-emerald-700 dark:text-emerald-400 tabular-nums shrink-0">
+                    {fmt(global.solde_caisse)} F
+                  </p>
+                </div>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   <Card className="border-l-4 border-l-blue-600">
                     <CardContent className="pt-4 pb-4 px-4">
                       <p className="text-xs text-muted-foreground uppercase tracking-wide flex items-center gap-1">
-                        <Banknote className="h-3.5 w-3.5" /> Caisse réelle
+                        <Banknote className="h-3.5 w-3.5" /> Cash encaissé (boutiques)
                       </p>
                       <p className="text-lg font-bold text-blue-700 dark:text-blue-300 mt-1">
                         {fmt(global.caisse_reelle)} F
                       </p>
-                      <p className="text-xs text-muted-foreground mt-0.5">Cash + paiements créances</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">Cash ventes + paiements créances</p>
                     </CardContent>
                   </Card>
                   <Card className="border-l-4 border-l-purple-400">
@@ -242,7 +270,7 @@ export default function FinanceDashboardPage() {
                       <p className="text-lg font-bold text-purple-700 dark:text-purple-300 mt-1">
                         {fmt(global.argent_theorique)} F
                       </p>
-                      <p className="text-xs text-muted-foreground mt-0.5">Caisse + créances</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">Cash + créances restantes</p>
                     </CardContent>
                   </Card>
                   <Card className="border-l-4 border-l-amber-400">
@@ -253,6 +281,7 @@ export default function FinanceDashboardPage() {
                       <p className="text-lg font-bold text-amber-700 dark:text-amber-300 mt-1">
                         {fmt(global.total_creances)} F
                       </p>
+                      <p className="text-xs text-muted-foreground mt-0.5">non encore encaissées</p>
                     </CardContent>
                   </Card>
                   <Card className="border-l-4 border-l-red-400">
@@ -263,6 +292,7 @@ export default function FinanceDashboardPage() {
                       <p className="text-lg font-bold text-red-600 dark:text-red-400 mt-1">
                         {fmt(global.total_dettes_fourn)} F
                       </p>
+                      <p className="text-xs text-muted-foreground mt-0.5">à payer aux fournisseurs</p>
                     </CardContent>
                   </Card>
                 </div>
@@ -273,10 +303,10 @@ export default function FinanceDashboardPage() {
                 )}>
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      Montant fictif (total attendu net)
+                      Montant net attendu
                     </p>
                     <p className="text-xs text-muted-foreground mt-0.5">
-                      Argent théorique − dettes fournisseurs − dépenses
+                      Cash encaissé + créances − dettes fournisseurs − dépenses
                     </p>
                   </div>
                   <p className={cn(
@@ -289,6 +319,71 @@ export default function FinanceDashboardPage() {
               </div>
             );
           })()}
+
+          {/* ── Ventes par boutique ─────────────────────────────────────────── */}
+          {ventesBoutiques.length > 0 && (
+            <div className="space-y-3">
+              <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+                <TrendingUp className="h-3.5 w-3.5 text-green-500" />
+                Ventes par boutique
+              </h2>
+              <div className="overflow-x-auto rounded-md border">
+                <table className="w-full text-xs sm:text-sm">
+                  <thead>
+                    <tr className="border-b bg-muted/40">
+                      <th className="text-left py-2 px-3 font-medium">Boutique</th>
+                      <th className="text-right py-2 px-3 font-medium">Tickets</th>
+                      <th className="text-right py-2 px-3 font-medium">Total ventes (FCFA)</th>
+                      <th className="text-right py-2 px-3 font-medium">Cash (FCFA)</th>
+                      <th className="text-right py-2 px-3 font-medium">Créances (FCFA)</th>
+                      <th className="text-right py-2 px-3 font-medium hidden sm:table-cell">Mouture (FCFA)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {ventesBoutiques.map((b) => (
+                      <tr key={b.lieu_id} className="border-b hover:bg-muted/20">
+                        <td className="py-1.5 px-3 font-medium">{b.lieu_nom}</td>
+                        <td className="py-1.5 px-3 text-right text-muted-foreground">{b.nb_tickets}</td>
+                        <td className="py-1.5 px-3 text-right font-semibold text-green-700 dark:text-green-400">
+                          {fmt(b.total_ventes)}
+                        </td>
+                        <td className="py-1.5 px-3 text-right text-blue-700 dark:text-blue-400">
+                          {fmt(b.caisse_reelle)}
+                        </td>
+                        <td className={cn(
+                          "py-1.5 px-3 text-right",
+                          parseFloat(b.total_creances) > 0 ? "text-amber-600 dark:text-amber-400 font-medium" : "text-muted-foreground"
+                        )}>
+                          {fmt(b.total_creances)}
+                        </td>
+                        <td className="py-1.5 px-3 text-right text-muted-foreground hidden sm:table-cell">
+                          {parseFloat(b.total_mouture) > 0 ? fmt(b.total_mouture) : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                    <tr className="bg-muted/30 font-semibold text-xs">
+                      <td className="py-2 px-3">Total</td>
+                      <td className="py-2 px-3 text-right">
+                        {ventesBoutiques.reduce((s, b) => s + b.nb_tickets, 0)}
+                      </td>
+                      <td className="py-2 px-3 text-right text-green-700 dark:text-green-400">
+                        {fmt(ventesBoutiques.reduce((s, b) => s + parseFloat(b.total_ventes), 0))}
+                      </td>
+                      <td className="py-2 px-3 text-right text-blue-700 dark:text-blue-400">
+                        {fmt(ventesBoutiques.reduce((s, b) => s + parseFloat(b.caisse_reelle), 0))}
+                      </td>
+                      <td className="py-2 px-3 text-right text-amber-600 dark:text-amber-400">
+                        {fmt(ventesBoutiques.reduce((s, b) => s + parseFloat(b.total_creances), 0))}
+                      </td>
+                      <td className="py-2 px-3 text-right text-muted-foreground hidden sm:table-cell">
+                        {fmt(ventesBoutiques.reduce((s, b) => s + parseFloat(b.total_mouture), 0))}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           {/* ── Collectes ────────────────────────────────────────────────────── */}
           {global && (global.collectes_par_boutique.length > 0 || parseFloat(global.total_collecte_pris) > 0) && (() => {

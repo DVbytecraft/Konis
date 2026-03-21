@@ -13,6 +13,8 @@ interface TransferRow {
   produit_nom: string;
   quantite_sacs: string | number;
   poids_total: string | number;
+  prix_par_sac: string | number;
+  montant_cession: string | number;
   created_at: string;
 }
 
@@ -57,7 +59,7 @@ export default function FactoryTransfersPage() {
   const [rows, setRows] = useState<TransferRow[]>([]);
   const [lots, setLots] = useState<LotOption[]>([]);
   const [shops, setShops] = useState<ShopOption[]>([]);
-  const [form, setForm] = useState({ lot: "", boutique: "", quantite_sacs: "", poids_total: "" });
+  const [form, setForm] = useState({ lot: "", boutique: "", quantite_sacs: "", poids_total: "", prix_par_sac: "" });
   const [err, setErr] = useState("");
 
   // --- Vers usines ---
@@ -97,9 +99,10 @@ export default function FactoryTransfersPage() {
           boutique: Number(form.boutique),
           quantite_sacs: form.quantite_sacs,
           poids_total: form.poids_total || "0",
+          prix_par_sac: form.prix_par_sac || "0",
         }),
       });
-      setForm({ lot: "", boutique: "", quantite_sacs: "", poids_total: "" });
+      setForm({ lot: "", boutique: "", quantite_sacs: "", poids_total: "", prix_par_sac: "" });
       await load();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Erreur");
@@ -186,8 +189,9 @@ export default function FactoryTransfersPage() {
                 <option key={s.id} value={s.id}>{s.nom}</option>
               ))}
             </select>
-            <Input placeholder="Nb sacs" value={form.quantite_sacs} onChange={(e) => setForm((f) => ({ ...f, quantite_sacs: e.target.value }))} />
-            <Input placeholder="Poids total (optionnel)" value={form.poids_total} onChange={(e) => setForm((f) => ({ ...f, poids_total: e.target.value }))} />
+            <Input placeholder="Nb sacs *" value={form.quantite_sacs} onChange={(e) => setForm((f) => ({ ...f, quantite_sacs: e.target.value }))} />
+            <Input placeholder="Prix / sac (FCFA)" value={form.prix_par_sac} onChange={(e) => setForm((f) => ({ ...f, prix_par_sac: e.target.value }))} />
+            <Input placeholder="Poids total kg (optionnel)" value={form.poids_total} onChange={(e) => setForm((f) => ({ ...f, poids_total: e.target.value }))} />
             <Button type="submit" className="w-full lg:col-span-6 sm:col-span-2 bg-blue-600 hover:bg-blue-700 text-white">
               Créer transfert vers boutique
             </Button>
@@ -203,6 +207,7 @@ export default function FactoryTransfersPage() {
                   <th className="text-left py-2 px-3">Boutique</th>
                   <th className="text-left py-2 px-3">Produit</th>
                   <th className="text-right py-2 px-3">Sacs</th>
+                  <th className="text-right py-2 px-3">Montant (FCFA)</th>
                   <th className="text-left py-2 px-3">Date</th>
                 </tr>
               </thead>
@@ -216,6 +221,9 @@ export default function FactoryTransfersPage() {
                     <td className="py-1.5 px-3">{r.boutique_nom}</td>
                     <td className="py-1.5 px-3">{r.produit_nom}</td>
                     <td className="py-1.5 px-3 text-right">{Number(r.quantite_sacs).toFixed(0)}</td>
+                    <td className="py-1.5 px-3 text-right font-medium text-blue-700 dark:text-blue-400">
+                      {Number(r.montant_cession) > 0 ? Number(r.montant_cession).toLocaleString("fr-FR") : "—"}
+                    </td>
                     <td className="py-1.5 px-3 text-muted-foreground">{new Date(r.created_at).toLocaleString("fr-FR")}</td>
                   </tr>
                 ))}

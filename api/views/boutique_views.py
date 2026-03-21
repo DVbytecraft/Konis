@@ -204,7 +204,7 @@ class VenteBoutiqueViewSet(ModelViewSet):
             if raw_unite:
                 if raw_unite not in ("kg", "sac", "sacs"):
                     return Response(
-                        {"detail": f"Unit?? invalide pour {produit.nom} : '{raw_unite}'."},
+                        {"detail": f"Unité invalide pour {produit.nom} : '{raw_unite}'."},
                         status=status.HTTP_400_BAD_REQUEST,
                     )
                 unite_ligne = "sac" if raw_unite in ("sac", "sacs") else "kg"

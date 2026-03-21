@@ -9,6 +9,7 @@ interface BoutiqueRapport {
   lieu_id: number; lieu_nom: string; nb_tickets: number;
   total_ventes: string; total_mouture: string; total_creances: string;
   cessions_recues_sacs: string; cessions_recues_montant: string;
+  caisse_reelle: string; nb_produits_en_stock: number;
 }
 interface UsineRapport {
   lieu_id: number; lieu_nom: string; nb_achats: number; total_achats: string;
@@ -24,15 +25,16 @@ interface Ticket {
   cout_mouture?: number | string;
   lignes: { quantite: string; prix_unitaire: string }[];
 }
-interface Achat { id: number; lieu_nom: string; produit_nom: string; quantite: string; unite: string; prix_total: string; date: string; }
 interface AchatMPSL { id: number; lieu_nom: string; produit_nom: string; quantite: string; unite: string; prix_unitaire: string; prix_total: string; fournisseur_nom: string | null; type_paiement_label: string; date: string; }
 interface BilanData {
   total_ventes: string;
-  total_achats_matieres: string;
+  total_achats_mpsl: string;
   total_depenses_operationnelles: string;
   total_charges: string;
   benefice_net: string;
   est_benefice: boolean;
+  total_dettes_fournisseurs: string;
+  nb_dettes_en_cours: number;
 }
 
 function fmt(v: string | number) { return Number(v).toLocaleString("fr-FR"); }
@@ -57,7 +59,7 @@ function thisMonthRange() {
   };
 }
 
-type Tab = "boutiques" | "usines" | "ventes" | "achats" | "mpsl";
+type Tab = "boutiques" | "usines" | "ventes" | "mpsl";
 
 export default function AdminRapportPage() {
   const router = useRouter();
@@ -67,7 +69,6 @@ export default function AdminRapportPage() {
   const [boutiques, setBoutiques] = useState<BoutiqueRapport[]>([]);
   const [usines, setUsines] = useState<UsineRapport[]>([]);
   const [tickets, setTickets] = useState<Ticket[]>([]);
-  const [achats, setAchats] = useState<Achat[]>([]);
   const [achatsMpsl, setAchatsMpsl] = useState<AchatMPSL[]>([]);
   const [bilan, setBilan] = useState<BilanData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -84,18 +85,16 @@ export default function AdminRapportPage() {
     const qs = buildQs();
     try {
       interface Paginated<T> { results: T[] }
-      const [b, u, t, a, bl, am] = await Promise.all([
+      const [b, u, t, bl, am] = await Promise.all([
         apiFetch<BoutiqueRapport[]>(`/comptable/rapport-boutiques/${qs}`),
         apiFetch<UsineRapport[]>(`/comptable/rapport-usines/${qs}`),
         apiFetch<Paginated<Ticket> | Ticket[]>(`/comptable/ventes/${qs}`),
-        apiFetch<Paginated<Achat> | Achat[]>(`/comptable/achats-usine/${qs}`),
         apiFetch<BilanData>(`/comptable/bilan/${qs}`),
         apiFetch<Paginated<AchatMPSL> | AchatMPSL[]>(`/mpsl/achats/${qs}`).catch(() => [] as AchatMPSL[]),
       ]);
       setBoutiques(b);
       setUsines(u);
       setTickets(Array.isArray(t) ? t : t.results);
-      setAchats(Array.isArray(a) ? a : a.results);
       setBilan(bl);
       setAchatsMpsl(Array.isArray(am) ? am : (am as Paginated<AchatMPSL>).results);
     } catch { /* silencieux */ }
@@ -113,7 +112,7 @@ export default function AdminRapportPage() {
   const totalVentes = boutiques.reduce((s, b) => s + Number(b.total_ventes), 0);
   const totalMouture = boutiques.reduce((s, b) => s + Number(b.total_mouture ?? "0"), 0);
   const totalCreances = boutiques.reduce((s, b) => s + Number(b.total_creances ?? "0"), 0);
-  const totalAchats = usines.reduce((s, u) => s + Number(u.total_achats), 0);
+  const totalCaisse = boutiques.reduce((s, b) => s + Number(b.caisse_reelle ?? "0"), 0);
   const totalTransferts = usines.reduce((s, u) => s + Number(u.total_transferts_montant), 0);
 
   const detailUrl = (type: "boutiques" | "usines", id: number) => {
@@ -166,14 +165,14 @@ export default function AdminRapportPage() {
               <p className="text-xs text-muted-foreground">dont mouture : {fmt(totalMouture)} F</p>
             </div>
             <div className="rounded-lg border border-l-4 border-l-orange-500 bg-orange-50 dark:bg-orange-950/20 p-3">
-              <p className="text-xs text-muted-foreground">Achats matières</p>
-              <p className="text-lg font-bold text-orange-700 dark:text-orange-400">{fmt(bilan.total_achats_matieres)}</p>
-              <p className="text-xs text-muted-foreground">FCFA</p>
+              <p className="text-xs text-muted-foreground">Achats MPSL (matières)</p>
+              <p className="text-lg font-bold text-orange-700 dark:text-orange-400">{fmt(bilan.total_achats_mpsl)}</p>
+              <p className="text-xs text-muted-foreground">coût d'achat fournisseurs</p>
             </div>
             <div className="rounded-lg border border-l-4 border-l-red-400 bg-red-50 dark:bg-red-950/20 p-3">
               <p className="text-xs text-muted-foreground">Charges opér.</p>
               <p className="text-lg font-bold text-red-600 dark:text-red-400">{fmt(bilan.total_depenses_operationnelles)}</p>
-              <p className="text-xs text-muted-foreground">FCFA</p>
+              <p className="text-xs text-muted-foreground">dépenses de fonctionnement</p>
             </div>
             <div className={cn(
               "rounded-lg border border-l-4 p-3",
@@ -188,10 +187,20 @@ export default function AdminRapportPage() {
               )}>
                 {estBenefice ? "+" : ""}{fmt(beneficeNet)}
               </p>
-              <p className="text-xs text-muted-foreground">FCFA</p>
+              <p className="text-xs text-muted-foreground">ventes − achats MPSL − dépenses</p>
             </div>
           </div>
-          {/* Créances en cours */}
+          {/* Dettes fournisseurs en cours */}
+          {bilan.nb_dettes_en_cours > 0 && (
+            <div className="rounded-lg border border-l-4 border-l-red-500 bg-red-50 dark:bg-red-950/20 p-3">
+              <p className="text-xs text-muted-foreground">
+                Dettes fournisseurs en cours — {bilan.nb_dettes_en_cours} dette{bilan.nb_dettes_en_cours > 1 ? "s" : ""} non soldée{bilan.nb_dettes_en_cours > 1 ? "s" : ""}
+              </p>
+              <p className="text-lg font-bold text-red-700 dark:text-red-400">{fmt(bilan.total_dettes_fournisseurs)} F</p>
+              <p className="text-xs text-muted-foreground">montants restants à payer aux fournisseurs MPSL</p>
+            </div>
+          )}
+          {/* Créances clients en cours */}
           {totalCreances > 0 && (
             <div className="rounded-lg border border-l-4 border-l-amber-400 bg-amber-50 dark:bg-amber-950/20 p-3">
               <p className="text-xs text-muted-foreground">Créances clients en cours (toutes boutiques)</p>
@@ -203,16 +212,20 @@ export default function AdminRapportPage() {
       )}
 
       {/* Cartes */}
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="rounded-lg border border-l-4 border-l-green-500 bg-card p-4">
           <p className="text-xs text-muted-foreground">CA boutiques</p>
           <p className="text-xl font-bold text-green-700 dark:text-green-400">{fmt(totalVentes)} <span className="text-sm font-normal text-muted-foreground">FCFA</span></p>
         </div>
-        <div className="rounded-lg border border-l-4 border-l-orange-500 bg-card p-4">
-          <p className="text-xs text-muted-foreground">Achats usines</p>
-          <p className="text-xl font-bold text-orange-700 dark:text-orange-400">{fmt(totalAchats)} <span className="text-sm font-normal text-muted-foreground">FCFA</span></p>
+        <div className="rounded-lg border border-l-4 border-l-blue-500 bg-card p-4">
+          <p className="text-xs text-muted-foreground">Cash encaissé (toutes boutiques)</p>
+          <p className="text-xl font-bold text-blue-700 dark:text-blue-400">{fmt(totalCaisse)} <span className="text-sm font-normal text-muted-foreground">FCFA</span></p>
         </div>
-        <div className="rounded-lg border border-l-4 border-l-green-500 bg-card p-4 col-span-2 lg:col-span-1">
+        <div className="rounded-lg border border-l-4 border-l-orange-500 bg-card p-4">
+          <p className="text-xs text-muted-foreground">Achats MPSL</p>
+          <p className="text-xl font-bold text-orange-700 dark:text-orange-400">{fmt(bilan?.total_achats_mpsl ?? 0)} <span className="text-sm font-normal text-muted-foreground">FCFA</span></p>
+        </div>
+        <div className="rounded-lg border border-l-4 border-l-green-500 bg-card p-4">
           <p className="text-xs text-muted-foreground">Valeur transferts</p>
           <p className="text-xl font-bold text-green-700 dark:text-green-400">{fmt(totalTransferts)} <span className="text-sm font-normal text-muted-foreground">FCFA</span></p>
         </div>
@@ -220,7 +233,7 @@ export default function AdminRapportPage() {
 
       {/* Tabs */}
       <div className="scrollbar-hidden flex gap-1 border-b overflow-x-auto">
-        {([["boutiques", "Boutiques"], ["usines", "Usines"], ["ventes", "Ventes détail"], ["achats", "Achats détail"], ["mpsl", "Achats MPSL"]] as [Tab, string][]).map(([t, label]) => (
+        {([["boutiques", "Boutiques"], ["usines", "Usines"], ["ventes", "Ventes détail"], ["mpsl", "Achats MPSL"]] as [Tab, string][]).map(([t, label]) => (
           <button key={t} onClick={() => setTab(t)} className={cn("px-4 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition-colors", tab === t ? "border-green-600 text-green-600 dark:border-green-400 dark:text-green-400" : "border-transparent text-muted-foreground hover:text-foreground")}>
             {label}
           </button>
@@ -229,25 +242,27 @@ export default function AdminRapportPage() {
 
       {tab === "boutiques" && (
         <div className="overflow-x-auto rounded-md border">
-          <table className="w-full text-xs sm:text-sm min-w-[800px]">
+          <table className="w-full text-xs sm:text-sm min-w-[960px]">
             <thead><tr className="border-b bg-muted/40">
               <th className="text-left py-2 px-3">Boutique</th>
               <th className="text-right py-2 px-3">Tickets</th>
               <th className="text-right py-2 px-3">Ventes totales</th>
-              <th className="text-right py-2 px-3">dont Mouture</th>
+              <th className="text-right py-2 px-3">Cash encaissé</th>
               <th className="text-right py-2 px-3">Créances en cours</th>
+              <th className="text-right py-2 px-3">Stock (produits)</th>
               <th className="text-right py-2 px-3">Cessions (sacs)</th>
               <th className="py-2 px-3"></th>
             </tr></thead>
             <tbody>
-              {boutiques.length === 0 && <tr><td colSpan={7} className="py-6 text-center text-muted-foreground">Aucune donnée.</td></tr>}
+              {boutiques.length === 0 && <tr><td colSpan={8} className="py-6 text-center text-muted-foreground">Aucune donnée.</td></tr>}
               {boutiques.map((b) => (
                 <tr key={b.lieu_id} className="border-b hover:bg-muted/20 cursor-pointer" onClick={() => router.push(detailUrl("boutiques", b.lieu_id))}>
                   <td className="py-2 px-3 font-medium">{b.lieu_nom}</td>
                   <td className="py-2 px-3 text-right">{b.nb_tickets}</td>
                   <td className="py-2 px-3 text-right font-medium text-green-700 dark:text-green-400">{fmt(b.total_ventes)} F</td>
-                  <td className="py-2 px-3 text-right text-green-600 dark:text-green-500">{fmt(b.total_mouture ?? "0")} F</td>
+                  <td className="py-2 px-3 text-right font-medium text-blue-700 dark:text-blue-400">{fmt(b.caisse_reelle ?? "0")} F</td>
                   <td className="py-2 px-3 text-right text-amber-600 dark:text-amber-400">{fmt(b.total_creances ?? "0")} F</td>
+                  <td className="py-2 px-3 text-right">{b.nb_produits_en_stock ?? 0}</td>
                   <td className="py-2 px-3 text-right">{fmt(b.cessions_recues_sacs)}</td>
                   <td className="py-2 px-3 text-right text-xs text-green-600 dark:text-green-400">Détail →</td>
                 </tr>
@@ -259,23 +274,19 @@ export default function AdminRapportPage() {
 
       {tab === "usines" && (
         <div className="overflow-x-auto rounded-md border">
-          <table className="w-full text-xs sm:text-sm min-w-[780px]">
+          <table className="w-full text-xs sm:text-sm min-w-[600px]">
             <thead><tr className="border-b bg-muted/40">
               <th className="text-left py-2 px-3">Usine</th>
-              <th className="text-right py-2 px-3">Achats</th>
-              <th className="text-right py-2 px-3">Total achats (FCFA)</th>
               <th className="text-right py-2 px-3">Vers boutiques (FCFA)</th>
               <th className="text-right py-2 px-3">Inter-usines (FCFA)</th>
               <th className="text-right py-2 px-3">Total transferts (FCFA)</th>
               <th className="py-2 px-3"></th>
             </tr></thead>
             <tbody>
-              {usines.length === 0 && <tr><td colSpan={7} className="py-6 text-center text-muted-foreground">Aucune donnée.</td></tr>}
+              {usines.length === 0 && <tr><td colSpan={5} className="py-6 text-center text-muted-foreground">Aucune donnée.</td></tr>}
               {usines.map((u) => (
                 <tr key={u.lieu_id} className="border-b hover:bg-muted/20 cursor-pointer" onClick={() => router.push(detailUrl("usines", u.lieu_id))}>
                   <td className="py-2 px-3 font-medium">{u.lieu_nom}</td>
-                  <td className="py-2 px-3 text-right">{u.nb_achats}</td>
-                  <td className="py-2 px-3 text-right text-orange-700 dark:text-orange-400">{fmt(u.total_achats)}</td>
                   <td className="py-2 px-3 text-right">{fmt(u.transferts_boutiques_montant)}</td>
                   <td className="py-2 px-3 text-right">{fmt(u.transferts_inter_usines_montant)}</td>
                   <td className="py-2 px-3 text-right font-medium text-green-700 dark:text-green-400">{fmt(u.total_transferts_montant)}</td>
@@ -304,34 +315,6 @@ export default function AdminRapportPage() {
                   <td className="py-1.5 px-3">{(t as unknown as Record<string, string>)["lieu_nom"] ?? String(t.lieu)}</td>
                   <td className="py-1.5 px-3 text-muted-foreground">{new Date(t.date).toLocaleDateString("fr-FR")}</td>
                   <td className="py-1.5 px-3 text-right font-medium text-green-700 dark:text-green-400">{fmt(ticketTotal(t))}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {tab === "achats" && (
-        <div className="overflow-x-auto rounded-md border">
-          <table className="w-full text-xs sm:text-sm min-w-[560px]">
-            <thead><tr className="border-b bg-muted/40">
-              <th className="text-left py-2 px-3">Date</th>
-              <th className="text-left py-2 px-3">Usine</th>
-              <th className="text-left py-2 px-3">Produit</th>
-              <th className="text-right py-2 px-3">Qté</th>
-              <th className="text-left py-2 px-3">Unité</th>
-              <th className="text-right py-2 px-3">Total (FCFA)</th>
-            </tr></thead>
-            <tbody>
-              {achats.length === 0 && <tr><td colSpan={6} className="py-6 text-center text-muted-foreground">Aucun achat.</td></tr>}
-              {achats.map((a) => (
-                <tr key={a.id} className="border-b hover:bg-muted/20">
-                  <td className="py-1.5 px-3 text-muted-foreground">{new Date(a.date).toLocaleDateString("fr-FR")}</td>
-                  <td className="py-1.5 px-3">{a.lieu_nom}</td>
-                  <td className="py-1.5 px-3">{a.produit_nom}</td>
-                  <td className="py-1.5 px-3 text-right">{Number(a.quantite).toLocaleString("fr-FR")}</td>
-                  <td className="py-1.5 px-3">{a.unite}</td>
-                  <td className="py-1.5 px-3 text-right font-medium text-orange-700 dark:text-orange-400">{fmt(a.prix_total)}</td>
                 </tr>
               ))}
             </tbody>

@@ -30,9 +30,9 @@ from api.serializers import (
 from core.models import Lieu
 from audit.services import audit_log
 from depenses.models import CategorieDepense, Depense
-from inventaire.models import AchatUsine, Stock, Transfert
+from inventaire.models import AchatMPSL, AchatUsine, Stock, Transfert
 from usine.models import TransfertCession, TransfertInterUsine
-from finance.models import JournalCreance
+from finance.models import JournalCreance, JournalPayable, PaiementCreance
 from ventes.models import LigneVente, Ticket
 
 # Expressions réutilisées pour calculer les montants en SQL (évite les boucles Python)
@@ -226,6 +226,7 @@ class RapportBoutiquesView(APIView):
                 "nb_tickets": 0, "total_ventes": Decimal("0"),
                 "total_mouture": Decimal("0"), "total_creances": Decimal("0"),
                 "cessions_recues_sacs": Decimal("0"), "cessions_recues_montant": Decimal("0"),
+                "caisse_reelle": Decimal("0"), "nb_produits_en_stock": 0,
             }
             for l in Lieu.objects.filter(type_lieu=Lieu.TYPE_MAGASIN, entreprise=entreprise)
         }
@@ -300,6 +301,47 @@ class RapportBoutiquesView(APIView):
                 boutiques[bid]["cessions_recues_sacs"] = stat["total_sacs"] or Decimal("0")
                 boutiques[bid]["cessions_recues_montant"] = stat["total_montant"] or Decimal("0")
 
+        # Caisse réelle par boutique (all-time : total cash encaissé = montant_cash tickets + paiements créances)
+        cash_stats = (
+            Ticket.objects.filter(
+                lieu__type_lieu=Lieu.TYPE_MAGASIN,
+                lieu__entreprise=entreprise,
+            ).exclude(type_mouture=Ticket.TYPE_MOUTURE_INTERNE)
+            .values("lieu_id")
+            .annotate(total_cash=Sum("montant_cash"))
+        )
+        for stat in cash_stats:
+            bid = stat["lieu_id"]
+            if bid in boutiques:
+                boutiques[bid]["caisse_reelle"] = stat["total_cash"] or Decimal("0")
+
+        paiement_stats = (
+            PaiementCreance.objects.filter(
+                journal__lieu__type_lieu=Lieu.TYPE_MAGASIN,
+                journal__lieu__entreprise=entreprise,
+            )
+            .values("journal__lieu_id")
+            .annotate(total=Sum("montant"))
+        )
+        for stat in paiement_stats:
+            bid = stat["journal__lieu_id"]
+            if bid in boutiques:
+                boutiques[bid]["caisse_reelle"] += stat["total"] or Decimal("0")
+
+        # Nombre de produits en stock (articles avec stock > 0)
+        stock_counts = (
+            Stock.objects.filter(
+                lieu__type_lieu=Lieu.TYPE_MAGASIN,
+                lieu__entreprise=entreprise,
+            ).filter(Q(quantite__gt=0) | Q(quantite_kg__gt=0))
+            .values("lieu_id")
+            .annotate(count=Count("id"))
+        )
+        for stat in stock_counts:
+            bid = stat["lieu_id"]
+            if bid in boutiques:
+                boutiques[bid]["nb_produits_en_stock"] = stat["count"] or 0
+
         result = [
             {
                 **v,
@@ -308,6 +350,7 @@ class RapportBoutiquesView(APIView):
                 "total_creances": str(v["total_creances"]),
                 "cessions_recues_sacs": str(v["cessions_recues_sacs"]),
                 "cessions_recues_montant": str(v["cessions_recues_montant"]),
+                "caisse_reelle": str(v["caisse_reelle"]),
             }
             for v in boutiques.values()
         ]
@@ -644,32 +687,188 @@ class BilanView(APIView):
         total_mouture = tickets_mouture_qs.aggregate(total=Sum("cout_mouture"))["total"] or Decimal("0")
         total_ventes = total_lignes + total_mouture
 
-        # Coûts matières : agrégation SQL sur les achats usine (entreprise uniquement)
-        achats_qs = AchatUsine.objects.filter(lieu__entreprise=entreprise)
+        # Charges matières : achats MPSL (flux réel de l'entreprise — remplace AchatUsine)
+        achats_mpsl_qs = AchatMPSL.objects.filter(lieu__entreprise=entreprise)
         if debut:
-            achats_qs = achats_qs.filter(date__date__gte=debut)
+            achats_mpsl_qs = achats_mpsl_qs.filter(date__date__gte=debut)
         if fin:
-            achats_qs = achats_qs.filter(date__date__lte=fin)
-        total_achats = achats_qs.aggregate(total=Sum("prix_total"))["total"] or Decimal("0")
+            achats_mpsl_qs = achats_mpsl_qs.filter(date__date__lte=fin)
+        total_achats_mpsl = achats_mpsl_qs.aggregate(total=Sum("prix_total"))["total"] or Decimal("0")
 
-        # Charges opérationnelles : agrégation SQL sur les dépenses (entreprise uniquement)
-        depenses_qs = Depense.objects.filter(lieu__entreprise=entreprise)
+        # Charges opérationnelles : dépenses de fonctionnement (toutes, y compris sans lieu)
+        depenses_qs = Depense.objects.filter(entreprise=entreprise)
         if debut:
             depenses_qs = depenses_qs.filter(date__date__gte=debut)
         if fin:
             depenses_qs = depenses_qs.filter(date__date__lte=fin)
         total_depenses = depenses_qs.aggregate(total=Sum("montant"))["total"] or Decimal("0")
 
-        total_charges = total_achats + total_depenses
+        total_charges = total_achats_mpsl + total_depenses
         benefice_net = total_ventes - total_charges
+
+        # Dettes fournisseurs en cours (JournalPayable non soldés — indépendant du filtre date)
+        dettes_agg = JournalPayable.objects.filter(
+            creancier__entreprise=entreprise,
+            statut="en_cours",
+        ).aggregate(
+            total_initial=Sum("montant_initial"),
+            total_paye=Sum("montant_paye"),
+            nb=Count("id"),
+        )
+        total_dettes = (
+            (dettes_agg["total_initial"] or Decimal("0"))
+            - (dettes_agg["total_paye"] or Decimal("0"))
+        )
+        nb_dettes = dettes_agg["nb"] or 0
 
         return Response({
             "total_ventes_produits": str(total_lignes),
             "total_mouture": str(total_mouture),
             "total_ventes": str(total_ventes),
-            "total_achats_matieres": str(total_achats),
+            "total_achats_mpsl": str(total_achats_mpsl),
             "total_depenses_operationnelles": str(total_depenses),
             "total_charges": str(total_charges),
             "benefice_net": str(benefice_net),
             "est_benefice": benefice_net >= Decimal("0"),
+            "total_dettes_fournisseurs": str(total_dettes),
+            "nb_dettes_en_cours": nb_dettes,
+        })
+
+
+class RapportMPSLView(APIView):
+    """
+    GET /api/comptable/rapport-mpsl/
+    Résumé par dépôt MPSL : achats + dettes fournisseurs en cours.
+    Filtres : ?debut=YYYY-MM-DD&fin=YYYY-MM-DD
+    """
+    permission_classes = [IsComptableRole]
+
+    def get(self, request):
+        entreprise = request.user.entreprise
+        debut = request.query_params.get("debut")
+        fin = request.query_params.get("fin")
+
+        # Initialiser tous les dépôts MPSL de l'entreprise
+        depots = {
+            l.id: {
+                "lieu_id": l.id, "lieu_nom": l.nom,
+                "nb_achats": 0, "total_achats": Decimal("0"),
+                "nb_dettes_en_cours": 0, "total_dettes": Decimal("0"),
+            }
+            for l in Lieu.objects.filter(type_lieu=Lieu.TYPE_MPSL, entreprise=entreprise)
+        }
+
+        # Agrégation SQL des achats par dépôt
+        achats_qs = AchatMPSL.objects.filter(lieu__entreprise=entreprise)
+        if debut:
+            achats_qs = achats_qs.filter(date__date__gte=debut)
+        if fin:
+            achats_qs = achats_qs.filter(date__date__lte=fin)
+
+        achat_stats = (
+            achats_qs
+            .values("lieu_id")
+            .annotate(nb=Count("id"), total=Sum("prix_total"))
+        )
+        for stat in achat_stats:
+            lid = stat["lieu_id"]
+            if lid in depots:
+                depots[lid]["nb_achats"] = stat["nb"] or 0
+                depots[lid]["total_achats"] = stat["total"] or Decimal("0")
+
+        # Dettes fournisseurs en cours par dépôt (indépendant du filtre date)
+        dettes_stats = (
+            JournalPayable.objects.filter(
+                achat_mpsl__lieu__entreprise=entreprise,
+                statut="en_cours",
+            )
+            .values("achat_mpsl__lieu_id")
+            .annotate(
+                nb=Count("id"),
+                total=Sum(ExpressionWrapper(
+                    F("montant_initial") - F("montant_paye"),
+                    output_field=DecimalField(max_digits=14, decimal_places=2),
+                ))
+            )
+        )
+        for stat in dettes_stats:
+            lid = stat["achat_mpsl__lieu_id"]
+            if lid in depots:
+                depots[lid]["nb_dettes_en_cours"] = stat["nb"] or 0
+                depots[lid]["total_dettes"] = stat["total"] or Decimal("0")
+
+        result = [
+            {
+                **v,
+                "total_achats": str(v["total_achats"]),
+                "total_dettes": str(v["total_dettes"]),
+            }
+            for v in depots.values()
+        ]
+        return Response(result)
+
+
+class DetailMPSLView(APIView):
+    """
+    GET /api/comptable/rapport-mpsl/<lieu_id>/
+    Détail d'un dépôt MPSL : liste des achats + dettes fournisseurs en cours.
+    Restriction : le dépôt doit appartenir à l'entreprise du comptable (anti-IDOR).
+    """
+    permission_classes = [IsComptableRole]
+
+    def get(self, request, lieu_id):
+        from api.serializers import AchatMPSLSerializer
+        debut = request.query_params.get("debut")
+        fin = request.query_params.get("fin")
+
+        try:
+            lieu = Lieu.objects.get(
+                pk=lieu_id,
+                type_lieu=Lieu.TYPE_MPSL,
+                entreprise=request.user.entreprise,  # anti-IDOR
+            )
+        except Lieu.DoesNotExist:
+            return Response({"detail": "Dépôt MPSL introuvable."}, status=404)
+
+        achats_qs = AchatMPSL.objects.filter(lieu=lieu).select_related("fournisseur").order_by("-date")
+        if debut:
+            achats_qs = achats_qs.filter(date__date__gte=debut)
+        if fin:
+            achats_qs = achats_qs.filter(date__date__lte=fin)
+
+        total_achats = achats_qs.aggregate(total=Sum("prix_total"))["total"] or Decimal("0")
+
+        # Dettes fournisseurs en cours pour ce dépôt (all-time)
+        dettes_qs = JournalPayable.objects.filter(
+            achat_mpsl__lieu=lieu,
+            statut="en_cours",
+        ).select_related("creancier").order_by("-date_echeance")
+
+        total_dettes = dettes_qs.aggregate(
+            total=Sum(ExpressionWrapper(
+                F("montant_initial") - F("montant_paye"),
+                output_field=DecimalField(max_digits=14, decimal_places=2),
+            ))
+        )["total"] or Decimal("0")
+
+        dettes_data = [
+            {
+                "id": j.pk,
+                "fournisseur_nom": j.creancier.nom if j.creancier else "—",
+                "montant_initial": str(j.montant_initial),
+                "montant_paye": str(j.montant_paye),
+                "montant_restant": str(j.montant_initial - j.montant_paye),
+                "date_echeance": str(j.date_echeance) if j.date_echeance else None,
+            }
+            for j in dettes_qs
+        ]
+
+        return Response({
+            "lieu_id": lieu.id,
+            "lieu_nom": lieu.nom,
+            "total_achats": str(total_achats),
+            "total_dettes": str(total_dettes),
+            "nb_dettes_en_cours": dettes_qs.count(),
+            "achats": AchatMPSLSerializer(achats_qs, many=True).data,
+            "dettes_en_cours": dettes_data,
         })

@@ -11,20 +11,21 @@ interface BoutiqueRapport {
   lieu_nom: string;
   nb_tickets: number;
   total_ventes: string;
+  total_mouture: string;
+  total_creances: string;
   cessions_recues_sacs: string;
   cessions_recues_montant: string;
+  caisse_reelle: string;
+  nb_produits_en_stock: number;
 }
 
-interface UsineRapport {
+interface MPSLRapport {
   lieu_id: number;
   lieu_nom: string;
   nb_achats: number;
   total_achats: string;
-  transferts_boutiques_sacs: string;
-  transferts_boutiques_montant: string;
-  transferts_inter_usines_sacs: string;
-  transferts_inter_usines_montant: string;
-  total_transferts_montant: string;
+  nb_dettes_en_cours: number;
+  total_dettes: string;
 }
 
 interface Ticket {
@@ -37,25 +38,17 @@ interface Ticket {
   lignes: { quantite: string; prix_unitaire: string }[];
 }
 
-interface Achat {
-  id: number;
-  lieu_nom: string;
-  produit_nom: string;
-  quantite: string;
-  unite: string;
-  prix_total: string;
-  date: string;
-}
-
 interface BilanData {
   total_ventes: string;
   total_ventes_produits: string;
   total_mouture: string;
-  total_achats_matieres: string;
+  total_achats_mpsl: string;
   total_depenses_operationnelles: string;
   total_charges: string;
   benefice_net: string;
   est_benefice: boolean;
+  total_dettes_fournisseurs: string;
+  nb_dettes_en_cours: number;
 }
 
 // ---- Helpers ----
@@ -85,7 +78,7 @@ function thisMonthRange() {
   return { debut, fin };
 }
 
-type Tab = "boutiques" | "usines" | "ventes" | "achats";
+type Tab = "boutiques" | "mpsl" | "ventes";
 
 export default function ComptablePage() {
   const router = useRouter();
@@ -94,9 +87,8 @@ export default function ComptablePage() {
   const [fin, setFin] = useState("");
 
   const [boutiques, setBoutiques] = useState<BoutiqueRapport[]>([]);
-  const [usines, setUsines] = useState<UsineRapport[]>([]);
+  const [mpsl, setMpsl] = useState<MPSLRapport[]>([]);
   const [tickets, setTickets] = useState<Ticket[]>([]);
-  const [achats, setAchats] = useState<Achat[]>([]);
   const [bilan, setBilan] = useState<BilanData | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -111,17 +103,15 @@ export default function ComptablePage() {
     setLoading(true);
     const qs = buildQs();
     try {
-      const [b, u, t, a, bl] = await Promise.all([
+      const [b, m, t, bl] = await Promise.all([
         apiFetch(`/comptable/rapport-boutiques/${qs}`),
-        apiFetch(`/comptable/rapport-usines/${qs}`),
+        apiFetch(`/comptable/rapport-mpsl/${qs}`),
         apiFetch(`/comptable/ventes/${qs}`),
-        apiFetch(`/comptable/achats-usine/${qs}`),
         apiFetch(`/comptable/bilan/${qs}`),
       ]);
       setBoutiques(b as BoutiqueRapport[]);
-      setUsines(u as UsineRapport[]);
+      setMpsl(m as MPSLRapport[]);
       setTickets((t as { results?: Ticket[] }).results ?? (t as Ticket[]));
-      setAchats((a as { results?: Achat[] }).results ?? (a as Achat[]));
       setBilan(bl as BilanData);
     } catch {
       // silencieux
@@ -139,16 +129,14 @@ export default function ComptablePage() {
   };
 
   const totalVentes = boutiques.reduce((s, b) => s + Number(b.total_ventes), 0);
-  const totalAchats = usines.reduce((s, u) => s + Number(u.total_achats), 0);
-  const totalTransferts = usines.reduce((s, u) => s + Number(u.total_transferts_montant), 0);
-
-  const detailUrl = (type: "boutiques" | "usines", id: number) => {
-    const qs = buildQs();
-    return `/comptable/${type}/${id}${qs}`;
-  };
+  const totalAchatsMpsl = mpsl.reduce((s, m) => s + Number(m.total_achats), 0);
+  const totalDettesMpsl = mpsl.reduce((s, m) => s + Number(m.total_dettes), 0);
 
   const beneficeNet = bilan ? Number(bilan.benefice_net) : 0;
   const estBenefice = bilan ? bilan.est_benefice : true;
+
+  const detailBoutiqueUrl = (id: number) => `/comptable/boutiques/${id}${buildQs()}`;
+  const detailMpslUrl = (id: number) => `/comptable/mpsl/${id}${buildQs()}`;
 
   return (
     <div className="space-y-4 min-w-0">
@@ -199,25 +187,15 @@ export default function ComptablePage() {
               {estBenefice ? "✓ Bénéfice" : "✗ Perte"}
             </span>
           </div>
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-            <div className="rounded-lg border border-l-4 border-l-green-500 bg-green-50 dark:bg-green-950/20 p-3">
-              <p className="text-xs text-muted-foreground">Ventes produits</p>
-              <p className="text-lg font-bold text-green-700 dark:text-green-400">{fmt(bilan.total_ventes_produits ?? bilan.total_ventes)}</p>
-              <p className="text-xs text-muted-foreground">FCFA</p>
-            </div>
-            <div className="rounded-lg border border-l-4 border-l-amber-500 bg-amber-50 dark:bg-amber-950/20 p-3">
-              <p className="text-xs text-muted-foreground">Revenus mouture</p>
-              <p className="text-lg font-bold text-amber-700 dark:text-amber-400">{fmt(bilan.total_mouture ?? 0)}</p>
-              <p className="text-xs text-muted-foreground">FCFA</p>
-            </div>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <div className="rounded-lg border border-l-4 border-l-green-600 bg-green-50 dark:bg-green-950/20 p-3">
               <p className="text-xs text-muted-foreground">Total revenus</p>
               <p className="text-lg font-bold text-green-800 dark:text-green-300">{fmt(bilan.total_ventes)}</p>
-              <p className="text-xs text-muted-foreground">FCFA</p>
+              <p className="text-xs text-muted-foreground">dont mouture {fmt(bilan.total_mouture)} FCFA</p>
             </div>
             <div className="rounded-lg border border-l-4 border-l-orange-500 bg-orange-50 dark:bg-orange-950/20 p-3">
-              <p className="text-xs text-muted-foreground">Achats matières</p>
-              <p className="text-lg font-bold text-orange-700 dark:text-orange-400">{fmt(bilan.total_achats_matieres)}</p>
+              <p className="text-xs text-muted-foreground">Achats MPSL</p>
+              <p className="text-lg font-bold text-orange-700 dark:text-orange-400">{fmt(bilan.total_achats_mpsl)}</p>
               <p className="text-xs text-muted-foreground">FCFA</p>
             </div>
             <div className="rounded-lg border border-l-4 border-l-red-400 bg-red-50 dark:bg-red-950/20 p-3">
@@ -241,6 +219,15 @@ export default function ComptablePage() {
               <p className="text-xs text-muted-foreground">FCFA</p>
             </div>
           </div>
+          {Number(bilan.total_dettes_fournisseurs) > 0 && (
+            <div className="rounded-lg border border-l-4 border-l-red-500 bg-red-50 dark:bg-red-950/20 p-3 flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium text-red-700 dark:text-red-400">Dettes fournisseurs en cours</p>
+                <p className="text-xs text-muted-foreground">{bilan.nb_dettes_en_cours} dette(s) non soldée(s)</p>
+              </div>
+              <p className="text-lg font-bold text-red-700 dark:text-red-400">{fmt(bilan.total_dettes_fournisseurs)} FCFA</p>
+            </div>
+          )}
         </div>
       )}
 
@@ -251,12 +238,12 @@ export default function ComptablePage() {
           <p className="text-xl font-bold text-green-700 dark:text-green-400">{fmt(totalVentes)} <span className="text-sm font-normal text-muted-foreground">FCFA</span></p>
         </div>
         <div className="rounded-lg border border-l-4 border-l-orange-500 bg-card p-4">
-          <p className="text-xs text-muted-foreground">Achats usines</p>
-          <p className="text-xl font-bold text-orange-700 dark:text-orange-400">{fmt(totalAchats)} <span className="text-sm font-normal text-muted-foreground">FCFA</span></p>
+          <p className="text-xs text-muted-foreground">Achats MPSL</p>
+          <p className="text-xl font-bold text-orange-700 dark:text-orange-400">{fmt(totalAchatsMpsl)} <span className="text-sm font-normal text-muted-foreground">FCFA</span></p>
         </div>
-        <div className="rounded-lg border border-l-4 border-l-green-500 bg-card p-4 col-span-2 lg:col-span-1">
-          <p className="text-xs text-muted-foreground">Valeur transferts</p>
-          <p className="text-xl font-bold text-green-700 dark:text-green-400">{fmt(totalTransferts)} <span className="text-sm font-normal text-muted-foreground">FCFA</span></p>
+        <div className="rounded-lg border border-l-4 border-l-red-400 bg-card p-4 col-span-2 lg:col-span-1">
+          <p className="text-xs text-muted-foreground">Dettes fournisseurs MPSL</p>
+          <p className="text-xl font-bold text-red-600 dark:text-red-400">{fmt(totalDettesMpsl)} <span className="text-sm font-normal text-muted-foreground">FCFA</span></p>
         </div>
       </div>
 
@@ -264,9 +251,8 @@ export default function ComptablePage() {
       <div className="scrollbar-hidden flex gap-1 border-b overflow-x-auto">
         {([
           ["boutiques", "Boutiques"],
-          ["usines", "Usines"],
+          ["mpsl", "MPSL"],
           ["ventes", "Ventes détail"],
-          ["achats", "Achats détail"],
         ] as [Tab, string][]).map(([t, label]) => (
           <button
             key={t}
@@ -284,26 +270,30 @@ export default function ComptablePage() {
       {/* Tab Boutiques */}
       {tab === "boutiques" && (
         <div className="overflow-x-auto rounded-md border">
-          <table className="w-full text-xs sm:text-sm min-w-[640px]">
+          <table className="w-full text-xs sm:text-sm min-w-[900px]">
             <thead>
               <tr className="border-b bg-muted/40">
                 <th className="text-left py-2 px-3">Boutique</th>
                 <th className="text-right py-2 px-3">Tickets</th>
                 <th className="text-right py-2 px-3">CA ventes (FCFA)</th>
-                <th className="text-right py-2 px-3">Cessions reçues (sacs)</th>
-                <th className="text-right py-2 px-3">Valeur cessions (FCFA)</th>
+                <th className="text-right py-2 px-3">Cash encaissé (FCFA)</th>
+                <th className="text-right py-2 px-3">Créances (FCFA)</th>
+                <th className="text-right py-2 px-3">Stock (produits)</th>
+                <th className="text-right py-2 px-3">Cessions reçues</th>
                 <th className="py-2 px-3"></th>
               </tr>
             </thead>
             <tbody>
-              {boutiques.length === 0 && <tr><td colSpan={6} className="py-6 text-center text-muted-foreground">Aucune donnée.</td></tr>}
+              {boutiques.length === 0 && <tr><td colSpan={8} className="py-6 text-center text-muted-foreground">Aucune donnée.</td></tr>}
               {boutiques.map((b) => (
-                <tr key={b.lieu_id} className="border-b hover:bg-muted/20 cursor-pointer" onClick={() => router.push(detailUrl("boutiques", b.lieu_id))}>
+                <tr key={b.lieu_id} className="border-b hover:bg-muted/20 cursor-pointer" onClick={() => router.push(detailBoutiqueUrl(b.lieu_id))}>
                   <td className="py-2 px-3 font-medium">{b.lieu_nom}</td>
                   <td className="py-2 px-3 text-right">{b.nb_tickets}</td>
                   <td className="py-2 px-3 text-right font-medium text-green-700 dark:text-green-400">{fmt(b.total_ventes)}</td>
-                  <td className="py-2 px-3 text-right">{fmt(b.cessions_recues_sacs)}</td>
-                  <td className="py-2 px-3 text-right">{fmt(b.cessions_recues_montant)}</td>
+                  <td className="py-2 px-3 text-right text-blue-700 dark:text-blue-400">{fmt(b.caisse_reelle)}</td>
+                  <td className="py-2 px-3 text-right text-amber-700 dark:text-amber-400">{fmt(b.total_creances)}</td>
+                  <td className="py-2 px-3 text-right">{b.nb_produits_en_stock}</td>
+                  <td className="py-2 px-3 text-right text-muted-foreground">{fmt(b.cessions_recues_sacs)} sacs</td>
                   <td className="py-2 px-3 text-right text-xs text-green-600 dark:text-green-400">Détail →</td>
                 </tr>
               ))}
@@ -312,31 +302,29 @@ export default function ComptablePage() {
         </div>
       )}
 
-      {/* Tab Usines */}
-      {tab === "usines" && (
+      {/* Tab MPSL */}
+      {tab === "mpsl" && (
         <div className="overflow-x-auto rounded-md border">
-          <table className="w-full text-xs sm:text-sm min-w-[780px]">
+          <table className="w-full text-xs sm:text-sm min-w-[640px]">
             <thead>
               <tr className="border-b bg-muted/40">
-                <th className="text-left py-2 px-3">Usine</th>
+                <th className="text-left py-2 px-3">Dépôt MPSL</th>
                 <th className="text-right py-2 px-3">Achats</th>
                 <th className="text-right py-2 px-3">Total achats (FCFA)</th>
-                <th className="text-right py-2 px-3">Vers boutiques (FCFA)</th>
-                <th className="text-right py-2 px-3">Inter-usines (FCFA)</th>
-                <th className="text-right py-2 px-3">Total transferts (FCFA)</th>
+                <th className="text-right py-2 px-3">Dettes en cours</th>
+                <th className="text-right py-2 px-3">Montant dettes (FCFA)</th>
                 <th className="py-2 px-3"></th>
               </tr>
             </thead>
             <tbody>
-              {usines.length === 0 && <tr><td colSpan={7} className="py-6 text-center text-muted-foreground">Aucune donnée.</td></tr>}
-              {usines.map((u) => (
-                <tr key={u.lieu_id} className="border-b hover:bg-muted/20 cursor-pointer" onClick={() => router.push(detailUrl("usines", u.lieu_id))}>
-                  <td className="py-2 px-3 font-medium">{u.lieu_nom}</td>
-                  <td className="py-2 px-3 text-right">{u.nb_achats}</td>
-                  <td className="py-2 px-3 text-right text-orange-700 dark:text-orange-400">{fmt(u.total_achats)}</td>
-                  <td className="py-2 px-3 text-right">{fmt(u.transferts_boutiques_montant)}</td>
-                  <td className="py-2 px-3 text-right">{fmt(u.transferts_inter_usines_montant)}</td>
-                  <td className="py-2 px-3 text-right font-medium text-green-700 dark:text-green-400">{fmt(u.total_transferts_montant)}</td>
+              {mpsl.length === 0 && <tr><td colSpan={6} className="py-6 text-center text-muted-foreground">Aucun dépôt MPSL.</td></tr>}
+              {mpsl.map((m) => (
+                <tr key={m.lieu_id} className="border-b hover:bg-muted/20 cursor-pointer" onClick={() => router.push(detailMpslUrl(m.lieu_id))}>
+                  <td className="py-2 px-3 font-medium">{m.lieu_nom}</td>
+                  <td className="py-2 px-3 text-right">{m.nb_achats}</td>
+                  <td className="py-2 px-3 text-right font-medium text-orange-700 dark:text-orange-400">{fmt(m.total_achats)}</td>
+                  <td className="py-2 px-3 text-right">{m.nb_dettes_en_cours}</td>
+                  <td className="py-2 px-3 text-right font-medium text-red-600 dark:text-red-400">{fmt(m.total_dettes)}</td>
                   <td className="py-2 px-3 text-right text-xs text-green-600 dark:text-green-400">Détail →</td>
                 </tr>
               ))}
@@ -365,37 +353,6 @@ export default function ComptablePage() {
                   <td className="py-1.5 px-3">{(t as unknown as Record<string, string>)["lieu_nom"] ?? String(t.lieu)}</td>
                   <td className="py-1.5 px-3 text-muted-foreground">{new Date(t.date).toLocaleDateString("fr-FR")}</td>
                   <td className="py-1.5 px-3 text-right font-medium text-green-700 dark:text-green-400">{fmt(ticketTotal(t))}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {/* Tab Achats détail */}
-      {tab === "achats" && (
-        <div className="overflow-x-auto rounded-md border">
-          <table className="w-full text-xs sm:text-sm min-w-[560px]">
-            <thead>
-              <tr className="border-b bg-muted/40">
-                <th className="text-left py-2 px-3">Date</th>
-                <th className="text-left py-2 px-3">Usine</th>
-                <th className="text-left py-2 px-3">Produit</th>
-                <th className="text-right py-2 px-3">Qté</th>
-                <th className="text-left py-2 px-3">Unité</th>
-                <th className="text-right py-2 px-3">Total (FCFA)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {achats.length === 0 && <tr><td colSpan={6} className="py-6 text-center text-muted-foreground">Aucun achat.</td></tr>}
-              {achats.map((a) => (
-                <tr key={a.id} className="border-b hover:bg-muted/20">
-                  <td className="py-1.5 px-3 text-muted-foreground">{new Date(a.date).toLocaleDateString("fr-FR")}</td>
-                  <td className="py-1.5 px-3">{a.lieu_nom}</td>
-                  <td className="py-1.5 px-3">{a.produit_nom}</td>
-                  <td className="py-1.5 px-3 text-right">{Number(a.quantite).toLocaleString("fr-FR")}</td>
-                  <td className="py-1.5 px-3">{a.unite}</td>
-                  <td className="py-1.5 px-3 text-right font-medium text-orange-700 dark:text-orange-400">{fmt(a.prix_total)}</td>
                 </tr>
               ))}
             </tbody>

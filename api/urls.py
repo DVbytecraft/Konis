@@ -34,6 +34,8 @@ from api.views.comptable_views import (
     DetailBoutiqueView,
     DetailUsineView,
     BilanView,
+    RapportMPSLView,
+    DetailMPSLView,
 )
 from api.views.usine_views import (
     AchatUsineViewSet,
@@ -177,6 +179,8 @@ urlpatterns = [
     path("comptable/rapport-usines/", RapportUsinesView.as_view(), name="comptable-rapport-usines"),
     path("comptable/rapport-usines/<int:lieu_id>/", DetailUsineView.as_view(), name="comptable-detail-usine"),
     path("comptable/bilan/", BilanView.as_view(), name="comptable-bilan"),
+    path("comptable/rapport-mpsl/", RapportMPSLView.as_view(), name="comptable-rapport-mpsl"),
+    path("comptable/rapport-mpsl/<int:lieu_id>/", DetailMPSLView.as_view(), name="comptable-detail-mpsl"),
     path("finance/resume/", FinanceResumeView.as_view(), name="finance-resume"),
     path("finance/dashboard/", DashboardGlobalView.as_view(), name="finance-dashboard"),
     path("finance/", include(router_finance.urls)),

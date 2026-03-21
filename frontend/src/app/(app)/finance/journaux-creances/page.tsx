@@ -1,13 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { fmt } from "@/lib/utils";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ChevronDown, ChevronRight, Plus, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Plus, Printer, X } from "lucide-react";
 
 interface Paiement {
   id: number;
@@ -80,6 +80,27 @@ export default function JournauxCreancesPage() {
   const [form, setForm] = useState(emptyJournalForm);
   const [showForm, setShowForm] = useState(false);
   const [expanded, setExpanded] = useState<number | null>(null);
+
+  // Filtres
+  const [filterDebut, setFilterDebut] = useState("");
+  const [filterFin, setFilterFin] = useState("");
+  const [filterStatut, setFilterStatut] = useState<"tous" | "en_cours" | "solde">("tous");
+
+  const filtered = useMemo(() => {
+    return journaux.filter((j) => {
+      const d = j.created_at.slice(0, 10);
+      if (filterDebut && d < filterDebut) return false;
+      if (filterFin && d > filterFin) return false;
+      if (filterStatut !== "tous" && j.statut !== filterStatut) return false;
+      return true;
+    });
+  }, [journaux, filterDebut, filterFin, filterStatut]);
+
+  const totaux = useMemo(() => ({
+    initial: filtered.reduce((s, j) => s + Number(j.montant_initial), 0),
+    paye:    filtered.reduce((s, j) => s + Number(j.montant_paye), 0),
+    restant: filtered.reduce((s, j) => s + Number(j.montant_restant), 0),
+  }), [filtered]);
 
   const [paiementJournal, setPaiementJournal] = useState<JournalCreance | null>(null);
   const [paiementForm, setPaiementForm] = useState(emptyPaiementForm);
@@ -205,20 +226,66 @@ export default function JournauxCreancesPage() {
   };
 
   return (
-    <div className="space-y-8 min-w-0">
-      <div className="flex items-center justify-between flex-wrap gap-2">
+    <div className="space-y-6 min-w-0">
+      {/* En-tête visible uniquement à l'impression */}
+      <div className="hidden print:block mb-4">
+        <h1 className="text-xl font-bold">Journaux créances</h1>
+        <p className="text-sm text-gray-500">
+          {filterDebut || filterFin
+            ? `Période : ${filterDebut || "—"} → ${filterFin || "—"}`
+            : "Toute période"}
+          {filterStatut !== "tous" ? ` · Statut : ${filterStatut === "en_cours" ? "En cours" : "Soldé"}` : ""}
+        </p>
+      </div>
+
+      <div className="flex items-center justify-between flex-wrap gap-2 print:hidden">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Journaux créances</h1>
           <p className="mt-1 text-sm text-muted-foreground">Montants dus par les clients.</p>
         </div>
-        <Button className="h-9 gap-1" onClick={() => setShowForm((v) => !v)}>
-          <Plus className="h-4 w-4" />
-          Nouveau journal
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" className="h-9 gap-1" onClick={() => window.print()}>
+            <Printer className="h-4 w-4" />
+            Imprimer
+          </Button>
+          <Button className="h-9 gap-1" onClick={() => setShowForm((v) => !v)}>
+            <Plus className="h-4 w-4" />
+            Nouveau journal
+          </Button>
+        </div>
+      </div>
+
+      {/* Filtres */}
+      <div className="flex flex-wrap items-end gap-3 print:hidden">
+        <div className="space-y-1">
+          <Label className="text-xs">Début</Label>
+          <Input type="date" value={filterDebut} onChange={(e) => setFilterDebut(e.target.value)} className="h-8 w-36 text-sm" />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Fin</Label>
+          <Input type="date" value={filterFin} onChange={(e) => setFilterFin(e.target.value)} className="h-8 w-36 text-sm" />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Statut</Label>
+          <select
+            value={filterStatut}
+            onChange={(e) => setFilterStatut(e.target.value as "tous" | "en_cours" | "solde")}
+            className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+          >
+            <option value="tous">Tous</option>
+            <option value="en_cours">En cours</option>
+            <option value="solde">Soldé</option>
+          </select>
+        </div>
+        {(filterDebut || filterFin || filterStatut !== "tous") && (
+          <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => { setFilterDebut(""); setFilterFin(""); setFilterStatut("tous"); }}>
+            <X className="h-3 w-3 mr-1" />Réinitialiser
+          </Button>
+        )}
       </div>
 
       {showForm && (
-        <Card>
+        <Card className="print:hidden">
           <CardHeader>
             <CardTitle>Nouveau journal créance</CardTitle>
             <CardDescription>Enregistrer une nouvelle créance client.</CardDescription>
@@ -282,21 +349,32 @@ export default function JournauxCreancesPage() {
         </Card>
       )}
 
-      {!showForm && success && <p className="text-sm text-emerald-600">{success}</p>}
+      {!showForm && success && <p className="text-sm text-emerald-600 print:hidden">{success}</p>}
 
       <Card>
         <CardHeader>
-          <CardTitle>Liste des journaux</CardTitle>
-          <CardDescription>{journaux.length} journal(ux) enregistré(s).</CardDescription>
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <CardTitle>Liste des journaux</CardTitle>
+              <CardDescription>{filtered.length} journal(ux) affiché(s) sur {journaux.length}.</CardDescription>
+            </div>
+            {filtered.length > 0 && (
+              <div className="text-right text-sm space-y-0.5">
+                <p className="text-muted-foreground">Total initial : <span className="font-semibold text-foreground">{fmt(totaux.initial)} FCFA</span></p>
+                <p className="text-muted-foreground">Encaissé : <span className="font-semibold text-emerald-600">{fmt(totaux.paye)} FCFA</span></p>
+                <p className="text-muted-foreground">Restant : <span className="font-semibold text-amber-600">{fmt(totaux.restant)} FCFA</span></p>
+              </div>
+            )}
+          </div>
         </CardHeader>
         <CardContent>
           {loading ? (
             <p className="text-sm text-muted-foreground">Chargement...</p>
-          ) : journaux.length === 0 ? (
+          ) : filtered.length === 0 ? (
             <p className="text-sm text-muted-foreground">Aucun journal créance.</p>
           ) : (
             <div className="space-y-3">
-              {journaux.map((j) => (
+              {filtered.map((j) => (
                 <div key={j.id} className="border rounded-lg overflow-hidden">
                   <div
                     className="flex items-start justify-between gap-2 p-3 cursor-pointer hover:bg-muted/20"
@@ -351,7 +429,7 @@ export default function JournauxCreancesPage() {
                       )}
 
                       {j.statut === "en_cours" && (
-                        <div className="flex flex-wrap gap-2">
+                        <div className="flex flex-wrap gap-2 print:hidden">
                           <Button size="sm" className="h-8 text-xs" onClick={() => openPaiement(j)}>
                             Enregistrer un encaissement
                           </Button>
@@ -377,7 +455,7 @@ export default function JournauxCreancesPage() {
       {/* Modal encaissement */}
       {paiementJournal && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 print:hidden"
           onClick={() => setPaiementJournal(null)}
         >
           <Card className="w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
@@ -455,7 +533,7 @@ export default function JournauxCreancesPage() {
       {/* Modal solder */}
       {solderJournal && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 print:hidden"
           onClick={() => setSolderJournal(null)}
         >
           <Card className="w-full max-w-sm" onClick={(e) => e.stopPropagation()}>

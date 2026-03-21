@@ -4,18 +4,15 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/api";
 
-interface Achat { id: number; produit_nom: string; quantite: string; unite: string; prix_unitaire: string; prix_total: string; date: string; }
 interface Cession { id: number; lot_nom: string; produit_nom: string; boutique_nom: string; quantite_sacs: string; prix_par_sac: string; montant_cession: string; created_at: string; }
 interface InterUsine { id: number; lot_nom: string; produit_nom: string; usine_source_nom: string; usine_destination_nom: string; quantite_sacs: string; prix_par_sac: string; montant_transfert: string; created_at: string; }
 
 interface DetailUsine {
   lieu_id: number;
   lieu_nom: string;
-  total_achats: string;
   total_transferts_boutiques: string;
   total_transferts_inter_usines_sortants: string;
   total_transferts: string;
-  achats: Achat[];
   cessions_vers_boutiques: Cession[];
   transferts_inter_usines_sortants: InterUsine[];
   transferts_inter_usines_entrants: InterUsine[];
@@ -23,7 +20,7 @@ interface DetailUsine {
 
 function fmt(v: string | number) { return Number(v).toLocaleString("fr-FR"); }
 
-type Tab = "achats" | "boutiques" | "inter_sortants" | "inter_entrants";
+type Tab = "boutiques" | "inter_sortants" | "inter_entrants";
 
 export default function DetailUsinePage() {
   const { id } = useParams<{ id: string }>();
@@ -32,7 +29,7 @@ export default function DetailUsinePage() {
   const [data, setData] = useState<DetailUsine | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
-  const [tab, setTab] = useState<Tab>("achats");
+  const [tab, setTab] = useState<Tab>("boutiques");
 
   const debut = searchParams.get("debut") ?? "";
   const fin = searchParams.get("fin") ?? "";
@@ -55,7 +52,6 @@ export default function DetailUsinePage() {
   const periode = debut && fin ? `${debut} → ${fin}` : debut ? `depuis ${debut}` : fin ? `jusqu'au ${fin}` : "toute période";
 
   const tabs: [Tab, string, number][] = [
-    ["achats", "Achats", data.achats.length],
     ["boutiques", "Vers boutiques", data.cessions_vers_boutiques.length],
     ["inter_sortants", "Inter-usines sortants", data.transferts_inter_usines_sortants.length],
     ["inter_entrants", "Inter-usines entrants", data.transferts_inter_usines_entrants.length],
@@ -69,11 +65,7 @@ export default function DetailUsinePage() {
         <span className="text-sm text-muted-foreground">{periode}</span>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <div className="rounded-lg border border-l-4 border-l-orange-500 bg-orange-50 dark:bg-orange-950/20 p-4">
-          <p className="text-xs text-muted-foreground">Total achats</p>
-          <p className="text-lg font-bold text-orange-700 dark:text-orange-400">{fmt(data.total_achats)} <span className="text-xs font-normal text-muted-foreground">FCFA</span></p>
-        </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div className="rounded-lg border border-l-4 border-l-green-500 bg-green-50 dark:bg-green-950/20 p-4">
           <p className="text-xs text-muted-foreground">Transferts boutiques</p>
           <p className="text-lg font-bold text-green-700 dark:text-green-400">{fmt(data.total_transferts_boutiques)} <span className="text-xs font-normal text-muted-foreground">FCFA</span></p>
@@ -99,38 +91,6 @@ export default function DetailUsinePage() {
           </button>
         ))}
       </div>
-
-      {tab === "achats" && (
-        <div className="overflow-x-auto rounded-md border">
-          <table className="w-full text-xs sm:text-sm min-w-[560px]">
-            <thead><tr className="border-b bg-muted/40">
-              <th className="text-left py-2 px-3">Date</th>
-              <th className="text-left py-2 px-3">Produit</th>
-              <th className="text-right py-2 px-3">Qté</th>
-              <th className="text-left py-2 px-3">Unité</th>
-              <th className="text-right py-2 px-3">Total (FCFA)</th>
-            </tr></thead>
-            <tbody>
-              {data.achats.length === 0 && <tr><td colSpan={5} className="py-4 text-center text-muted-foreground">Aucun achat.</td></tr>}
-              {data.achats.map((a) => (
-                <tr key={a.id} className="border-b hover:bg-muted/20">
-                  <td className="py-1.5 px-3 text-muted-foreground">{new Date(a.date).toLocaleDateString("fr-FR")}</td>
-                  <td className="py-1.5 px-3">{a.produit_nom}</td>
-                  <td className="py-1.5 px-3 text-right">{fmt(a.quantite)}</td>
-                  <td className="py-1.5 px-3">{a.unite}</td>
-                  <td className="py-1.5 px-3 text-right font-medium text-orange-700 dark:text-orange-400">{fmt(a.prix_total)}</td>
-                </tr>
-              ))}
-              {data.achats.length > 0 && (
-                <tr className="bg-orange-50 dark:bg-orange-950/20 font-semibold">
-                  <td colSpan={4} className="py-2 px-3">Total</td>
-                  <td className="py-2 px-3 text-right text-orange-700 dark:text-orange-400">{fmt(data.total_achats)}</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      )}
 
       {tab === "boutiques" && (
         <div className="overflow-x-auto rounded-md border">
