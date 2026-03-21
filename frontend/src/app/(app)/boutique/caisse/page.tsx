@@ -1136,14 +1136,26 @@ export default function BoutiqueCaissePage() {
               </p>
             )}
             <div className="space-y-1">
-              <label className="text-sm font-medium">Nombre de sacs à convertir</label>
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-medium">
+                  Nombre de sacs à convertir
+                  <span className="text-muted-foreground font-normal ml-1">(max {stockConvertTarget.quantite_sac})</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setStockNombreSacs(String(stockConvertTarget.quantite_sac))}
+                  className="text-xs text-blue-600 hover:underline"
+                >
+                  Tout
+                </button>
+              </div>
               <Input
                 type="number"
                 min={1}
                 max={stockConvertTarget.quantite_sac}
                 value={stockNombreSacs}
                 onChange={(e) => setStockNombreSacs(e.target.value)}
-                placeholder="ex : 5"
+                placeholder={`1 – ${stockConvertTarget.quantite_sac}`}
                 autoFocus
               />
             </div>
