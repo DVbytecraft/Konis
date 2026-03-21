@@ -77,26 +77,16 @@
   display: none;
 }
 
-/* Impression ticket thermique 80mm : n'afficher que le bloc ticket */
+/* Impression pages normales (journaux, rapports, dashboards)
+   Les tickets thermiques s'impriment via printViaIframe (iframe isolé) —
+   ils ont leur propre CSS @page et n'utilisent pas window.print(). */
 @media print {
-  body * {
-    visibility: hidden;
-  }
-  .ticket-thermal-print,
-  .ticket-thermal-print * {
-    visibility: visible;
-  }
-  .ticket-thermal-print {
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 72mm;
-    font-size: 10px;
-    font-family: monospace;
-    line-height: 1.2;
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
   @page {
-    size: 80mm auto;
-    margin: 2mm 4mm;
+    size: A4;
+    margin: 10mm 15mm;
   }
 }
