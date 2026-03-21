@@ -23,6 +23,7 @@ export default function HomePage() {
       usine: "/factory",
       boutique: "/boutique/caisse",
       mpsl: "/mpsl",
+      collecteur: "/collecteur",
     };
     const target = targets[user.role] ?? "/login";
     router.replace(target);
