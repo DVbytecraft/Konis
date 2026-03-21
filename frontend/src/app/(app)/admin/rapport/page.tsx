@@ -167,7 +167,7 @@ export default function AdminRapportPage() {
             <div className="rounded-lg border border-l-4 border-l-orange-500 bg-orange-50 dark:bg-orange-950/20 p-3">
               <p className="text-xs text-muted-foreground">Achats MPSL (matières)</p>
               <p className="text-lg font-bold text-orange-700 dark:text-orange-400">{fmt(bilan.total_achats_mpsl)}</p>
-              <p className="text-xs text-muted-foreground">coût d'achat fournisseurs</p>
+              <p className="text-xs text-muted-foreground">coût d&apos;achat fournisseurs</p>
             </div>
             <div className="rounded-lg border border-l-4 border-l-red-400 bg-red-50 dark:bg-red-950/20 p-3">
               <p className="text-xs text-muted-foreground">Charges opér.</p>
