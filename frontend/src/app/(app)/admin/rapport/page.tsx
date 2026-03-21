@@ -25,6 +25,7 @@ interface Ticket {
   lignes: { quantite: string; prix_unitaire: string }[];
 }
 interface Achat { id: number; lieu_nom: string; produit_nom: string; quantite: string; unite: string; prix_total: string; date: string; }
+interface AchatMPSL { id: number; lieu_nom: string; produit_nom: string; quantite: string; unite: string; prix_unitaire: string; prix_total: string; fournisseur_nom: string | null; type_paiement_label: string; date: string; }
 interface BilanData {
   total_ventes: string;
   total_achats_matieres: string;
@@ -56,7 +57,7 @@ function thisMonthRange() {
   };
 }
 
-type Tab = "boutiques" | "usines" | "ventes" | "achats";
+type Tab = "boutiques" | "usines" | "ventes" | "achats" | "mpsl";
 
 export default function AdminRapportPage() {
   const router = useRouter();
@@ -67,6 +68,7 @@ export default function AdminRapportPage() {
   const [usines, setUsines] = useState<UsineRapport[]>([]);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [achats, setAchats] = useState<Achat[]>([]);
+  const [achatsMpsl, setAchatsMpsl] = useState<AchatMPSL[]>([]);
   const [bilan, setBilan] = useState<BilanData | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -82,18 +84,20 @@ export default function AdminRapportPage() {
     const qs = buildQs();
     try {
       interface Paginated<T> { results: T[] }
-      const [b, u, t, a, bl] = await Promise.all([
+      const [b, u, t, a, bl, am] = await Promise.all([
         apiFetch<BoutiqueRapport[]>(`/comptable/rapport-boutiques/${qs}`),
         apiFetch<UsineRapport[]>(`/comptable/rapport-usines/${qs}`),
         apiFetch<Paginated<Ticket> | Ticket[]>(`/comptable/ventes/${qs}`),
         apiFetch<Paginated<Achat> | Achat[]>(`/comptable/achats-usine/${qs}`),
         apiFetch<BilanData>(`/comptable/bilan/${qs}`),
+        apiFetch<Paginated<AchatMPSL> | AchatMPSL[]>(`/mpsl/achats/${qs}`).catch(() => [] as AchatMPSL[]),
       ]);
       setBoutiques(b);
       setUsines(u);
       setTickets(Array.isArray(t) ? t : t.results);
       setAchats(Array.isArray(a) ? a : a.results);
       setBilan(bl);
+      setAchatsMpsl(Array.isArray(am) ? am : (am as Paginated<AchatMPSL>).results);
     } catch { /* silencieux */ }
     finally { setLoading(false); }
   }, [buildQs]);
@@ -216,7 +220,7 @@ export default function AdminRapportPage() {
 
       {/* Tabs */}
       <div className="scrollbar-hidden flex gap-1 border-b overflow-x-auto">
-        {([["boutiques", "Boutiques"], ["usines", "Usines"], ["ventes", "Ventes détail"], ["achats", "Achats détail"]] as [Tab, string][]).map(([t, label]) => (
+        {([["boutiques", "Boutiques"], ["usines", "Usines"], ["ventes", "Ventes détail"], ["achats", "Achats détail"], ["mpsl", "Achats MPSL"]] as [Tab, string][]).map(([t, label]) => (
           <button key={t} onClick={() => setTab(t)} className={cn("px-4 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition-colors", tab === t ? "border-green-600 text-green-600 dark:border-green-400 dark:text-green-400" : "border-transparent text-muted-foreground hover:text-foreground")}>
             {label}
           </button>
@@ -328,6 +332,40 @@ export default function AdminRapportPage() {
                   <td className="py-1.5 px-3 text-right">{Number(a.quantite).toLocaleString("fr-FR")}</td>
                   <td className="py-1.5 px-3">{a.unite}</td>
                   <td className="py-1.5 px-3 text-right font-medium text-orange-700 dark:text-orange-400">{fmt(a.prix_total)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {tab === "mpsl" && (
+        <div className="overflow-x-auto rounded-md border">
+          <table className="w-full text-xs sm:text-sm min-w-[700px]">
+            <thead><tr className="border-b bg-muted/40">
+              <th className="text-left py-2 px-3">Date</th>
+              <th className="text-left py-2 px-3">Dépôt</th>
+              <th className="text-left py-2 px-3">Produit</th>
+              <th className="text-right py-2 px-3">Qté</th>
+              <th className="text-left py-2 px-3">Unité</th>
+              <th className="text-right py-2 px-3">Prix unit.</th>
+              <th className="text-right py-2 px-3">Total (FCFA)</th>
+              <th className="text-left py-2 px-3">Fournisseur</th>
+              <th className="text-left py-2 px-3">Paiement</th>
+            </tr></thead>
+            <tbody>
+              {achatsMpsl.length === 0 && <tr><td colSpan={9} className="py-6 text-center text-muted-foreground">Aucun achat MPSL.</td></tr>}
+              {achatsMpsl.map((a) => (
+                <tr key={a.id} className="border-b hover:bg-muted/20">
+                  <td className="py-1.5 px-3 text-muted-foreground">{new Date(a.date).toLocaleDateString("fr-FR")}</td>
+                  <td className="py-1.5 px-3">{a.lieu_nom}</td>
+                  <td className="py-1.5 px-3 font-medium">{a.produit_nom}</td>
+                  <td className="py-1.5 px-3 text-right">{Number(a.quantite).toLocaleString("fr-FR")}</td>
+                  <td className="py-1.5 px-3">{a.unite}</td>
+                  <td className="py-1.5 px-3 text-right text-muted-foreground">{fmt(a.prix_unitaire)}</td>
+                  <td className="py-1.5 px-3 text-right font-medium text-orange-700 dark:text-orange-400">{fmt(a.prix_total)}</td>
+                  <td className="py-1.5 px-3">{a.fournisseur_nom ?? "—"}</td>
+                  <td className="py-1.5 px-3 text-muted-foreground">{a.type_paiement_label}</td>
                 </tr>
               ))}
             </tbody>

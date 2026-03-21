@@ -16,7 +16,7 @@ import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import { Pencil, Trash2, X } from "lucide-react";
 
-type Role = "supreme_admin" | "admin" | "daf" | "comptable" | "usine" | "boutique" | "mpsl";
+type Role = "supreme_admin" | "admin" | "daf" | "comptable" | "usine" | "boutique" | "mpsl" | "collecteur";
 
 interface Lieu {
   id: number;
@@ -301,6 +301,7 @@ export default function AdminUsersPage() {
                 <option value="usine">Usine</option>
                 <option value="boutique">Boutique</option>
                 <option value="mpsl">MPSL</option>
+                <option value="collecteur">Collecteur</option>
               </select>
             </div>
             {(form.role === "boutique" || form.role === "usine") && (
@@ -438,6 +439,7 @@ export default function AdminUsersPage() {
                   <option value="usine">Usine</option>
                   <option value="boutique">Boutique</option>
                   <option value="mpsl">MPSL</option>
+                  <option value="collecteur">Collecteur</option>
                 </select>
               </div>
               {(editForm.role === "boutique" || editForm.role === "usine") && (
