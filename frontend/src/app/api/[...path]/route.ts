@@ -83,6 +83,10 @@ async function proxy(
   if (request.headers.get("content-type")) {
     headers["Content-Type"] = request.headers.get("content-type")!;
   }
+  const idempotencyKey = request.headers.get("idempotency-key");
+  if (idempotencyKey) {
+    headers["Idempotency-Key"] = idempotencyKey;
+  }
 
   let body: string | undefined;
   try {
