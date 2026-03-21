@@ -16,9 +16,20 @@ class Migration(migrations.Migration):
 
     operations = [
         # Étape 1 : supprimer l'index sur (produit, lieu)
-        migrations.RemoveIndex(
-            model_name="achatmpsl",
-            name="achatmpsl_produit_lieu_idx",
+        # SQLite peut ne pas avoir l'index (ex: DB de dev partielle) -> DROP IF EXISTS
+        migrations.SeparateDatabaseAndState(
+            database_operations=[
+                migrations.RunSQL(
+                    sql="DROP INDEX IF EXISTS achatmpsl_produit_lieu_idx;",
+                    reverse_sql="SELECT 1;",
+                )
+            ],
+            state_operations=[
+                migrations.RemoveIndex(
+                    model_name="achatmpsl",
+                    name="achatmpsl_produit_lieu_idx",
+                ),
+            ],
         ),
         # Étape 2 : ajouter produit_nom avec une valeur par défaut temporaire
         migrations.AddField(

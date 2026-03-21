@@ -112,6 +112,7 @@ class AchatMPSLViewSet(ModelViewSet):
                 fournisseur=fournisseur,
                 type_paiement=d.get("type_paiement", "cash"),
                 montant_paye_initial=d.get("montant_paye_initial", Decimal("0")),
+                poids_par_sac=d.get("poids_par_sac"),
             )
         except ErreurStock as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
@@ -188,13 +189,22 @@ class TransfertMPSLViewSet(ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
             quantite = Decimal(str(item["quantite"]))
-            lignes.append((produit, quantite))
+            raw_unite = (item.get("unite") or "").strip().lower()
+            if raw_unite and raw_unite not in ("sac", "sacs", "kg", "tonne", "tonnes"):
+                return Response(
+                    {"detail": f"Unit?? invalide pour {produit.nom} : '{raw_unite}'."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            unite_ligne = raw_unite or (produit.unite or "kg")
+            lignes.append((produit, quantite, unite_ligne))
 
         try:
             transfert = transfert_depuis_mpsl(
                 from_mpsl=from_lieu,
                 to_lieu=to_lieu,
                 lignes=lignes,
+                updated_by=request.user,
+                log_request=request,
             )
         except ErreurStock as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
@@ -229,6 +239,7 @@ class StockMPSLView(APIView):
                 {"detail": "Dépôt MPSL introuvable pour ce compte."},
                 status=status.HTTP_404_NOT_FOUND,
             )
+        from inventaire.services import get_quantite_equivalente_kg
         stocks = (
             Stock.objects.filter(lieu=lieu)
             .select_related("produit")
@@ -240,10 +251,162 @@ class StockMPSLView(APIView):
                 "produit_nom": s.produit.nom,
                 "produit_code": s.produit.code or "",
                 "quantite": str(s.quantite),
+                "quantite_kg": str(s.quantite_kg),
+                "poids_par_sac": str(s.produit.poids_par_sac) if s.produit.poids_par_sac is not None else None,
                 "unite": s.produit.unite,
             }
             for s in stocks
+            if get_quantite_equivalente_kg(s) > 0
         ])
+
+
+# --- Conversion sacs → kg (MPSL) ---------------------------------------------
+
+class ConvertirSacEnKgMpslView(APIView):
+    """
+    POST /api/mpsl/stock/<produit_id>/convertir/
+    Convertit N sacs entiers en kg pour le stock MPSL.
+    Body : { "nombre_sacs": <int> }
+    """
+    permission_classes = [IsAuthenticated, IsMPSLRole]
+
+    def post(self, request, produit_id):
+        from inventaire.services import convertir_sac_en_kg
+        from audit.models import AuditLog
+        from django.conf import settings
+        from api.utils import (
+            apply_idempotency_warning,
+            find_idempotency_record,
+            get_idempotency_info,
+            record_idempotency_replay,
+            record_idempotency_success,
+        )
+
+        idempotency_key, missing, payload_hash, _ = get_idempotency_info(
+            request, operation="conversion_sac_en_kg"
+        )
+        if missing and settings.IDEMPOTENCY_STRICT_MODE:
+            resp = Response(
+                {"detail": "Idempotency-Key requis."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+            return apply_idempotency_warning(resp, True)
+
+        lieu = get_lieu_mpsl(request)
+        if not lieu:
+            resp = Response({"detail": "Dépôt MPSL introuvable."}, status=status.HTTP_400_BAD_REQUEST)
+            return apply_idempotency_warning(resp, missing)
+
+        try:
+            stock = Stock.objects.get(produit_id=produit_id, lieu=lieu)
+        except Stock.DoesNotExist:
+            resp = Response({"detail": "Stock introuvable."}, status=status.HTTP_404_NOT_FOUND)
+            return apply_idempotency_warning(resp, missing)
+
+        nombre_sacs = request.data.get("nombre_sacs")
+        try:
+            nombre_sacs = int(nombre_sacs)
+        except (TypeError, ValueError):
+            resp = Response({"detail": "nombre_sacs doit être un entier."}, status=status.HTTP_400_BAD_REQUEST)
+            return apply_idempotency_warning(resp, missing)
+
+        try:
+            if idempotency_key and len(idempotency_key) > 128:
+                resp = Response(
+                    {"detail": "Header Idempotency-Key trop long (max 128)."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+                return apply_idempotency_warning(resp, missing)
+            if idempotency_key:
+                record = find_idempotency_record(
+                    key=idempotency_key,
+                    operation="conversion_sac_en_kg",
+                    endpoint=request.path,
+                )
+                if record and record.extra.get("response"):
+                    record_idempotency_replay(
+                        request, key=idempotency_key, operation="conversion_sac_en_kg"
+                    )
+                    resp = Response(record.extra.get("response"))
+                    return apply_idempotency_warning(resp, missing)
+
+                existing = (
+                    AuditLog.objects
+                    .filter(
+                        action="conversion_sac_en_kg",
+                        object_type="Stock",
+                        object_id=stock.pk,
+                        extra__idempotency_key=idempotency_key,
+                    )
+                    .order_by("-created_at")
+                    .first()
+                )
+                if existing:
+                    audit_log(
+                        user=request.user,
+                        action="conversion_sac_en_kg_rejouee",
+                        object_type="Stock",
+                        object_id=stock.pk,
+                        extra={"idempotency_key": idempotency_key},
+                        request=request,
+                    )
+                    stock.refresh_from_db()
+                    resp = Response({
+                        "kg_generes": str(existing.extra.get("kg_generes") or "0"),
+                        "quantite_sacs": str(stock.quantite),
+                        "quantite_kg": str(stock.quantite_kg),
+                    })
+                    return apply_idempotency_warning(resp, missing)
+
+            kg = convertir_sac_en_kg(
+                stock=stock,
+                nombre_sacs=nombre_sacs,
+                updated_by=request.user,
+                idempotency_key=idempotency_key,
+                log_request=request,
+            )
+        except ErreurStock as e:
+            resp = Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            return apply_idempotency_warning(resp, missing)
+
+        stock.refresh_from_db()
+        resp_data = {
+            "kg_generes": str(kg),
+            "quantite_sacs": str(stock.quantite),
+            "quantite_kg": str(stock.quantite_kg),
+        }
+        if idempotency_key:
+            record_idempotency_success(
+                request=request,
+                key=idempotency_key,
+                operation="conversion_sac_en_kg",
+                object_type="Stock",
+                object_id=stock.pk,
+                payload_hash=payload_hash,
+                response_data=resp_data,
+            )
+        resp = Response(resp_data)
+        return apply_idempotency_warning(resp, missing)
+
+
+# --- Fournisseurs (lecture seule pour les achats MPSL) ------------------------
+
+class FournisseursMpslView(APIView):
+    """GET /api/mpsl/fournisseurs/?search=... — creanciers de l'entreprise (lecture seule)."""
+    permission_classes = [IsAuthenticated, IsMPSLRole]
+
+    def get(self, request):
+        from django.db.models import Q
+        from finance.models import Creancier
+        from api.serializers_finance import CreancierSerializer
+        ent_id = request.user.entreprise_id
+        if not ent_id:
+            return Response([])
+        qs = Creancier.objects.filter(entreprise_id=ent_id).order_by("nom")
+        search = request.query_params.get("search", "").strip()
+        if search:
+            qs = qs.filter(Q(nom__icontains=search) | Q(contact__icontains=search))
+        return Response(CreancierSerializer(qs[:30], many=True).data)
 
 
 # --- Dashboard MPSL -----------------------------------------------------------
@@ -269,6 +432,7 @@ class MpslDashboardView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
+        from inventaire.services import get_quantite_equivalente_kg
         stock_mpsl = Stock.objects.filter(lieu=lieu).select_related("produit")
         last_achats = AchatMPSL.objects.filter(lieu=lieu).order_by("-date")[:5]
         last_transferts = (
@@ -286,9 +450,12 @@ class MpslDashboardView(APIView):
                 {
                     "produit": s.produit.nom,
                     "quantite": str(s.quantite),
+                    "quantite_kg": str(s.quantite_kg),
+                    "poids_par_sac": str(s.produit.poids_par_sac) if s.produit.poids_par_sac is not None else None,
                     "unite": s.produit.unite,
                 }
                 for s in stock_mpsl
+                if get_quantite_equivalente_kg(s) > 0
             ],
             "total_achats_fcfa": str(total_achats),
             "total_transferts": total_transferts,

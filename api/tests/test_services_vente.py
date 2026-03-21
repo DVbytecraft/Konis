@@ -70,6 +70,52 @@ class TestVenteBoutique(APITestCase):
         stock_apres = Stock.objects.get(produit=self.produit_kg, lieu=self.boutique).quantite
         self.assertEqual(stock_avant - stock_apres, Decimal("5"))
 
+    def test_vente_kg_utilise_quantite_kg_si_disponible(self):
+        """Si quantite_kg est renseigné, la vente en kg débite quantite_kg."""
+        produit_kg2 = Produit.objects.create(
+            nom="Riz kg", code="RKG", unite="kg", entreprise=self.ent
+        )
+        Stock.objects.create(
+            produit=produit_kg2, lieu=self.boutique,
+            quantite=Decimal("0"), quantite_kg=Decimal("20"),
+        )
+        vente_boutique(self.boutique, [(produit_kg2, Decimal("5"), Decimal("300"))])
+        stock_apres = Stock.objects.get(produit=produit_kg2, lieu=self.boutique)
+        self.assertEqual(stock_apres.quantite_kg, Decimal("15"))
+        self.assertEqual(stock_apres.quantite, Decimal("0"))
+
+    def test_vente_mixte_sac_kg_conversion_auto(self):
+        """
+        Cas critique :
+        5 sacs (50kg) -> 250kg + 50kg direct
+        vente 270kg -> 0 sac, 30kg restant
+        """
+        produit_mixte = Produit.objects.create(
+            nom="Maïs mixte", code="MMX", unite="sac",
+            entreprise=self.ent, poids_par_sac=Decimal("50.000"),
+        )
+        Stock.objects.create(
+            produit=produit_mixte, lieu=self.boutique,
+            quantite=Decimal("5"), quantite_kg=Decimal("50"),
+        )
+        vente_boutique(self.boutique, [(produit_mixte, Decimal("270"), Decimal("200"), "kg")])
+        stock_apres = Stock.objects.get(produit=produit_mixte, lieu=self.boutique)
+        self.assertEqual(stock_apres.quantite, Decimal("0"))
+        self.assertEqual(stock_apres.quantite_kg, Decimal("30"))
+
+    def test_vente_kg_superieure_stock_mixte_leve_erreur(self):
+        """Vente kg > total kg dispo (sacs+kg) -> ErreurStock."""
+        produit_mixte = Produit.objects.create(
+            nom="Mil mixte", code="MILMX", unite="sac",
+            entreprise=self.ent, poids_par_sac=Decimal("50.000"),
+        )
+        Stock.objects.create(
+            produit=produit_mixte, lieu=self.boutique,
+            quantite=Decimal("5"), quantite_kg=Decimal("50"),
+        )
+        with self.assertRaises(ErreurStock):
+            vente_boutique(self.boutique, [(produit_mixte, Decimal("301"), Decimal("200"), "kg")])
+
     def test_stock_insuffisant_leve_erreur(self):
         """ErreurStock levée si quantité > stock disponible."""
         with self.assertRaises(ErreurStock) as ctx:

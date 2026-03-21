@@ -699,6 +699,7 @@ class MoutureSeuleUsineView(APIView):
                 produit_apporte=produit_nom,
                 produit_ref=produit_ref,
                 idempotency_key=idempotency_key,
+                type_mouture=Ticket.TYPE_MOUTURE_INTERNE,
             )
         except ErreurStock as e:
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)

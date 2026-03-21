@@ -30,6 +30,7 @@ interface LieuOption {
 interface LigneForme {
   produit_id: string;
   quantite: string;
+  unite: string;
 }
 
 type ApiList<T> = T[] | { results?: T[] };
@@ -46,7 +47,7 @@ export default function MpslTransfertsPage() {
   const [rows, setRows] = useState<TransfertRow[]>([]);
 
   const [toLieu, setToLieu] = useState("");
-  const [lignes, setLignes] = useState<LigneForme[]>([{ produit_id: "", quantite: "" }]);
+  const [lignes, setLignes] = useState<LigneForme[]>([{ produit_id: "", quantite: "", unite: "sacs" }]);
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -66,7 +67,7 @@ export default function MpslTransfertsPage() {
 
   useEffect(() => { load().catch(() => {}); }, []);
 
-  const addLigne = () => setLignes((l) => [...l, { produit_id: "", quantite: "" }]);
+  const addLigne = () => setLignes((l) => [...l, { produit_id: "", quantite: "", unite: "sacs" }]);
   const removeLigne = (i: number) => setLignes((l) => l.filter((_, idx) => idx !== i));
   const updateLigne = (i: number, field: keyof LigneForme, value: string) => {
     setLignes((l) => l.map((line, idx) => idx === i ? { ...line, [field]: value } : line));
@@ -88,11 +89,12 @@ export default function MpslTransfertsPage() {
           lignes: lignesValides.map((l) => ({
             produit_id: Number(l.produit_id),
             quantite: l.quantite,
+            unite: l.unite,
           })),
         }),
       });
       setToLieu("");
-      setLignes([{ produit_id: "", quantite: "" }]);
+      setLignes([{ produit_id: "", quantite: "", unite: "sacs" }]);
       setTab("historique");
       await load();
     } catch (e) {
@@ -200,6 +202,15 @@ export default function MpslTransfertsPage() {
                     value={ligne.quantite}
                     onChange={(e) => updateLigne(i, "quantite", e.target.value)}
                   />
+                  <select
+                    className="h-10 rounded-md border border-input bg-background px-2 text-sm"
+                    value={ligne.unite}
+                    onChange={(e) => updateLigne(i, "unite", e.target.value)}
+                  >
+                    <option value="sacs">sacs</option>
+                    <option value="kg">kg</option>
+                    <option value="tonnes">tonnes</option>
+                  </select>
                   {lignes.length > 1 && (
                     <button
                       type="button"

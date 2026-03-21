@@ -17,11 +17,14 @@ from django.http import HttpResponse
 from django.utils import timezone
 
 from rest_framework import status
+from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError as DRFValidationError
+from rest_framework.mixins import ListModelMixin, RetrieveModelMixin
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
+from rest_framework.viewsets import GenericViewSet, ModelViewSet, ReadOnlyModelViewSet
 
 from audit.services import audit_log
 from api.pagination import KonisPagination
@@ -62,8 +65,8 @@ class StockBoutiqueViewSet(ModelViewSet):
         return Stock.objects.filter(lieu=lieu).select_related("produit", "lieu")
 
     def create(self, request, *args, **kwargs):
-        """Réservé aux admins — les boutiques ne peuvent pas entrer du stock directement."""
-        if request.user.role != CustomUser.ROLE_ADMIN:
+        """Réservé aux admins (admin + supreme_admin) — les boutiques ne peuvent pas entrer du stock directement."""
+        if request.user.role not in (CustomUser.ROLE_ADMIN, CustomUser.ROLE_SUPREME_ADMIN):
             return Response(
                 {"detail": "L'entrée directe de stock est réservée aux administrateurs. "
                            "Le stock boutique est alimenté uniquement via les cessions usine."},
@@ -148,8 +151,18 @@ class VenteBoutiqueViewSet(ModelViewSet):
         fin = self.request.query_params.get("fin")
         mouture = self.request.query_params.get("mouture")
         if debut:
+            try:
+                from datetime import datetime as _dt
+                _dt.strptime(debut, "%Y-%m-%d")
+            except ValueError:
+                raise DRFValidationError({"debut": f"Format de date invalide : '{debut}'. Attendu : YYYY-MM-DD."})
             qs = qs.filter(date__date__gte=debut)
         if fin:
+            try:
+                from datetime import datetime as _dt
+                _dt.strptime(fin, "%Y-%m-%d")
+            except ValueError:
+                raise DRFValidationError({"fin": f"Format de date invalide : '{fin}'. Attendu : YYYY-MM-DD."})
             qs = qs.filter(date__date__lte=fin)
         if mouture is not None:
             value = mouture.strip().lower() in {"1", "true", "yes", "oui"}
@@ -187,7 +200,17 @@ class VenteBoutiqueViewSet(ModelViewSet):
                 )
             quantite = Decimal(str(item["quantite"]))
             prix_unitaire = Decimal(str(item["prix_unitaire"]))
-            lignes.append((produit, quantite, prix_unitaire))
+            raw_unite = (item.get("unite") or "").strip().lower()
+            if raw_unite:
+                if raw_unite not in ("kg", "sac", "sacs"):
+                    return Response(
+                        {"detail": f"Unit?? invalide pour {produit.nom} : '{raw_unite}'."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                unite_ligne = "sac" if raw_unite in ("sac", "sacs") else "kg"
+            else:
+                unite_ligne = produit.unite or "kg"
+            lignes.append((produit, quantite, prix_unitaire, unite_ligne))
 
         mouture = ser.validated_data.get("mouture", False)
         prix_mouture_kg = ser.validated_data.get("prix_mouture_kg")
@@ -230,6 +253,13 @@ class VenteBoutiqueViewSet(ModelViewSet):
                     return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         idempotency_key = (request.headers.get("Idempotency-Key") or "").strip()[:128] or None
+        if not idempotency_key:
+            from django.conf import settings
+            if settings.IDEMPOTENCY_STRICT_MODE:
+                return Response(
+                    {"detail": "Idempotency-Key requis."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
         # ── Type de vente + client ───────────────────────────────────────────
         type_vente  = ser.validated_data.get("type_vente", "cash")
@@ -331,8 +361,18 @@ class MoutureSeuleView(APIView):
         fin = request.query_params.get("fin")
         source = (request.query_params.get("source") or "").strip().lower()
         if debut:
+            try:
+                from datetime import datetime as _dt
+                _dt.strptime(debut, "%Y-%m-%d")
+            except ValueError:
+                raise DRFValidationError({"debut": f"Format de date invalide : '{debut}'. Attendu : YYYY-MM-DD."})
             qs = qs.filter(date__date__gte=debut)
         if fin:
+            try:
+                from datetime import datetime as _dt
+                _dt.strptime(fin, "%Y-%m-%d")
+            except ValueError:
+                raise DRFValidationError({"fin": f"Format de date invalide : '{fin}'. Attendu : YYYY-MM-DD."})
             qs = qs.filter(date__date__lte=fin)
         if source in {"seule", "mouture_seule"}:
             qs = qs.annotate(lignes_count=Count("lignes")).filter(lignes_count=0)
@@ -364,6 +404,13 @@ class MoutureSeuleView(APIView):
                 {"detail": "Header Idempotency-Key trop long (max 128)."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        if not idempotency_key:
+            from django.conf import settings
+            if settings.IDEMPOTENCY_STRICT_MODE:
+                return Response(
+                    {"detail": "Idempotency-Key requis."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
         # ── Garde-fou prix ──────────────────────────────────────────────────
         prix_par_kg = ser.validated_data["prix_par_kg"]
@@ -402,6 +449,9 @@ class MoutureSeuleView(APIView):
                 produit_apporte=produit_nom,
                 produit_ref=produit_ref,
                 idempotency_key=idempotency_key,
+                nombre_sacs=ser.validated_data.get("nombre_sacs"),
+                poids_par_sac=ser.validated_data.get("poids_par_sac"),
+                type_mouture=Ticket.TYPE_MOUTURE_CLIENT,
             )
         except ErreurStock as e:
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
@@ -871,5 +921,277 @@ class DashboardBoutiqueView(APIView):
                 return Response({"detail": "Boutique introuvable."}, status=status.HTTP_404_NOT_FOUND)
 
         data = get_dashboard_boutique(lieu)
-        # Convertir Decimal → str pour JSON
-        return Response({k: str(v) for k, v in data.items()})
+        # Convertir Decimal → str pour JSON (nb_produits_en_stock est un int)
+        return Response({k: str(v) if not isinstance(v, int) else v for k, v in data.items()})
+
+
+# ─── Conversion sacs → kg ─────────────────────────────────────────────────────
+
+class ConvertirSacEnKgView(APIView):
+    """
+    POST /api/boutique/stock/<produit_id>/convertir/
+    Convertit N sacs entiers en kg pour le stock de la boutique.
+    Body : { "nombre_sacs": <int> }
+    """
+    permission_classes = [IsAuthenticated, IsBoutiqueRole | IsAdminRole]
+
+    def post(self, request, produit_id):
+        from inventaire.services import convertir_sac_en_kg
+        from audit.models import AuditLog
+        from django.conf import settings
+        from api.utils import (
+            apply_idempotency_warning,
+            find_idempotency_record,
+            get_idempotency_info,
+            record_idempotency_replay,
+            record_idempotency_success,
+        )
+
+        idempotency_key, missing, payload_hash, _ = get_idempotency_info(
+            request, operation="conversion_sac_en_kg"
+        )
+        if missing and settings.IDEMPOTENCY_STRICT_MODE:
+            resp = Response(
+                {"detail": "Idempotency-Key requis."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+            return apply_idempotency_warning(resp, True)
+
+        lieu = get_lieu_boutique(request)
+        if not lieu:
+            resp = Response({"detail": "Boutique introuvable."}, status=status.HTTP_400_BAD_REQUEST)
+            return apply_idempotency_warning(resp, missing)
+
+        try:
+            stock = Stock.objects.get(produit_id=produit_id, lieu=lieu)
+        except Stock.DoesNotExist:
+            resp = Response({"detail": "Stock introuvable."}, status=status.HTTP_404_NOT_FOUND)
+            return apply_idempotency_warning(resp, missing)
+
+        nombre_sacs = request.data.get("nombre_sacs")
+        try:
+            nombre_sacs = int(nombre_sacs)
+        except (TypeError, ValueError):
+            resp = Response({"detail": "nombre_sacs doit être un entier."}, status=status.HTTP_400_BAD_REQUEST)
+            return apply_idempotency_warning(resp, missing)
+
+        try:
+            if idempotency_key and len(idempotency_key) > 128:
+                resp = Response(
+                    {"detail": "Header Idempotency-Key trop long (max 128)."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+                return apply_idempotency_warning(resp, missing)
+            if idempotency_key:
+                record = find_idempotency_record(
+                    key=idempotency_key,
+                    operation="conversion_sac_en_kg",
+                    endpoint=request.path,
+                )
+                if record and record.extra.get("response"):
+                    record_idempotency_replay(
+                        request, key=idempotency_key, operation="conversion_sac_en_kg"
+                    )
+                    resp = Response(record.extra.get("response"))
+                    return apply_idempotency_warning(resp, missing)
+
+                existing = (
+                    AuditLog.objects
+                    .filter(
+                        action="conversion_sac_en_kg",
+                        object_type="Stock",
+                        object_id=stock.pk,
+                        extra__idempotency_key=idempotency_key,
+                    )
+                    .order_by("-created_at")
+                    .first()
+                )
+                if existing:
+                    audit_log(
+                        user=request.user,
+                        action="conversion_sac_en_kg_rejouee",
+                        object_type="Stock",
+                        object_id=stock.pk,
+                        extra={"idempotency_key": idempotency_key},
+                        request=request,
+                    )
+                    stock.refresh_from_db()
+                    resp = Response({
+                        "kg_generes": str(existing.extra.get("kg_generes") or "0"),
+                        "quantite_sacs": str(stock.quantite),
+                        "quantite_kg": str(stock.quantite_kg),
+                    })
+                    return apply_idempotency_warning(resp, missing)
+
+            kg = convertir_sac_en_kg(
+                stock=stock,
+                nombre_sacs=nombre_sacs,
+                updated_by=request.user,
+                idempotency_key=idempotency_key,
+                log_request=request,
+            )
+        except ErreurStock as e:
+            resp = Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            return apply_idempotency_warning(resp, missing)
+
+        stock.refresh_from_db()
+        resp_data = {
+            "kg_generes": str(kg),
+            "quantite_sacs": str(stock.quantite),
+            "quantite_kg": str(stock.quantite_kg),
+        }
+        if idempotency_key:
+            record_idempotency_success(
+                request=request,
+                key=idempotency_key,
+                operation="conversion_sac_en_kg",
+                object_type="Stock",
+                object_id=stock.pk,
+                payload_hash=payload_hash,
+                response_data=resp_data,
+            )
+        resp = Response(resp_data)
+        return apply_idempotency_warning(resp, missing)
+
+
+# ─── Clients (lecture seule pour la caisse) ───────────────────────────────────
+
+class ClientsBoutiqueView(APIView):
+    """
+    GET /api/boutique/clients/?search=...
+    Recherche de clients pour la caisse boutique (lecture seule, scoped entreprise).
+    """
+    permission_classes = [IsAuthenticated, IsBoutiqueRole | IsAdminRole]
+
+    def get(self, request):
+        from django.db.models import Q
+        from finance.models import ClientFinance
+        from api.serializers_finance import ClientFinanceSerializer
+
+        ent_id = request.user.entreprise_id
+        if not ent_id:
+            return Response([])
+
+        qs = ClientFinance.objects.filter(entreprise_id=ent_id).order_by("nom")
+        search = request.query_params.get("search", "").strip()
+        if search:
+            qs = qs.filter(Q(nom__icontains=search) | Q(contact__icontains=search))
+
+        return Response(ClientFinanceSerializer(qs[:20], many=True).data)
+
+
+# ─── Créances boutique ────────────────────────────────────────────────────────
+
+class CreanceBoutiqueViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet):
+    """
+    GET  /api/boutique/creances/               — créances de cette boutique
+    GET  /api/boutique/creances/{id}/          — détail + paiements
+    POST /api/boutique/creances/{id}/paiement/ — enregistrer un paiement reçu
+
+    Filtre : ?statut=en_cours|solde
+    Sécurité : scoping strict par lieu=boutique du user (IDOR impossible).
+    """
+    permission_classes = [IsAuthenticated, IsBoutiqueRole | IsAdminRole]
+
+    def get_queryset(self):
+        from finance.models import JournalCreance
+        lieu = get_lieu_boutique(self.request)
+        if not lieu:
+            return JournalCreance.objects.none()
+        qs = (
+            JournalCreance.objects
+            .filter(lieu=lieu)
+            .select_related("client")
+            .prefetch_related("paiements__created_by")
+            .order_by("-created_at")
+        )
+        statut = self.request.query_params.get("statut")
+        if statut in ("en_cours", "solde"):
+            qs = qs.filter(statut=statut)
+        return qs
+
+    def get_serializer_class(self):
+        from api.serializers_finance import JournalCreanceSerializer
+        return JournalCreanceSerializer
+
+    @action(detail=True, methods=["post"])
+    def paiement(self, request, pk=None):
+        from finance.models import JournalCreance
+        from api.serializers_finance import JournalCreanceSerializer, PaiementCreanceCreateSerializer
+        from finance.services import enregistrer_paiement_creance, ErreurFinance
+        from django.conf import settings
+        from api.utils import (
+            apply_idempotency_warning,
+            find_idempotency_record,
+            get_idempotency_info,
+            record_idempotency_replay,
+            record_idempotency_success,
+        )
+
+        lieu = get_lieu_boutique(request)
+        if not lieu:
+            return Response({"detail": "Lieu boutique requis."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Scoping : la créance doit appartenir à cette boutique
+        try:
+            journal = JournalCreance.objects.get(pk=pk, lieu=lieu)
+        except JournalCreance.DoesNotExist:
+            return Response({"detail": "Créance introuvable."}, status=status.HTTP_404_NOT_FOUND)
+
+        idempotency_key, missing, payload_hash, _ = get_idempotency_info(
+            request, operation="paiement_creance_boutique"
+        )
+        if missing and settings.IDEMPOTENCY_STRICT_MODE:
+            resp = Response({"detail": "Idempotency-Key requis."}, status=status.HTTP_400_BAD_REQUEST)
+            return apply_idempotency_warning(resp, True)
+        if idempotency_key:
+            record = find_idempotency_record(
+                key=idempotency_key,
+                operation="paiement_creance_boutique",
+                endpoint=request.path,
+            )
+            if record and record.extra.get("response"):
+                record_idempotency_replay(
+                    request, key=idempotency_key, operation="paiement_creance_boutique"
+                )
+                resp = Response(record.extra.get("response"))
+                return apply_idempotency_warning(resp, missing)
+
+        ser = PaiementCreanceCreateSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        d = ser.validated_data
+        try:
+            enregistrer_paiement_creance(
+                journal=journal,
+                montant=d["montant"],
+                date=d["date"],
+                created_by=request.user,
+                mode_paiement=d.get("mode_paiement", "especes"),
+                reference=d.get("reference", ""),
+                notes=d.get("notes", ""),
+            )
+        except ErreurFinance as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        audit_log(
+            user=request.user,
+            action="paiement_creance_boutique",
+            object_type="JournalCreance",
+            object_id=journal.pk,
+            extra={"montant": str(d["montant"]), "lieu": lieu.nom},
+            request=request,
+        )
+        journal.refresh_from_db()
+        resp_data = JournalCreanceSerializer(journal).data
+        if idempotency_key:
+            record_idempotency_success(
+                request=request,
+                key=idempotency_key,
+                operation="paiement_creance_boutique",
+                object_type="JournalCreance",
+                object_id=journal.pk,
+                payload_hash=payload_hash,
+                response_data=resp_data,
+            )
+        resp = Response(resp_data)
+        return apply_idempotency_warning(resp, missing)

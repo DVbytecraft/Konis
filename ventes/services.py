@@ -19,7 +19,7 @@ from django.utils import timezone
 
 from core.models import Lieu
 from inventaire.models import Stock
-from inventaire.services import ErreurStock
+from inventaire.services import ErreurStock, _prelever_stock_unite, _verifier_stock_disponible
 from produits.models import Produit
 from ventes.models import LigneVente, Ticket
 
@@ -45,9 +45,9 @@ def normaliser_quantite_en_kg(
     u = (unite or "").strip().lower()
     if u == "kg":
         return quantite
-    if u == "tonne":
+    if u in ("tonne", "tonnes"):
         return quantite * KG_PAR_TONNE
-    if u == "sac":
+    if u in ("sac", "sacs"):
         if produit is None or produit.poids_par_sac is None:
             nom = getattr(produit, "nom", "inconnu") if produit else "inconnu"
             raise ErreurStock(
@@ -71,7 +71,7 @@ def calculer_cout_mouture(quantite_kg: Decimal, prix_par_kg: Decimal) -> Decimal
 # ── Calcul totaux boutique ──────────────────────────────────────────────────
 
 def _compute_boutique_totals(
-    lignes: list[tuple[Produit, Decimal, Decimal]],
+    lignes: list[tuple],
     *,
     mouture: bool,
     prix_mouture_kg: Decimal | None,
@@ -89,7 +89,7 @@ def _compute_boutique_totals(
     Retourne (montant_produits, cout_mouture, montant_total).
     """
     montant_produits = sum(
-        (quantite * prix_unitaire for _, quantite, prix_unitaire in lignes),
+        (quantite * prix_unitaire for _, quantite, prix_unitaire, *_ in lignes),
         Decimal("0"),
     )
 
@@ -104,9 +104,11 @@ def _compute_boutique_totals(
 
     # Normaliser toutes les lignes produits en kg
     qty_produits_kg = Decimal("0")
-    for produit, quantite, _ in lignes:
+    for line in lignes:
+        produit, quantite, _ = line[0], line[1], line[2]
+        unite_ligne = line[3] if len(line) > 3 and line[3] else (produit.unite or "kg")
         qty_produits_kg += normaliser_quantite_en_kg(
-            quantite, produit.unite or "kg", produit
+            quantite, unite_ligne, produit
         )
 
     total_mouture_kg = qty_produits_kg + quantite_apportee_client_kg
@@ -166,7 +168,7 @@ def _creer_journal_creance_pour_ticket(ticket: Ticket, montant: Decimal, created
 
 def vente_boutique(
     lieu: Lieu,
-    lignes: list[tuple[Produit, Decimal, Decimal]],
+    lignes: list[tuple],
     *,
     mouture: bool = False,
     prix_mouture_kg: Decimal | None = None,
@@ -179,57 +181,61 @@ def vente_boutique(
 ) -> tuple[Ticket, bool]:
     """
     Enregistre une vente en boutique (ticket + lignes + mouture optionnelle).
-    Transaction atomique. Numéro de ticket généré automatiquement.
-    Lève ErreurStock si stock insuffisant.
+    Transaction atomique. Num??ro de ticket g??n??r?? automatiquement.
+    L??ve ErreurStock si stock insuffisant.
 
     Retourne (ticket, created) :
-      created=False si un ticket existant avec la même clé idempotency a été renvoyé.
+      created=False si un ticket existant avec la m??me cl?? idempotency a ??t?? renvoy??.
 
-    lignes          : liste de (produit, quantite, prix_unitaire)
+    lignes          : liste de (produit, quantite, prix_unitaire, unite?)
     mouture         : True si le client demande la mouture
-    prix_mouture_kg : prix FCFA/kg (toutes unités normalisées en kg avant calcul)
-    quantite_apportee_client_kg : grain supplémentaire apporté par le client (déjà en kg)
-    idempotency_key : clé de déduplication (header Idempotency-Key du client)
+    prix_mouture_kg : prix FCFA/kg (toutes unit??s normalis??es en kg avant calcul)
+    quantite_apportee_client_kg : grain suppl??mentaire apport?? par le client (d??j?? en kg)
+    idempotency_key : cl?? de d??duplication (header Idempotency-Key du client)
     type_vente      : 'cash' | 'credit' | 'partiel'
     montant_cash    : acompte si type_vente='partiel' (None = montant total si cash)
     client          : ClientFinance requis si credit ou partiel
     created_by      : CustomUser pour l'audit JournalCreance
     """
-    # ── Validation type_vente ────────────────────────────────────────────────
+    # ?????? Validation type_vente ????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
     if type_vente not in (Ticket.TYPE_CASH, Ticket.TYPE_CREDIT, Ticket.TYPE_PARTIEL):
         raise ErreurStock(f"type_vente invalide : '{type_vente}'.")
     if type_vente in (Ticket.TYPE_CREDIT, Ticket.TYPE_PARTIEL) and client is None:
-        raise ErreurStock("Un client est requis pour une vente à crédit ou partielle.")
+        raise ErreurStock("Un client est requis pour une vente ?? cr??dit ou partielle.")
     if type_vente == Ticket.TYPE_PARTIEL:
         if montant_cash is None or montant_cash < Decimal("0"):
-            raise ErreurStock("montant_cash (acompte) est requis et doit être >= 0 pour une vente partielle.")
+            raise ErreurStock("montant_cash (acompte) est requis et doit ??tre >= 0 pour une vente partielle.")
 
     key = (idempotency_key or "").strip() or None
     if lieu.type_lieu != Lieu.TYPE_MAGASIN:
         raise ErreurStock(f"Le lieu {lieu} n'est pas un magasin.")
 
-    # Déduplication : renvoyer le ticket existant sans re-traiter la commande
-    if key:
-        existing = Ticket.objects.filter(lieu=lieu, idempotency_key=key, mouture=mouture).first()
-        if existing is not None:
-            return existing, False
-
     with transaction.atomic():
-        # Verrouiller et vérifier les stocks
-        for produit, quantite, _ in lignes:
+        # Déduplication INSIDE la transaction (même pattern que vente_mouture_seule).
+        # select_for_update sérialise les requêtes concurrentes sur le même lieu/clé
+        # et évite le TOCTOU entre le check et le create.
+        if key:
+            existing = (
+                Ticket.objects.select_for_update()
+                .filter(lieu=lieu, idempotency_key=key, mouture=mouture)
+                .first()
+            )
+            if existing is not None:
+                return existing, False
+
+        # Verrouiller et v??rifier les stocks
+        for line in lignes:
+            produit, quantite = line[0], line[1]
+            unite_ligne = line[3] if len(line) > 3 and line[3] else (produit.unite or "kg")
             if quantite <= 0:
-                raise ErreurStock(f"Quantité invalide pour {produit}: {quantite}")
+                raise ErreurStock(f"Quantit?? invalide pour {produit}: {quantite}")
             try:
                 stock = Stock.objects.select_for_update().get(
                     produit=produit, lieu=lieu
                 )
             except Stock.DoesNotExist:
-                raise ErreurStock(f"Pas de stock pour {produit} à {lieu}.")
-            if stock.quantite < quantite:
-                raise ErreurStock(
-                    f"Stock insuffisant pour {produit} à {lieu}: "
-                    f"disponible {stock.quantite}, demandé {quantite}."
-                )
+                raise ErreurStock(f"Pas de stock pour {produit} ?? {lieu}.")
+            _verifier_stock_disponible(stock, quantite, unite_ligne)
 
         montant_produits, cout_mouture, montant_total = _compute_boutique_totals(
             lignes,
@@ -238,7 +244,7 @@ def vente_boutique(
             quantite_apportee_client_kg=quantite_apportee_client_kg,
         )
 
-        # ── Calculer répartition cash / crédit ──────────────────────────────
+        # ?????? Calculer r??partition cash / cr??dit ??????????????????????????????????????????????????????????????????????????????????????????
         if type_vente == Ticket.TYPE_CASH:
             m_cash   = montant_total
             m_credit = Decimal("0")
@@ -250,7 +256,7 @@ def vente_boutique(
             m_credit = montant_total - m_cash
             if m_credit < Decimal("0"):
                 raise ErreurStock(
-                    f"L'acompte ({m_cash}) dépasse le montant total ({montant_total})."
+                    f"L'acompte ({m_cash}) d??passe le montant total ({montant_total})."
                 )
 
         ticket = None
@@ -273,29 +279,42 @@ def vente_boutique(
                 )
                 break
             except IntegrityError:
+                # Peut être une collision de numéro de ticket OU une collision
+                # d'idempotency_key (deux requêtes concurrentes avec la même clé).
+                # Dans ce second cas, retourner le ticket déjà créé par l'autre requête.
+                if key:
+                    existing = Ticket.objects.filter(
+                        lieu=lieu, idempotency_key=key, mouture=mouture
+                    ).first()
+                    if existing is not None:
+                        return existing, False
                 continue
         if ticket is None:
             raise ErreurStock("Impossible de generer un numero de ticket unique.")
 
-        for produit, quantite, prix_unitaire in lignes:
+        for line in lignes:
+            produit, quantite, prix_unitaire = line[0], line[1], line[2]
+            unite_ligne = line[3] if len(line) > 3 and line[3] else (produit.unite or "kg")
             LigneVente.objects.create(
                 ticket=ticket,
                 produit=produit,
                 quantite=quantite,
                 prix_unitaire=prix_unitaire,
+                unite=unite_ligne,
             )
-            stock = Stock.objects.select_for_update().get(produit=produit, lieu=lieu)
-            stock.quantite -= quantite
-            stock.save(update_fields=["quantite"])
+            _prelever_stock_unite(
+                stock=Stock.objects.get(produit=produit, lieu=lieu),
+                quantite=quantite,
+                unite=unite_ligne,
+                updated_by=created_by,
+            )
 
-        # ── Auto-créer JournalCreance si crédit ou partiel ──────────────────
+        # ?????? Auto-cr??er JournalCreance si cr??dit ou partiel ??????????????????????????????????????????????????????
         if type_vente in (Ticket.TYPE_CREDIT, Ticket.TYPE_PARTIEL) and m_credit > Decimal("0"):
             _creer_journal_creance_pour_ticket(ticket, m_credit, created_by)
 
     return ticket, True
 
-
-# ── Mouture seule (sans vente de produits) ───────────────────────────────────
 
 def vente_mouture_seule(
     lieu: Lieu,
@@ -306,6 +325,9 @@ def vente_mouture_seule(
     produit_apporte: str = "",
     produit_ref: Produit | None = None,
     idempotency_key: str | None = None,
+    nombre_sacs: int | None = None,
+    poids_par_sac: Decimal | None = None,
+    type_mouture: str = Ticket.TYPE_MOUTURE_CLIENT,
 ) -> tuple[Ticket, bool]:
     """
     Ticket mouture-seule : aucune déduction de stock.
@@ -356,6 +378,9 @@ def vente_mouture_seule(
                     quantite_apportee_client=apportee_kg,
                     cout_mouture=cout,
                     montant_total=cout,
+                    nombre_sacs=nombre_sacs,
+                    poids_par_sac=poids_par_sac,
+                    type_mouture=type_mouture,
                 )
                 return ticket, True
             except IntegrityError:

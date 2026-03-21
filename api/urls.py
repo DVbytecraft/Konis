@@ -6,7 +6,7 @@ from rest_framework.routers import DefaultRouter
 
 from api.views.auth_views import LoginView, RefreshView, LogoutView, MeView
 from api.views.health_views import HealthView, HealthCheckView
-from api.views.boutique_views import StockBoutiqueViewSet, ProduitBoutiqueViewSet, VenteBoutiqueViewSet, MoutureSeuleView, MoutureStatsView, MoutureExportView, MouturePdfExportView, TicketReprintView, DashboardBoutiqueView
+from api.views.boutique_views import StockBoutiqueViewSet, ProduitBoutiqueViewSet, VenteBoutiqueViewSet, MoutureSeuleView, MoutureStatsView, MoutureExportView, MouturePdfExportView, TicketReprintView, DashboardBoutiqueView, ClientsBoutiqueView, CreanceBoutiqueViewSet, ConvertirSacEnKgView
 from api.views.admin_views import (
     EntrepriseViewSet,
     FactoryViewSet,
@@ -68,6 +68,8 @@ from api.views.finance_views import (
 from api.views.mpsl_views import (
     AchatMPSLViewSet,
     CatalogueProduitsMPSLView,
+    ConvertirSacEnKgMpslView,
+    FournisseursMpslView,
     MpslDashboardView,
     StockMPSLView,
     TransfertMPSLViewSet,
@@ -86,6 +88,7 @@ router_boutique = DefaultRouter()
 router_boutique.register("stock", StockBoutiqueViewSet, basename="boutique-stock")
 router_boutique.register("produits", ProduitBoutiqueViewSet, basename="boutique-produits")
 router_boutique.register("ventes", VenteBoutiqueViewSet, basename="boutique-ventes")
+router_boutique.register("creances", CreanceBoutiqueViewSet, basename="boutique-creances")
 
 # Admin
 router_admin = DefaultRouter()
@@ -147,13 +150,17 @@ urlpatterns = [
     path("boutique/mouture-pdf/", MouturePdfExportView.as_view(), name="boutique-mouture-pdf"),
     path("boutique/tickets/<int:ticket_id>/reimprimer/", TicketReprintView.as_view(), name="boutique-ticket-reimprimer"),
     path("boutique/dashboard/", DashboardBoutiqueView.as_view(), name="boutique-dashboard"),
+    path("boutique/clients/", ClientsBoutiqueView.as_view(), name="boutique-clients"),
+    path("boutique/stock/<int:produit_id>/convertir/", ConvertirSacEnKgView.as_view(), name="boutique-stock-convertir"),
     path("boutique/", include(router_boutique.urls)),
     path("admin/", include(router_admin.urls)),
     path("comptable/", include(router_comptable.urls)),
     path("mpsl/", include(router_mpsl.urls)),
     path("mpsl/stock/", StockMPSLView.as_view(), name="mpsl-stock"),
+    path("mpsl/stock/<int:produit_id>/convertir/", ConvertirSacEnKgMpslView.as_view(), name="mpsl-stock-convertir"),
     path("mpsl/catalogue/", CatalogueProduitsMPSLView.as_view(), name="mpsl-catalogue"),
     path("mpsl/dashboard/", MpslDashboardView.as_view(), name="mpsl-dashboard"),
+    path("mpsl/fournisseurs/", FournisseursMpslView.as_view(), name="mpsl-fournisseurs"),
     path("usine/", include(router_usine.urls)),
     path("usine/rapports/benefices/", RapportBeneficesUsineView.as_view(), name="usine-rapport-benefices"),
     path("factory/finished-products/catalog/", FactoryFinishedProductsCatalogView.as_view(), name="factory-finished-products-catalog"),

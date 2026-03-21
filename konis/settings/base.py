@@ -153,6 +153,9 @@ SESSION_COOKIE_SAMESITE = "Strict"
 # Générer avec : python -c "import secrets; print(secrets.token_urlsafe(32))"
 INTERNAL_API_SECRET = os.environ.get("INTERNAL_API_SECRET", "")
 
+# Idempotence : mode strict (refus si clé absente)
+IDEMPOTENCY_STRICT_MODE = os.environ.get("IDEMPOTENCY_STRICT_MODE", "1").lower() in ("1", "true", "yes", "y")
+
 # Hashers mots de passe : Argon2 en premier (résistant aux attaques GPU/ASIC),
 # PBKDF2 en fallback pour les hashes existants.
 # Les mots de passe PBKDF2 sont automatiquement rehashés en Argon2 au prochain login.
@@ -161,3 +164,68 @@ PASSWORD_HASHERS = [
     "django.contrib.auth.hashers.PBKDF2PasswordHasher",
     "django.contrib.auth.hashers.PBKDF2SHA1PasswordHasher",
 ]
+
+# ── Logging structuré KONIS ─────────────────────────────────────────────────
+# - konis.alerts  : log CRITICAL pour les événements nécessitant une alerte immédiate
+#                   (stock bas, dépassement budget, throttle répété, sécurité)
+# - konis.audit   : log INFO pour les actions métier tracées (complement de audit_log DB)
+# - konis.perf    : log WARNING pour les opérations lentes ou volumineuses
+#
+# En prod : router konis.alerts vers un handler Slack/email/PagerDuty via LOGGING override.
+# En dev  : tout va sur console.
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "[{asctime}] {levelname} {name} {message}",
+            "style": "{",
+        },
+        "simple": {
+            "format": "{levelname} {name}: {message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "verbose",
+        },
+    },
+    "loggers": {
+        # Alertes critiques métier (stock bas, budget dépassé, sécurité)
+        "konis.alerts": {
+            "handlers": ["console"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+        # Traces métier complémentaires (complement de AuditLog DB)
+        "konis.audit": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        # Performances (requêtes lentes, N+1 résiduels)
+        "konis.perf": {
+            "handlers": ["console"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+        # Django request errors
+        "django.request": {
+            "handlers": ["console"],
+            "level": "ERROR",
+            "propagate": False,
+        },
+        # Throttling DRF
+        "django.security": {
+            "handlers": ["console"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": "WARNING",
+    },
+}

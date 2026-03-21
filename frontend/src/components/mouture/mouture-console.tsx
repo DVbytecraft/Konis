@@ -100,6 +100,9 @@ export function MoutureConsole({
   const [qteApportee, setQteApportee] = useState("");
   const [qteAchetee, setQteAchetee] = useState("");
   const [unite, setUnite] = useState<Unite>("kg");
+  const [saisieParSacs, setSaisieParSacs] = useState(false);
+  const [nbSacs, setNbSacs] = useState("");
+  const [poidsSac, setPoidsSac] = useState("");
   const [prixParKg, setPrixParKg] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -173,9 +176,17 @@ export function MoutureConsole({
     ? Number(user.lieu.prix_mouture_max)
     : null;
 
+  // Valeur effective de l'apportée (directe ou calculée par sacs)
+  const effectiveApportee = saisieParSacs
+    ? (Number.parseFloat(nbSacs) || 0) * (Number.parseFloat(poidsSac) || 0)
+    : Number.parseFloat(qteApportee) || 0;
+  const effectiveUnite: Unite = saisieParSacs ? "kg" : unite;
+
   // Preview calcul
   const { totalQte, coutMouture } = useMemo(() => {
-    const a = Number.parseFloat(qteApportee) || 0;
+    const a = saisieParSacs
+      ? (Number.parseFloat(nbSacs) || 0) * (Number.parseFloat(poidsSac) || 0)
+      : Number.parseFloat(qteApportee) || 0;
     const b = Number.parseFloat(qteAchetee) || 0;
     const p = Number.parseFloat(prixParKg) || 0;
     const total = a + b;
@@ -183,7 +194,7 @@ export function MoutureConsole({
       return { totalQte: null, coutMouture: null };
     }
     return { totalQte: total, coutMouture: total * p };
-  }, [qteApportee, qteAchetee, prixParKg]);
+  }, [saisieParSacs, nbSacs, poidsSac, qteApportee, qteAchetee, prixParKg]);
 
   const depasseSeuil = totalQte !== null && totalQte > SEUIL_ALERTE;
   const depassePrixMax =
@@ -218,6 +229,8 @@ export function MoutureConsole({
     setQteApportee("");
     setQteAchetee("");
     setUnite("kg");
+    setNbSacs("");
+    setPoidsSac("");
     // Conserver le prix configuré lors du reset
     const defaut = user?.lieu?.prix_mouture_defaut;
     setPrixParKg(defaut ? String(defaut) : "");
@@ -230,9 +243,12 @@ export function MoutureConsole({
     if (submitLockRef.current) return;
     setError("");
 
-    const a = Number.parseFloat(qteApportee) || 0;
+    const a = saisieParSacs
+      ? (Number.parseFloat(nbSacs) || 0) * (Number.parseFloat(poidsSac) || 0)
+      : Number.parseFloat(qteApportee) || 0;
     const b = Number.parseFloat(qteAchetee) || 0;
     const p = Number.parseFloat(prixParKg);
+    const finalUnite: Unite = saisieParSacs ? "kg" : unite;
 
     // Validations strictes
     if (a < 0 || b < 0 || (a === 0 && b === 0)) {
@@ -253,7 +269,7 @@ export function MoutureConsole({
     // Confirmation si quantité élevée
     if (a + b > SEUIL_ALERTE) {
       const ok = window.confirm(
-        `Attention : quantité élevée (${fmt(a + b, 3)} ${unite}).\n` +
+        `Attention : quantité élevée (${fmt(a + b, 3)} ${finalUnite}).\n` +
           `Coût estimé : ${fmt((a + b) * p)} FCFA\n\n` +
           `Confirmer l'opération ?`,
       );
@@ -263,7 +279,8 @@ export function MoutureConsole({
       const ok = window.confirm(
         `Confirmer la mouture ?\n` +
           `Grain : ${produitApporte || "—"}\n` +
-          `Total : ${fmt(a + b, 3)} ${unite} × ${p} FCFA/kg\n` +
+          (saisieParSacs ? `Sacs : ${nbSacs} × ${poidsSac} kg = ${fmt(a, 3)} kg\n` : "") +
+          `Total : ${fmt(a + b, 3)} ${finalUnite} × ${p} FCFA/kg\n` +
           `= ${fmt((a + b) * p)} FCFA`,
       );
       if (!ok) return;
@@ -281,7 +298,7 @@ export function MoutureConsole({
         body: JSON.stringify({
           quantite_apportee: String(a),
           quantite_achetee: String(b),
-          unite,
+          unite: finalUnite,
           prix_par_kg: prixParKg,
           produit_nom: produitApporte,
         }),
@@ -295,7 +312,7 @@ export function MoutureConsole({
       setSaving(false);
       submitLockRef.current = false;
     }
-  }, [depassePrixMax, prixMax, prixParKg, produitApporte, qteApportee, qteAchetee, refetch, refetchStats, roleGuard, submitPath, unite]);
+  }, [depassePrixMax, prixMax, prixParKg, produitApporte, qteApportee, qteAchetee, nbSacs, poidsSac, saisieParSacs, refetch, refetchStats, roleGuard, submitPath, unite]);
 
   // ── Access guards ──────────────────────────────────────────────────────────
   if (roleGuard === "boutique" && user?.role !== "boutique") {
@@ -496,70 +513,159 @@ export function MoutureConsole({
               />
             </div>
 
-            {/* Unité */}
+            {/* Mode de saisie */}
             <div className="space-y-2">
-              <label className="text-sm font-medium">Unité de mesure</label>
-              <div className="grid grid-cols-3 gap-2">
-                {(["kg", "tonne", "sac"] as Unite[]).map((u) => (
-                  <button
-                    key={u}
-                    type="button"
-                    onClick={() => setUnite(u)}
-                    className={`rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
-                      unite === u
-                        ? "bg-green-600 text-white border-green-600"
-                        : "border-input bg-background hover:bg-muted"
-                    }`}
-                  >
-                    {u.toUpperCase()}
-                  </button>
-                ))}
+              <label className="text-sm font-medium">Mode de saisie</label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSaisieParSacs(false)}
+                  className={`rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
+                    !saisieParSacs
+                      ? "bg-green-600 text-white border-green-600"
+                      : "border-input bg-background hover:bg-muted"
+                  }`}
+                >
+                  Saisie directe
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setSaisieParSacs(true); setUnite("kg"); }}
+                  className={`rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
+                    saisieParSacs
+                      ? "bg-amber-600 text-white border-amber-600"
+                      : "border-input bg-background hover:bg-muted"
+                  }`}
+                >
+                  Par sacs
+                </button>
               </div>
-              <p className="text-xs text-muted-foreground">{UNITE_LABELS[unite]}</p>
             </div>
 
+            {/* Unité (saisie directe uniquement) */}
+            {!saisieParSacs && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Unité de mesure</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {(["kg", "tonne", "sac"] as Unite[]).map((u) => (
+                    <button
+                      key={u}
+                      type="button"
+                      onClick={() => setUnite(u)}
+                      className={`rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
+                        unite === u
+                          ? "bg-green-600 text-white border-green-600"
+                          : "border-input bg-background hover:bg-muted"
+                      }`}
+                    >
+                      {u.toUpperCase()}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground">{UNITE_LABELS[unite]}</p>
+              </div>
+            )}
+
             {/* Quantités */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium">
-                  Apportée ({unite})
-                  <span className="ml-1 text-xs text-muted-foreground font-normal">client</span>
-                </label>
-                <Input
-                  ref={apporteeRef}
-                  type="number"
-                  min="0"
-                  step="0.001"
-                  placeholder={`0 ${unite}`}
-                  value={qteApportee}
-                  onChange={(e) => setQteApportee(e.target.value)}
-                  autoFocus
-                  className="h-10"
-                />
+            {saisieParSacs ? (
+              /* Mode sacs : nb sacs × poids par sac → kg automatique */
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <label className="text-sm font-medium">Nombre de sacs</label>
+                    <Input
+                      ref={apporteeRef}
+                      type="number"
+                      min="0"
+                      step="1"
+                      placeholder="Ex : 5"
+                      value={nbSacs}
+                      onChange={(e) => setNbSacs(e.target.value)}
+                      autoFocus
+                      className="h-10"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-sm font-medium">Poids / sac (kg)</label>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.1"
+                      placeholder="Ex : 50"
+                      value={poidsSac}
+                      onChange={(e) => setPoidsSac(e.target.value)}
+                      className="h-10"
+                    />
+                  </div>
+                </div>
+                {effectiveApportee > 0 && (
+                  <div className="flex items-center justify-between rounded-md border border-dashed border-amber-300 px-3 py-2 text-sm bg-amber-50/50 dark:bg-amber-950/20">
+                    <span className="text-muted-foreground">Quantité apportée calculée</span>
+                    <span className="font-semibold tabular-nums text-amber-700 dark:text-amber-300">
+                      {fmt(effectiveApportee, 3)} kg
+                    </span>
+                  </div>
+                )}
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">
+                    Achetée (kg)
+                    <span className="ml-1 text-xs text-muted-foreground font-normal">boutique</span>
+                  </label>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.001"
+                    placeholder="0 kg"
+                    value={qteAchetee}
+                    onChange={(e) => setQteAchetee(e.target.value)}
+                    className="h-10"
+                  />
+                </div>
               </div>
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium">
-                  Achetée ({unite})
-                  <span className="ml-1 text-xs text-muted-foreground font-normal">boutique</span>
-                </label>
-                <Input
-                  type="number"
-                  min="0"
-                  step="0.001"
-                  placeholder={`0 ${unite}`}
-                  value={qteAchetee}
-                  onChange={(e) => setQteAchetee(e.target.value)}
-                  className="h-10"
-                />
+            ) : (
+              /* Mode direct : champs quantité apportée + achetée */
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">
+                    Apportée ({unite})
+                    <span className="ml-1 text-xs text-muted-foreground font-normal">client</span>
+                  </label>
+                  <Input
+                    ref={apporteeRef}
+                    type="number"
+                    min="0"
+                    step="0.001"
+                    placeholder={`0 ${unite}`}
+                    value={qteApportee}
+                    onChange={(e) => setQteApportee(e.target.value)}
+                    autoFocus
+                    className="h-10"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">
+                    Achetée ({unite})
+                    <span className="ml-1 text-xs text-muted-foreground font-normal">boutique</span>
+                  </label>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.001"
+                    placeholder={`0 ${unite}`}
+                    value={qteAchetee}
+                    onChange={(e) => setQteAchetee(e.target.value)}
+                    className="h-10"
+                  />
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Alerte quantité élevée */}
             {depasseSeuil && (
               <div className="flex items-start gap-2 text-sm text-amber-700 bg-amber-50 dark:bg-amber-950/30 dark:text-amber-400 border border-amber-200 dark:border-amber-800 rounded-md px-3 py-2">
                 <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
                 <span>
-                  Quantité élevée ({fmt(totalQte!, 3)} {unite}). Vérifiez avant de valider.
+                  Quantité élevée ({fmt(totalQte!, 3)} {effectiveUnite}). Vérifiez avant de valider.
                 </span>
               </div>
             )}
@@ -569,7 +675,7 @@ export function MoutureConsole({
               <div className="flex items-center justify-between rounded-md border border-dashed px-3 py-2 text-sm bg-muted/30">
                 <span className="text-muted-foreground">Total à moudre</span>
                 <span className="font-semibold tabular-nums">
-                  {fmt(totalQte, 3)} {unite}
+                  {fmt(totalQte, 3)} {effectiveUnite}
                 </span>
               </div>
             )}
@@ -602,7 +708,7 @@ export function MoutureConsole({
               <div className="border rounded-md p-3 bg-green-50/50 dark:bg-green-950/20 space-y-1">
                 <div className="flex justify-between text-sm text-muted-foreground">
                   <span>
-                    {fmt(totalQte, 3)} {unite} × {prixParKg} FCFA/kg
+                    {fmt(totalQte, 3)} {effectiveUnite} × {prixParKg} FCFA/kg
                   </span>
                 </div>
                 <div className="flex justify-between font-bold text-lg">
@@ -623,8 +729,7 @@ export function MoutureConsole({
               disabled={
                 saving ||
                 depassePrixMax ||
-                ((!qteApportee || Number.parseFloat(qteApportee) <= 0) &&
-                  (!qteAchetee || Number.parseFloat(qteAchetee) <= 0)) ||
+                (effectiveApportee <= 0 && (!qteAchetee || Number.parseFloat(qteAchetee) <= 0)) ||
                 !prixParKg
               }
             >

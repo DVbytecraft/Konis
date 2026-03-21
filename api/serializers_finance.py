@@ -137,14 +137,15 @@ class LigneCreanceSerializer(serializers.ModelSerializer):
 
 class PaiementCreanceSerializer(serializers.ModelSerializer):
     mode_paiement_display = serializers.CharField(source="get_mode_paiement_display", read_only=True)
+    created_by_username   = serializers.CharField(source="created_by.username", read_only=True, default=None)
 
     class Meta:
         model = PaiementCreance
         fields = (
             "id", "montant", "date", "mode_paiement", "mode_paiement_display",
-            "reference", "notes", "created_at",
+            "reference", "notes", "created_at", "created_by_username",
         )
-        read_only_fields = ("id", "created_at")
+        read_only_fields = ("id", "created_at", "created_by_username")
 
 
 class JournalCreanceSerializer(MontantRestantMixin, serializers.ModelSerializer):
@@ -403,18 +404,54 @@ class CollecteArgentCreateSerializer(serializers.Serializer):
         return data
 
 
+class CollecteArgentUpdateSerializer(serializers.Serializer):
+    """
+    Correction d'une collecte existante.
+    Si depot_banque est lié, seules les notes peuvent être modifiées.
+    Sinon, montant_trouve, montant_pris et notes sont modifiables.
+    """
+    montant_trouve = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=Decimal("0"), required=False)
+    montant_pris   = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=Decimal("0"), required=False)
+    notes          = serializers.CharField(max_length=1000, required=False, allow_blank=True)
+
+    def validate(self, data):
+        trouve = data.get("montant_trouve")
+        pris   = data.get("montant_pris")
+        if trouve is not None and pris is not None and pris > trouve:
+            raise serializers.ValidationError(
+                {"montant_pris": "montant_pris ne peut pas dépasser montant_trouve."}
+            )
+        return data
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # DASHBOARD GLOBAL
 # ═══════════════════════════════════════════════════════════════════════════════
 
+class CollecteParBoutiqueSerializer(serializers.Serializer):
+    lieu_id       = serializers.IntegerField(read_only=True)
+    lieu_nom      = serializers.CharField(read_only=True)
+    total_pris    = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    total_laisse  = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+
+
 class DashboardGlobalSerializer(serializers.Serializer):
-    total_ventes       = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
-    total_cash         = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
-    total_credit       = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
-    total_creances     = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
-    total_dettes_fourn = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
-    total_depenses     = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
-    solde_caisse       = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
-    argent_theorique   = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
-    benefice_brut      = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
-    benefice_net       = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    total_ventes          = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    total_cash            = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    total_credit          = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    total_creances        = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    total_dettes_fourn    = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    total_depenses        = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    solde_caisse          = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    caisse_reelle         = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    argent_theorique      = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    montant_fictif        = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    total_achats_mpsl     = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    total_achats_usine    = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    benefice_brut         = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    benefice_net          = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    total_mouture         = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    total_ventes_produits = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    total_collecte_pris   = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    total_collecte_laisse = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    collectes_par_boutique = CollecteParBoutiqueSerializer(many=True, read_only=True)

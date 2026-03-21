@@ -674,13 +674,39 @@ def get_resume_financier(entreprise: Entreprise) -> dict:
         )
     )
 
-    # Projets
+    # Projets — annotation SQL pour éviter N×2 requêtes (1 par projet × 2 aggregats)
+    from django.db.models import Subquery, OuterRef, Value
+    from django.db.models import DecimalField as _DecField
+    from django.db.models.functions import Coalesce
+
     projets_qs = Projet.objects.filter(entreprise=entreprise, statut="en_cours")
     nb_projets = projets_qs.count()
-    nb_depassement = sum(
-        1 for p in projets_qs
-        if get_budget_restant_projet(p) < Decimal("0")
+
+    projets_annotated = projets_qs.annotate(
+        _tot_depots=Coalesce(
+            Subquery(
+                DepotProjet.objects.filter(projet=OuterRef("pk"))
+                .values("projet")
+                .annotate(_s=Sum("montant"))
+                .values("_s"),
+            ),
+            Value(Decimal("0")),
+            output_field=_DecField(max_digits=14, decimal_places=2),
+        ),
+        _tot_depenses=Coalesce(
+            Subquery(
+                DepenseProjet.objects.filter(projet=OuterRef("pk"))
+                .values("projet")
+                .annotate(_s=Sum("montant"))
+                .values("_s"),
+            ),
+            Value(Decimal("0")),
+            output_field=_DecField(max_digits=14, decimal_places=2),
+        ),
     )
+    nb_depassement = projets_annotated.filter(
+        _tot_depenses__gt=F("budget_initial") + F("_tot_depots")
+    ).count()
 
     return {
         "total_creances_restantes": creances["total"] or Decimal("0"),
@@ -769,6 +795,80 @@ def enregistrer_collecte(
     return collecte
 
 
+@transaction.atomic
+def modifier_collecte(
+    *,
+    collecte,
+    updated_by: CustomUser,
+    montant_trouve: Decimal | None = None,
+    montant_pris: Decimal | None = None,
+    notes: str | None = None,
+):
+    """
+    Correction d'une collecte existante.
+
+    Règles :
+      - Si depot_banque est lié, seules les notes sont modifiables
+        (les montants sont déjà engagés en banque).
+      - Sinon : montant_trouve, montant_pris et notes sont modifiables.
+      - montant_laisse est recalculé automatiquement.
+    """
+    from finance.models import CollecteArgent
+
+    # Re-fetch avec SELECT FOR UPDATE pour sérialiser les modifications concurrentes.
+    # Sans ce verrou, deux PATCH simultanés sur la même collecte pourraient s'écraser
+    # mutuellement (last-write-wins). Le @transaction.atomic garantit le rollback complet.
+    collecte = CollecteArgent.objects.select_for_update().get(pk=collecte.pk)
+
+    if collecte.depot_banque_id is not None:
+        # Dépôt banque déjà effectué → uniquement les notes
+        if montant_trouve is not None or montant_pris is not None:
+            raise ErreurFinance(
+                "Impossible de modifier les montants : un dépôt banque est déjà lié à cette collecte. "
+                "Seules les notes peuvent être corrigées."
+            )
+        if notes is not None:
+            collecte.notes = notes
+            collecte.save(update_fields=["notes", "updated_at"])
+        return collecte
+
+    # Pas de dépôt banque : correction libre des montants
+    ancien_trouve = collecte.montant_trouve
+    ancien_pris   = collecte.montant_pris
+
+    if montant_trouve is not None:
+        collecte.montant_trouve = montant_trouve
+    if montant_pris is not None:
+        collecte.montant_pris = montant_pris
+    if notes is not None:
+        collecte.notes = notes
+
+    if collecte.montant_pris > collecte.montant_trouve:
+        raise ErreurFinance(
+            f"montant_pris ({collecte.montant_pris}) ne peut dépasser montant_trouve ({collecte.montant_trouve})."
+        )
+
+    # montant_laisse recalculé automatiquement par save()
+    collecte.save()
+
+    audit_log(
+        user=updated_by,
+        action="collecte_modifiée",
+        object_type="CollecteArgent",
+        object_id=collecte.pk,
+        extra={
+            "lieu": collecte.lieu.nom,
+            "date": str(collecte.date_collecte),
+            "ancien_trouve": str(ancien_trouve),
+            "ancien_pris":   str(ancien_pris),
+            "nouveau_trouve": str(collecte.montant_trouve),
+            "nouveau_pris":   str(collecte.montant_pris),
+            "montant_laisse": str(collecte.montant_laisse),
+        },
+    )
+    return collecte
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # DASHBOARD — Agrégats globaux étendus (ventes + cash + créances + dettes + dépenses)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -794,11 +894,16 @@ def get_dashboard_global(entreprise: Entreprise) -> dict:
     from inventaire.models import AchatMPSL
     from depenses.models import Depense
 
-    # Ventes
-    tickets = Ticket.objects.filter(lieu__entreprise=entreprise).aggregate(
+    # Ventes — exclut la mouture production_interne (usage interne, hors CA)
+    tickets = Ticket.objects.filter(
+        lieu__entreprise=entreprise
+    ).exclude(
+        type_mouture=Ticket.TYPE_MOUTURE_INTERNE
+    ).aggregate(
         total_ventes=Sum("montant_total"),
         total_cash=Sum("montant_cash"),
         total_credit_ventes=Sum("montant_credit"),
+        total_mouture=Sum("cout_mouture"),
     )
 
     # Créances restantes
@@ -826,33 +931,89 @@ def get_dashboard_global(entreprise: Entreprise) -> dict:
         total=Sum("prix_total")
     )
 
+    # Achats usine (intrants — comptabilité uniquement, sans impact stock direct)
+    from inventaire.models import AchatUsine
+    achats_usine = AchatUsine.objects.filter(lieu__entreprise=entreprise).aggregate(
+        total=Sum("prix_total")
+    )
+
     # Dépenses
     depenses = Depense.objects.filter(entreprise=entreprise).aggregate(
         total=Sum("montant")
     )
 
-    tv       = tickets["total_ventes"]        or Decimal("0")
-    tc       = tickets["total_cash"]          or Decimal("0")
-    tcr      = tickets["total_credit_ventes"] or Decimal("0")
+    # Paiements reçus sur créances — toutes boutiques (argent entré après la vente crédit)
+    paiements_creances_global = PaiementCreance.objects.filter(
+        journal__lieu__entreprise=entreprise
+    ).aggregate(total=Sum("montant"))
+
+    # Collectes — agrégat global + détail par boutique
+    from finance.models import CollecteArgent
+    collectes_agg = CollecteArgent.objects.filter(
+        lieu__entreprise=entreprise
+    ).aggregate(
+        total_pris=Sum("montant_pris"),
+        total_laisse=Sum("montant_laisse"),
+    )
+    collectes_par_boutique = list(
+        CollecteArgent.objects
+        .filter(lieu__entreprise=entreprise)
+        .values("lieu_id", "lieu__nom")
+        .annotate(
+            total_pris=Sum("montant_pris"),
+            total_laisse=Sum("montant_laisse"),
+        )
+        .order_by("lieu__nom")
+    )
+
+    tv            = tickets["total_ventes"]        or Decimal("0")
+    tc            = tickets["total_cash"]          or Decimal("0")
+    tcr           = tickets["total_credit_ventes"] or Decimal("0")
+    total_mouture = tickets["total_mouture"]       or Decimal("0")
     creances_restantes = creances["total"]    or Decimal("0")
     dettes_restantes   = dettes["total"]      or Decimal("0")
-    total_achats       = achats["total"]      or Decimal("0")
-    total_dep          = depenses["total"]    or Decimal("0")
+    total_achats_mpsl  = achats["total"]        or Decimal("0")
+    total_achats_usine = achats_usine["total"]  or Decimal("0")
+    total_achats       = total_achats_mpsl + total_achats_usine
+    total_dep          = depenses["total"]      or Decimal("0")
+    pcc_global         = paiements_creances_global["total"] or Decimal("0")
+    total_collecte_pris   = collectes_agg["total_pris"]   or Decimal("0")
+    total_collecte_laisse = collectes_agg["total_laisse"] or Decimal("0")
     solde              = get_solde_caisse(entreprise)
+    caisse_reelle      = tc + pcc_global
     ben_brut           = tv - total_achats
     ben_net            = ben_brut - total_dep
+    # Montant fictif = ce qu'on aurait si tous les clients payaient et toutes les dettes réglées
+    montant_fictif     = caisse_reelle + creances_restantes - dettes_restantes - total_dep
 
     return {
-        "total_ventes":       tv,
-        "total_cash":         tc,
-        "total_credit":       tcr,
-        "total_creances":     creances_restantes,
-        "total_dettes_fourn": dettes_restantes,
-        "total_depenses":     total_dep,
-        "solde_caisse":       solde,
-        "argent_theorique":   tc + creances_restantes,
-        "benefice_brut":      ben_brut,
-        "benefice_net":       ben_net,
+        "total_ventes":          tv,
+        "total_cash":            tc,
+        "total_credit":          tcr,
+        "total_creances":        creances_restantes,
+        "total_dettes_fourn":    dettes_restantes,
+        "total_depenses":        total_dep,
+        "solde_caisse":          solde,
+        "caisse_reelle":         caisse_reelle,
+        "argent_theorique":      caisse_reelle + creances_restantes,
+        "montant_fictif":        montant_fictif,
+        "benefice_brut":         ben_brut,
+        "benefice_net":          ben_net,
+        "total_mouture":         total_mouture,
+        "total_ventes_produits": tv - total_mouture,
+        "total_achats_mpsl":     total_achats_mpsl,
+        "total_achats_usine":    total_achats_usine,
+        "total_collecte_pris":   total_collecte_pris,
+        "total_collecte_laisse": total_collecte_laisse,
+        "collectes_par_boutique": [
+            {
+                "lieu_id":      row["lieu_id"],
+                "lieu_nom":     row["lieu__nom"],
+                "total_pris":   str(row["total_pris"]   or Decimal("0")),
+                "total_laisse": str(row["total_laisse"] or Decimal("0")),
+            }
+            for row in collectes_par_boutique
+        ],
     }
 
 
@@ -860,17 +1021,23 @@ def get_dashboard_boutique(lieu) -> dict:
     """
     Dashboard par boutique (rôle boutique, admin).
 
-    Retourne : ventes, cash, créances, dépenses, stock_valeur, nb_produits_stock
+    Règles métier :
+      - caisse_reelle    = Σ montant_cash(tickets) + Σ paiements reçus sur créances
+      - argent_theorique = caisse_reelle + total_creances_restantes
     """
-    from django.db.models import Sum, Count, F, ExpressionWrapper, DecimalField, Q
+    from django.db.models import Q, Sum, F, ExpressionWrapper, DecimalField
     from ventes.models import Ticket
     from depenses.models import Depense
     from inventaire.models import Stock
+    from finance.models import CollecteArgent
 
-    tickets = Ticket.objects.filter(lieu=lieu).aggregate(
+    tickets = Ticket.objects.filter(lieu=lieu).exclude(
+        type_mouture=Ticket.TYPE_MOUTURE_INTERNE
+    ).aggregate(
         total_ventes=Sum("montant_total"),
         total_cash=Sum("montant_cash"),
         total_credit=Sum("montant_credit"),
+        total_mouture=Sum("cout_mouture"),
     )
     creances = JournalCreance.objects.filter(lieu=lieu, statut="en_cours").aggregate(
         total=Sum(ExpressionWrapper(
@@ -878,14 +1045,60 @@ def get_dashboard_boutique(lieu) -> dict:
             output_field=DecimalField(max_digits=14, decimal_places=2),
         ))
     )
+    # Paiements reçus sur créances liées à ce lieu (argent encaissé en retard)
+    paiements_creances = PaiementCreance.objects.filter(
+        journal__lieu=lieu
+    ).aggregate(total=Sum("montant"))
+
     depenses = Depense.objects.filter(lieu=lieu).aggregate(total=Sum("montant"))
-    stock_nb = Stock.objects.filter(lieu=lieu, quantite__gt=0).count()
+    # Nombre de produits ayant encore du stock (sacs OU kg > 0).
+    # Q(quantite__gt=0) | Q(quantite_kg__gt=0) est équivalent à get_quantite_equivalente_kg > 0
+    # pour tous les cas (produit en sacs avec poids_par_sac, ou produit en kg natif).
+    # SQL count : O(1) quelle que soit la taille du stock, contra O(n) Python + select_related.
+    stock_nb = Stock.objects.filter(lieu=lieu).filter(
+        Q(quantite__gt=0) | Q(quantite_kg__gt=0)
+    ).count()
+
+    tc   = tickets["total_cash"]            or Decimal("0")
+    pcc  = paiements_creances["total"]      or Decimal("0")
+    total_creances_restantes = creances["total"] or Decimal("0")
+    total_mouture = tickets["total_mouture"] or Decimal("0")
+    total_dep_boutique = depenses["total"] or Decimal("0")
+    caisse_reelle    = tc + pcc
+    argent_theorique = caisse_reelle + total_creances_restantes
+    # Montant fictif boutique = si tous les clients payaient (hors dettes fourn / dépenses non locales)
+    montant_fictif   = argent_theorique - total_dep_boutique
+
+    # Dernière collecte pour ce lieu
+    derniere_collecte = (
+        CollecteArgent.objects.filter(lieu=lieu)
+        .order_by("-date_collecte", "-created_at")
+        .select_related("collecteur")
+        .first()
+    )
+    derniere_collecte_data = None
+    if derniere_collecte:
+        derniere_collecte_data = {
+            "date":           str(derniere_collecte.date_collecte),
+            "montant_trouve": str(derniere_collecte.montant_trouve),
+            "montant_pris":   str(derniere_collecte.montant_pris),
+            "montant_laisse": str(derniere_collecte.montant_laisse),
+            "collecteur":     derniere_collecte.collecteur.get_full_name() or derniere_collecte.collecteur.username
+                              if derniere_collecte.collecteur else None,
+        }
 
     return {
-        "total_ventes":   tickets["total_ventes"]  or Decimal("0"),
-        "total_cash":     tickets["total_cash"]    or Decimal("0"),
-        "total_credit":   tickets["total_credit"]  or Decimal("0"),
-        "total_creances": creances["total"]         or Decimal("0"),
-        "total_depenses": depenses["total"]         or Decimal("0"),
-        "nb_produits_en_stock": stock_nb,
+        "total_ventes":             tickets["total_ventes"] or Decimal("0"),
+        "total_cash":               tc,
+        "total_credit":             tickets["total_credit"] or Decimal("0"),
+        "total_creances":           total_creances_restantes,
+        "total_paiements_creances": pcc,
+        "caisse_reelle":            caisse_reelle,
+        "argent_theorique":         argent_theorique,
+        "montant_fictif":           montant_fictif,
+        "total_depenses":           total_dep_boutique,
+        "nb_produits_en_stock":     stock_nb,
+        "total_mouture":            total_mouture,
+        "total_ventes_produits":    (tickets["total_ventes"] or Decimal("0")) - total_mouture,
+        "derniere_collecte":        derniere_collecte_data,
     }

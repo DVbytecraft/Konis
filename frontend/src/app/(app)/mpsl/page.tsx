@@ -8,6 +8,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 interface StockItem {
   produit: string;
   quantite: string;
+  quantite_kg: string;
+  poids_par_sac: string | null;
   unite: string;
 }
 
@@ -120,7 +122,18 @@ export default function MpslDashboardPage() {
                     <tr key={i} className="border-b hover:bg-muted/20">
                       <td className="py-1.5 px-2 font-medium">{s.produit}</td>
                       <td className="py-1.5 px-2 text-right font-mono text-emerald-700 dark:text-emerald-300 font-semibold">
-                        {Number(s.quantite).toFixed(2)}
+                        {(() => {
+                          const isSac = (s.unite || "").toLowerCase().includes("sac");
+                          const sacs = Number(s.quantite);
+                          const kg = Number(s.quantite_kg ?? 0);
+                          if (isSac) {
+                            if (sacs > 0 && kg > 0) return `${sacs.toFixed(2)} sacs + ${kg.toFixed(3)} kg`;
+                            if (sacs > 0) return `${sacs.toFixed(2)} sacs`;
+                            if (kg > 0) return `${kg.toFixed(3)} kg`;
+                            return "0";
+                          }
+                          return `${Number(s.quantite).toFixed(2)} ${s.unite}`;
+                        })()}
                       </td>
                       <td className="py-1.5 px-2 text-muted-foreground">{s.unite}</td>
                     </tr>

@@ -86,6 +86,34 @@ class Ticket(models.Model):
         verbose_name="Quantité grain apportée par le client (kg, normalisé)",
         help_text="Toujours stocké en kg après normalisation.",
     )
+    # ── Type de mouture ───────────────────────────────────────────────────────
+    TYPE_MOUTURE_CLIENT  = "client_externe"
+    TYPE_MOUTURE_INTERNE = "production_interne"
+    TYPE_MOUTURE_CHOICES = [
+        (TYPE_MOUTURE_CLIENT,  "Client externe"),
+        (TYPE_MOUTURE_INTERNE, "Production interne"),
+    ]
+    type_mouture = models.CharField(
+        max_length=20,
+        choices=TYPE_MOUTURE_CHOICES,
+        null=True, blank=True,
+        db_index=True,
+        verbose_name="Type de mouture",
+        help_text="client_externe = revenu comptabilisé ; production_interne = usage interne, hors CA.",
+    )
+
+    # ── Saisie par sacs (traçabilité optionnelle) ────────────────────────────
+    nombre_sacs = models.PositiveIntegerField(
+        null=True, blank=True,
+        verbose_name="Nombre de sacs (saisie par sacs)",
+        help_text="Renseigné uniquement si la saisie a été effectuée en mode 'par sacs'.",
+    )
+    poids_par_sac = models.DecimalField(
+        max_digits=10, decimal_places=3,
+        null=True, blank=True,
+        verbose_name="Poids par sac (kg)",
+        help_text="Poids unitaire du sac en kg (saisie par sacs).",
+    )
     cout_mouture = models.DecimalField(
         max_digits=12, decimal_places=2, default=Decimal("0"),
         verbose_name="Coût total mouture",
@@ -123,6 +151,10 @@ class Ticket(models.Model):
             CheckConstraint(
                 condition=Q(prix_mouture_sac__isnull=True) | Q(prix_mouture_sac__gte=0),
                 name="ticket_prix_mouture_sac_positif",
+            ),
+            CheckConstraint(
+                condition=Q(poids_par_sac__isnull=True) | Q(poids_par_sac__gt=0),
+                name="ticket_poids_par_sac_positif",
             ),
         ]
         indexes = [
@@ -170,6 +202,12 @@ class LigneVente(models.Model):
     )
     produit = models.ForeignKey(
         Produit, on_delete=models.PROTECT, related_name="lignes_vente"
+    )
+    unite = models.CharField(
+        max_length=20,
+        blank=True,
+        default="",
+        help_text="Unité de la ligne (ex. kg, sac).",
     )
     quantite = models.DecimalField(max_digits=12, decimal_places=2)
     prix_unitaire = models.DecimalField(max_digits=12, decimal_places=2)

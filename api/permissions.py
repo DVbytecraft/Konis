@@ -2,7 +2,7 @@
 Permissions strictes par role KONIS.
 
 Hiérarchie des rôles :
-  supreme_admin > admin > daf > comptable > usine / boutique / mpsl
+  supreme_admin > admin > daf > comptable > usine / boutique / mpsl / collecteur
 
   - supreme_admin : accès total, supervise tout
   - admin         : accès opérationnel complet (supervisé par supreme_admin)
@@ -11,6 +11,7 @@ Hiérarchie des rôles :
   - usine         : opérations usine
   - boutique      : opérations boutique
   - mpsl          : opérations dépôt MPSL
+  - collecteur    : module collectes uniquement (lecture + création collectes)
 
 Règle générale : supreme_admin est inclus dans TOUTES les permissions admin/daf/opérationnel.
 """
@@ -140,10 +141,63 @@ class IsMPSLRole(permissions.BasePermission):
         )
 
 
+class IsCollecteurRole(permissions.BasePermission):
+    """Accès réservé au collecteur, admins et DAF."""
+    message = "Réservé aux collecteurs ou administrateurs."
+
+    def has_permission(self, request, view):
+        return (
+            request.user
+            and request.user.is_authenticated
+            and request.user.role in (
+                CustomUser.ROLE_COLLECTEUR,
+                CustomUser.ROLE_SUPREME_ADMIN,
+                CustomUser.ROLE_ADMIN,
+                CustomUser.ROLE_DAF,
+            )
+        )
+
+
+class DafReadOnlyMixin:
+    """
+    Mixin à ajouter sur les ViewSets financiers.
+    Bloque les opérations d'écriture pour les rôles DAF et COMPTABLE.
+
+    Rôles bloqués :
+      - DAF      : lecture seule (peut consulter, pas créer/modifier)
+      - COMPTABLE: lecture seule sur finance (peut écrire sur dépenses via IsComptableRole)
+
+    Actions bloquées :
+      - CRUD standard : create, update, partial_update, destroy
+      - Actions custom des ViewSets finance : modifier, paiement, solder,
+        remboursement, depense, depot, changer_statut
+    """
+    _READ_ONLY_ROLES = frozenset({CustomUser.ROLE_DAF, CustomUser.ROLE_COMPTABLE})
+    _WRITE_ACTIONS = frozenset({
+        # Actions CRUD standard DRF
+        "create", "update", "partial_update", "destroy",
+        # Actions custom d'écriture sur les ViewSets finance
+        "modifier", "paiement", "solder", "remboursement",
+        "depense", "depot", "changer_statut",
+    })
+
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        if (
+            request.user
+            and request.user.is_authenticated
+            and getattr(request.user, "role", None) in self._READ_ONLY_ROLES
+            and getattr(self, "action", None) in self._WRITE_ACTIONS
+        ):
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("Accès en lecture seule pour ce rôle.")
+
+
 # Aliases pour la checklist sécurité (noms explicites)
-IsAdminUser     = IsAdminRole
-IsComptableUser = IsComptableRole
-IsBoutiqueUser  = IsBoutiqueRole
-IsUsineUser     = IsUsineRole
-IsMPSLUser      = IsMPSLRole
-IsDafUser       = IsDafRole
+IsAdminUser      = IsAdminRole
+IsComptableUser  = IsComptableRole
+IsBoutiqueUser   = IsBoutiqueRole
+IsUsineUser      = IsUsineRole
+IsMPSLUser       = IsMPSLRole
+IsDafUser        = IsDafRole
+IsCollecteurUser = IsCollecteurRole

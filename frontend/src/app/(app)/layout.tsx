@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/auth-context";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { Button } from "@/components/ui/button";
-import { LayoutDashboard, Store, Calculator, LogOut, Users, Package, Warehouse, Receipt, BarChart3, ClipboardList, Wheat, Tag, Truck, TrendingUp, TrendingDown, Banknote, FolderKanban, Landmark, CreditCard, Building2 } from "lucide-react";
+import { LayoutDashboard, Store, Calculator, LogOut, Users, Package, Warehouse, Receipt, BarChart3, ClipboardList, Wheat, Tag, Truck, TrendingUp, TrendingDown, Banknote, FolderKanban, Landmark, CreditCard, Building2, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navByRole: Record<string, { href: string; label: string; icon: React.ComponentType<{ className?: string }> }[]> = {
@@ -16,6 +16,7 @@ const navByRole: Record<string, { href: string; label: string; icon: React.Compo
     { href: "/admin/factories", label: "Usines", icon: Warehouse },
     { href: "/admin/magasins", label: "Lieux", icon: Store },
     { href: "/admin/produits", label: "Produits", icon: Package },
+    { href: "/admin/stock", label: "Stock global", icon: Package },
     { href: "/admin/rapport", label: "Rapport", icon: BarChart3 },
     { href: "/factures", label: "Factures", icon: Receipt },
     { href: "/comptable", label: "Vue comptable", icon: Calculator },
@@ -54,7 +55,10 @@ const navByRole: Record<string, { href: string; label: string; icon: React.Compo
     { href: "/factures", label: "Factures", icon: Receipt },
   ],
   boutique: [
+    { href: "/boutique", label: "Tableau de bord", icon: LayoutDashboard },
     { href: "/boutique/caisse", label: "Caisse", icon: Store },
+    { href: "/boutique/stock", label: "Stock", icon: Package },
+    { href: "/boutique/creances", label: "Créances", icon: AlertCircle },
     { href: "/boutique/mouture", label: "Mouture", icon: Wheat },
     { href: "/boutique/tickets", label: "Tickets", icon: ClipboardList },
     { href: "/factures", label: "Factures", icon: Receipt },
@@ -64,12 +68,16 @@ const navByRole: Record<string, { href: string; label: string; icon: React.Compo
     { href: "/mpsl/achats", label: "Achats", icon: Package },
     { href: "/mpsl/transferts", label: "Transferts", icon: Warehouse },
   ],
+  collecteur: [
+    { href: "/collecteur", label: "Mes collectes", icon: Truck },
+  ],
   supreme_admin: [
     { href: "/admin", label: "Tableau de bord", icon: LayoutDashboard },
     { href: "/admin/users", label: "Utilisateurs", icon: Users },
     { href: "/admin/factories", label: "Usines", icon: Warehouse },
     { href: "/admin/magasins", label: "Lieux", icon: Store },
     { href: "/admin/produits", label: "Produits", icon: Package },
+    { href: "/admin/stock", label: "Stock global", icon: Package },
     { href: "/admin/rapport", label: "Rapport", icon: BarChart3 },
     { href: "/factures", label: "Factures", icon: Receipt },
     { href: "/comptable", label: "Vue comptable", icon: Calculator },
@@ -83,6 +91,7 @@ const navByRole: Record<string, { href: string; label: string; icon: React.Compo
     { href: "/finance/emprunts", label: "Emprunts", icon: CreditCard },
     { href: "/finance/tresorerie", label: "Trésorerie", icon: Banknote },
     { href: "/finance/projets", label: "Projets", icon: FolderKanban },
+    { href: "/finance/collectes", label: "Collectes", icon: Truck },
   ],
   daf: [
     { href: "/finance", label: "Tableau de bord", icon: LayoutDashboard },
@@ -93,6 +102,7 @@ const navByRole: Record<string, { href: string; label: string; icon: React.Compo
     { href: "/finance/emprunts", label: "Emprunts", icon: CreditCard },
     { href: "/finance/tresorerie", label: "Trésorerie", icon: Banknote },
     { href: "/finance/projets", label: "Projets", icon: FolderKanban },
+    { href: "/finance/collectes", label: "Collectes", icon: Truck },
   ],
 };
 

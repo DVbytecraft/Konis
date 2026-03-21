@@ -7,6 +7,7 @@ export interface LigneTicket {
   quantite: number;
   prix_unitaire: number;
   total: number;
+  unite?: string;
 }
 
 interface Ticket58mmProps {
@@ -75,13 +76,7 @@ export function Ticket58mm({
           : undefined
       }
     >
-      {/* En-tête */}
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src="/logo-konis.png"
-        alt="AGRO KONIS"
-        style={{ width: "40mm", height: "auto", display: "block", margin: "0 auto 2px" }}
-      />
+      {/* En-tête — le logo est volontairement absent des tickets (application uniquement) */}
       <div className="text-center font-semibold text-xs uppercase tracking-wider">
         {lieuNom}
       </div>
@@ -113,7 +108,7 @@ export function Ticket58mm({
         lignes.map((l, i) => (
           <div key={i} className="flex justify-between text-[10px]">
             <span className="flex-1 truncate">
-              {l.quantite} x {l.produit_nom}
+              {l.unite ? `${l.quantite} ${l.unite} x ${l.produit_nom}` : `${l.quantite} x ${l.produit_nom}`}
             </span>
             <span className="ml-1">{fmt(l.total)}</span>
           </div>

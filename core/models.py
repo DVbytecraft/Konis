@@ -129,8 +129,9 @@ class CustomUser(AbstractUser):
     ROLE_DAF = "daf"
     ROLE_COMPTABLE = "comptable"
     ROLE_USINE = "usine"
-    ROLE_BOUTIQUE = "boutique"
-    ROLE_MPSL = "mpsl"
+    ROLE_BOUTIQUE   = "boutique"
+    ROLE_MPSL       = "mpsl"
+    ROLE_COLLECTEUR = "collecteur"
     ROLE_CHOICES = [
         (ROLE_SUPREME_ADMIN, "Supreme Admin"),
         (ROLE_ADMIN,         "Admin"),
@@ -139,6 +140,7 @@ class CustomUser(AbstractUser):
         (ROLE_USINE,         "Usine"),
         (ROLE_BOUTIQUE,      "Boutique"),
         (ROLE_MPSL,          "MPSL"),
+        (ROLE_COLLECTEUR,    "Collecteur"),
     ]
 
     entreprise = models.ForeignKey(

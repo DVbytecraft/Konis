@@ -11,6 +11,7 @@ au lieu de boucles Python, évitant les problèmes N+1 et les chargements en mé
 from decimal import Decimal
 
 from django.db.models import Count, DecimalField, ExpressionWrapper, F, Q, Sum
+from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -31,6 +32,7 @@ from audit.services import audit_log
 from depenses.models import CategorieDepense, Depense
 from inventaire.models import AchatUsine, Stock, Transfert
 from usine.models import TransfertCession, TransfertInterUsine
+from finance.models import JournalCreance
 from ventes.models import LigneVente, Ticket
 
 # Expressions réutilisées pour calculer les montants en SQL (évite les boucles Python)
@@ -52,11 +54,20 @@ def _filter_by_lieu(qs, request, lieu_field="lieu"):
 
 
 def _filter_by_date(qs, request, date_field="date"):
+    from datetime import datetime as _dt
     debut = request.query_params.get("debut")
     fin = request.query_params.get("fin")
     if debut:
+        try:
+            _dt.strptime(debut, "%Y-%m-%d")
+        except ValueError:
+            raise DRFValidationError({"debut": f"Format de date invalide : '{debut}'. Attendu : YYYY-MM-DD."})
         qs = qs.filter(**{f"{date_field}__date__gte": debut})
     if fin:
+        try:
+            _dt.strptime(fin, "%Y-%m-%d")
+        except ValueError:
+            raise DRFValidationError({"fin": f"Format de date invalide : '{fin}'. Attendu : YYYY-MM-DD."})
         qs = qs.filter(**{f"{date_field}__date__lte": fin})
     return qs
 
@@ -103,7 +114,7 @@ class DepenseComptableViewSet(ModelViewSet):
     queryset = Depense.objects.all().select_related("lieu", "categorie").order_by("-date")
     serializer_class = DepenseSerializer
     permission_classes = [IsComptableRole]
-    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
+    http_method_names = ["get", "post", "patch", "head", "options"]
 
     def get_queryset(self):
         qs = super().get_queryset().filter(entreprise=self.request.user.entreprise)
@@ -213,34 +224,57 @@ class RapportBoutiquesView(APIView):
             l.id: {
                 "lieu_id": l.id, "lieu_nom": l.nom,
                 "nb_tickets": 0, "total_ventes": Decimal("0"),
+                "total_mouture": Decimal("0"), "total_creances": Decimal("0"),
                 "cessions_recues_sacs": Decimal("0"), "cessions_recues_montant": Decimal("0"),
             }
             for l in Lieu.objects.filter(type_lieu=Lieu.TYPE_MAGASIN, entreprise=entreprise)
         }
 
-        # Agrégation SQL des ventes par boutique (1 query au lieu de N)
-        lignes_qs = LigneVente.objects.filter(
-            ticket__lieu__type_lieu=Lieu.TYPE_MAGASIN,
-            ticket__lieu__entreprise=entreprise,
-        )
+        # Agrégation SQL sur Ticket.montant_total (inclut mouture + produits)
+        tickets_qs = Ticket.objects.filter(
+            lieu__type_lieu=Lieu.TYPE_MAGASIN,
+            lieu__entreprise=entreprise,
+        ).exclude(type_mouture=Ticket.TYPE_MOUTURE_INTERNE)
         if debut:
-            lignes_qs = lignes_qs.filter(ticket__date__date__gte=debut)
+            tickets_qs = tickets_qs.filter(date__date__gte=debut)
         if fin:
-            lignes_qs = lignes_qs.filter(ticket__date__date__lte=fin)
+            tickets_qs = tickets_qs.filter(date__date__lte=fin)
 
         ticket_stats = (
-            lignes_qs
-            .values("ticket__lieu_id")
+            tickets_qs
+            .values("lieu_id")
             .annotate(
-                nb_tickets=Count("ticket", distinct=True),
-                total_ventes=Sum(_VENTE_MONTANT),
+                nb_tickets=Count("id"),
+                total_ventes=Sum("montant_total"),
+                total_mouture=Sum("cout_mouture"),
             )
         )
         for stat in ticket_stats:
-            bid = stat["ticket__lieu_id"]
+            bid = stat["lieu_id"]
             if bid in boutiques:
                 boutiques[bid]["nb_tickets"] = stat["nb_tickets"] or 0
                 boutiques[bid]["total_ventes"] = stat["total_ventes"] or Decimal("0")
+                boutiques[bid]["total_mouture"] = stat["total_mouture"] or Decimal("0")
+
+        # Créances restantes en cours par boutique
+        creances_stats = (
+            JournalCreance.objects.filter(
+                lieu__type_lieu=Lieu.TYPE_MAGASIN,
+                lieu__entreprise=entreprise,
+                statut="en_cours",
+            )
+            .values("lieu_id")
+            .annotate(
+                total=Sum(ExpressionWrapper(
+                    F("montant_initial") - F("montant_paye"),
+                    output_field=DecimalField(max_digits=14, decimal_places=2),
+                ))
+            )
+        )
+        for stat in creances_stats:
+            bid = stat["lieu_id"]
+            if bid in boutiques:
+                boutiques[bid]["total_creances"] = stat["total"] or Decimal("0")
 
         # Agrégation SQL des cessions reçues par boutique
         cessions_qs = TransfertCession.objects.filter(
@@ -270,6 +304,8 @@ class RapportBoutiquesView(APIView):
             {
                 **v,
                 "total_ventes": str(v["total_ventes"]),
+                "total_mouture": str(v["total_mouture"]),
+                "total_creances": str(v["total_creances"]),
                 "cessions_recues_sacs": str(v["cessions_recues_sacs"]),
                 "cessions_recues_montant": str(v["cessions_recues_montant"]),
             }
@@ -401,7 +437,12 @@ class DetailBoutiqueView(APIView):
         except Lieu.DoesNotExist:
             return Response({"detail": "Boutique introuvable."}, status=404)
 
-        tickets_qs = Ticket.objects.filter(lieu=lieu).prefetch_related("lignes__produit").order_by("-date")
+        tickets_qs = (
+            Ticket.objects.filter(lieu=lieu)
+            .exclude(type_mouture=Ticket.TYPE_MOUTURE_INTERNE)
+            .prefetch_related("lignes__produit")
+            .order_by("-date")
+        )
         if debut:
             tickets_qs = tickets_qs.filter(date__date__gte=debut)
         if fin:
@@ -415,33 +456,78 @@ class DetailBoutiqueView(APIView):
         if fin:
             cessions_qs = cessions_qs.filter(created_at__date__lte=fin)
 
-        # Totaux via agrégation SQL (une query au lieu de N itérations Python)
-        lignes_qs = LigneVente.objects.filter(ticket__lieu=lieu)
-        if debut:
-            lignes_qs = lignes_qs.filter(ticket__date__date__gte=debut)
-        if fin:
-            lignes_qs = lignes_qs.filter(ticket__date__date__lte=fin)
-        total_lignes = lignes_qs.aggregate(total=Sum(_VENTE_MONTANT))["total"] or Decimal("0")
-
-        # Mouture : s'ajoute au total ventes (coût de service écrasement)
-        tickets_mouture_qs = Ticket.objects.filter(lieu=lieu, mouture=True)
-        if debut:
-            tickets_mouture_qs = tickets_mouture_qs.filter(date__date__gte=debut)
-        if fin:
-            tickets_mouture_qs = tickets_mouture_qs.filter(date__date__lte=fin)
-        total_mouture = tickets_mouture_qs.aggregate(total=Sum("cout_mouture"))["total"] or Decimal("0")
-        total_ventes = total_lignes + total_mouture
+        # Agrégation sur Ticket.montant_total (inclut mouture, exclut production_interne)
+        agg = tickets_qs.aggregate(
+            total_ventes=Sum("montant_total"),
+            total_mouture=Sum("cout_mouture"),
+            total_cash=Sum("montant_cash"),
+            total_credit=Sum("montant_credit"),
+        )
+        total_ventes  = agg["total_ventes"]  or Decimal("0")
+        total_mouture = agg["total_mouture"] or Decimal("0")
+        total_cash    = agg["total_cash"]    or Decimal("0")
+        total_credit  = agg["total_credit"]  or Decimal("0")
 
         total_cessions = cessions_qs.aggregate(total=Sum(_CESSION_MONTANT))["total"] or Decimal("0")
+
+        # Stock actuel de cette boutique
+        from inventaire.models import Stock as StockModel
+        from inventaire.services import get_quantite_equivalente_kg
+        stock_items = StockModel.objects.filter(lieu=lieu).select_related("produit")
+        stock_data = [
+            {"produit_nom": s.produit.nom, "produit_code": s.produit.code or "", "quantite": str(s.quantite)}
+            for s in stock_items
+            if get_quantite_equivalente_kg(s) > 0
+        ]
+
+        # Créances en cours
+        from finance.models import JournalCreance
+        creances_qs = JournalCreance.objects.filter(lieu=lieu, statut="en_cours").select_related("client")
+        total_creances = creances_qs.aggregate(
+            total=Sum(ExpressionWrapper(
+                F("montant_initial") - F("montant_paye"),
+                output_field=DecimalField(max_digits=14, decimal_places=2),
+            ))
+        )["total"] or Decimal("0")
+        creances_data = [
+            {
+                "id": j.pk,
+                "client_nom": j.client.nom,
+                "montant_initial": str(j.montant_initial),
+                "montant_paye": str(j.montant_paye),
+                "montant_restant": str(j.montant_restant),
+            }
+            for j in creances_qs
+        ]
+
+        # Collectes pour cette boutique (5 dernières)
+        from finance.models import CollecteArgent
+        collectes_qs = CollecteArgent.objects.filter(lieu=lieu).select_related("collecteur").order_by("-date_collecte")[:5]
+        collectes_data = [
+            {
+                "date": str(c.date_collecte),
+                "montant_trouve": str(c.montant_trouve),
+                "montant_pris": str(c.montant_pris),
+                "montant_laisse": str(c.montant_laisse),
+                "collecteur": c.collecteur.get_full_name() or c.collecteur.username if c.collecteur else None,
+            }
+            for c in collectes_qs
+        ]
 
         from api.serializers import TicketSerializer
         return Response({
             "lieu_id": lieu.id,
             "lieu_nom": lieu.nom,
-            "total_ventes_produits": str(total_lignes),
-            "total_mouture": str(total_mouture),
             "total_ventes": str(total_ventes),
+            "total_ventes_produits": str(total_ventes - total_mouture),
+            "total_mouture": str(total_mouture),
+            "total_cash": str(total_cash),
+            "total_credit": str(total_credit),
+            "total_creances": str(total_creances),
             "total_cessions_recues": str(total_cessions),
+            "stock": stock_data,
+            "creances_en_cours": creances_data,
+            "collectes_recentes": collectes_data,
             "tickets": TicketSerializer(tickets_qs, many=True).data,
             "cessions_recues": TransfertCessionSerializer(cessions_qs, many=True).data,
         })

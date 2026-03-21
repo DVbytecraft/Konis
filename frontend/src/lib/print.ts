@@ -3,6 +3,7 @@ export interface TicketPrintLine {
   quantite: number;
   prix_unitaire: number;
   total?: number;
+  unite?: string;
 }
 
 export interface TicketPrintData {
@@ -112,7 +113,8 @@ function buildTicketHtml(ticket: TicketPrintData): string {
     ? lignes
         .map((ligne) => {
           const total = ligne.total ?? ligne.quantite * ligne.prix_unitaire;
-          const libelle = `${ligne.produit_nom} x${ligne.quantite} @ ${formatNumber(ligne.prix_unitaire)}`;
+          const qty = ligne.unite ? `${ligne.quantite} ${ligne.unite}` : `${ligne.quantite}`;
+          const libelle = `${ligne.produit_nom} x${qty} @ ${formatNumber(ligne.prix_unitaire)}`;
           return `<div class="ligne"><span>${escapeHtml(libelle)}</span><span>${formatNumber(total)}</span></div>`;
         })
         .join("")

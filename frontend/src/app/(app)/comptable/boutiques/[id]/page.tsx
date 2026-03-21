@@ -23,13 +23,24 @@ interface Cession {
   montant_cession: string;
   created_at: string;
 }
+interface StockItem { produit_nom: string; produit_code: string; quantite: string }
+interface CreanceItem { id: number; client_nom: string; montant_initial: string; montant_paye: string; montant_restant: string }
+interface CollecteItem { date: string; montant_trouve: string; montant_pris: string; montant_laisse: string; collecteur: string | null }
 interface DetailBoutique {
   lieu_id: number;
   lieu_nom: string;
   total_ventes: string;
+  total_ventes_produits: string;
+  total_mouture: string;
+  total_cash: string;
+  total_credit: string;
+  total_creances: string;
   total_cessions_recues: string;
   tickets: Ticket[];
   cessions_recues: Cession[];
+  stock: StockItem[];
+  creances_en_cours: CreanceItem[];
+  collectes_recentes: CollecteItem[];
 }
 
 function fmt(v: string | number) { return Number(v).toLocaleString("fr-FR"); }
@@ -75,17 +86,114 @@ export default function DetailBoutiquePage() {
         <span className="text-sm text-muted-foreground">{periode}</span>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      {/* KPIs ventes */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         <div className="rounded-lg border border-l-4 border-l-green-500 bg-green-50 dark:bg-green-950/20 p-4">
-          <p className="text-xs text-muted-foreground">CA ventes (tickets)</p>
-          <p className="text-xl font-bold text-green-700 dark:text-green-400">{fmt(data.total_ventes)} <span className="text-sm font-normal text-muted-foreground">FCFA</span></p>
+          <p className="text-xs text-muted-foreground">CA ventes total</p>
+          <p className="text-xl font-bold text-green-700 dark:text-green-400">{fmt(data.total_ventes)} <span className="text-sm font-normal text-muted-foreground">F</span></p>
+          <p className="text-xs text-muted-foreground mt-1">Cash : {fmt(data.total_cash)} · Crédit : {fmt(data.total_credit)}</p>
         </div>
-        <div className="rounded-lg border border-l-4 border-l-green-500 bg-green-50 dark:bg-green-950/20 p-4">
-          <p className="text-xs text-muted-foreground">Valeur cessions reçues</p>
-          <p className="text-xl font-bold text-green-700 dark:text-green-400">{fmt(data.total_cessions_recues)} <span className="text-sm font-normal text-muted-foreground">FCFA</span></p>
+        {parseFloat(data.total_mouture) > 0 && (
+          <div className="rounded-lg border border-l-4 border-l-teal-400 p-4">
+            <p className="text-xs text-muted-foreground">dont Mouture</p>
+            <p className="text-xl font-bold text-teal-700 dark:text-teal-300">{fmt(data.total_mouture)} <span className="text-sm font-normal text-muted-foreground">F</span></p>
+            <p className="text-xs text-muted-foreground mt-1">Produits : {fmt(data.total_ventes_produits)} F</p>
+          </div>
+        )}
+        <div className="rounded-lg border border-l-4 border-l-amber-400 p-4">
+          <p className="text-xs text-muted-foreground">Créances en cours</p>
+          <p className="text-xl font-bold text-amber-700 dark:text-amber-300">{fmt(data.total_creances)} <span className="text-sm font-normal text-muted-foreground">F</span></p>
+        </div>
+        <div className="rounded-lg border border-l-4 border-l-blue-400 p-4">
+          <p className="text-xs text-muted-foreground">Cessions reçues</p>
+          <p className="text-xl font-bold text-blue-700 dark:text-blue-300">{fmt(data.total_cessions_recues)} <span className="text-sm font-normal text-muted-foreground">F</span></p>
         </div>
       </div>
 
+      {/* Stock actuel */}
+      {data.stock.length > 0 && (
+        <div>
+          <h2 className="text-base font-semibold mb-2">Stock actuel ({data.stock.length} produits)</h2>
+          <div className="overflow-x-auto rounded-md border">
+            <table className="w-full text-xs sm:text-sm">
+              <thead><tr className="border-b bg-muted/40">
+                <th className="text-left py-2 px-3">Produit</th>
+                <th className="text-left py-2 px-3">Code</th>
+                <th className="text-right py-2 px-3">Quantité</th>
+              </tr></thead>
+              <tbody>
+                {data.stock.map((s, i) => (
+                  <tr key={i} className="border-b hover:bg-muted/20">
+                    <td className="py-1.5 px-3">{s.produit_nom}</td>
+                    <td className="py-1.5 px-3 font-mono text-muted-foreground">{s.produit_code || "—"}</td>
+                    <td className="py-1.5 px-3 text-right font-medium">{fmt(s.quantite)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Créances en cours */}
+      {data.creances_en_cours.length > 0 && (
+        <div>
+          <h2 className="text-base font-semibold mb-2">Créances en cours ({data.creances_en_cours.length})</h2>
+          <div className="overflow-x-auto rounded-md border">
+            <table className="w-full text-xs sm:text-sm">
+              <thead><tr className="border-b bg-muted/40">
+                <th className="text-left py-2 px-3">Client</th>
+                <th className="text-right py-2 px-3">Montant initial</th>
+                <th className="text-right py-2 px-3">Déjà payé</th>
+                <th className="text-right py-2 px-3">Restant</th>
+              </tr></thead>
+              <tbody>
+                {data.creances_en_cours.map((c) => (
+                  <tr key={c.id} className="border-b hover:bg-muted/20">
+                    <td className="py-1.5 px-3">{c.client_nom}</td>
+                    <td className="py-1.5 px-3 text-right">{fmt(c.montant_initial)}</td>
+                    <td className="py-1.5 px-3 text-right text-green-600">{fmt(c.montant_paye)}</td>
+                    <td className="py-1.5 px-3 text-right font-bold text-amber-600 dark:text-amber-400">{fmt(c.montant_restant)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Collectes récentes */}
+      {data.collectes_recentes.length > 0 && (
+        <div>
+          <h2 className="text-base font-semibold mb-2">Collectes récentes</h2>
+          <div className="overflow-x-auto rounded-md border">
+            <table className="w-full text-xs sm:text-sm">
+              <thead><tr className="border-b bg-muted/40">
+                <th className="text-left py-2 px-3">Date</th>
+                <th className="text-right py-2 px-3">Trouvé</th>
+                <th className="text-right py-2 px-3">Prélevé</th>
+                <th className="text-right py-2 px-3">Laissé</th>
+                <th className="text-left py-2 px-3">Collecteur</th>
+              </tr></thead>
+              <tbody>
+                {data.collectes_recentes.map((c, i) => (
+                  <tr key={i} className="border-b hover:bg-muted/20">
+                    <td className="py-1.5 px-3 text-muted-foreground">{new Date(c.date).toLocaleDateString("fr-FR")}</td>
+                    <td className="py-1.5 px-3 text-right">{fmt(c.montant_trouve)}</td>
+                    <td className="py-1.5 px-3 text-right text-blue-700 dark:text-blue-300 font-medium">{fmt(c.montant_pris)}</td>
+                    <td className={`py-1.5 px-3 text-right font-bold ${parseFloat(c.montant_laisse) > 0 ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}>
+                      {fmt(c.montant_laisse)}
+                    </td>
+                    <td className="py-1.5 px-3 text-muted-foreground">{c.collecteur ?? "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Tickets */}
       <div>
         <h2 className="text-base font-semibold mb-2">Ventes ({data.tickets.length} tickets)</h2>
         <div className="overflow-x-auto rounded-md border">
@@ -117,6 +225,7 @@ export default function DetailBoutiquePage() {
         </div>
       </div>
 
+      {/* Cessions */}
       <div>
         <h2 className="text-base font-semibold mb-2">Cessions reçues ({data.cessions_recues.length})</h2>
         <div className="overflow-x-auto rounded-md border">

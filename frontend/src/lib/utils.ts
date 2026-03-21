@@ -1,6 +1,23 @@
 import { type ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
 
+/**
+ * Génère une clé d'idempotency unique pour les requêtes critiques (ventes, conversions).
+ * Utilise crypto.randomUUID() si disponible (navigateurs modernes), sinon fallback manuel.
+ *
+ * Format : {scope}-{uuid}
+ * Exemples : "vente-550e8400-e29b-41d4-a716-446655440000"
+ *            "conversion-3f6c1234-..."
+ */
+export function buildIdempotencyKey(scope: string): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `${scope}-${crypto.randomUUID()}`;
+  }
+  // Fallback pour environnements sans crypto.randomUUID (rare en 2026)
+  const rand = () => Math.floor(Math.random() * 0x100000000).toString(16).padStart(8, "0");
+  return `${scope}-${rand()}-${rand()}-${rand()}-${rand()}`;
+}
+
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }

@@ -1,7 +1,14 @@
 """
 Throttling KONIS : limite login (anti-bruteforce) et création de ventes (anti-abus).
+
+Chaque throttle logue un WARNING via konis.alerts quand la limite est atteinte,
+permettant une surveillance centralisée sans dépendance externe.
 """
+import logging
+
 from rest_framework.throttling import SimpleRateThrottle
+
+_alert = logging.getLogger("konis.alerts")
 
 
 class LoginRateThrottle(SimpleRateThrottle):
@@ -15,6 +22,12 @@ class LoginRateThrottle(SimpleRateThrottle):
             "scope": self.scope,
             "ident": self.get_ident(request),
         }
+
+    def allow_request(self, request, view):
+        allowed = super().allow_request(request, view)
+        if not allowed:
+            _alert.warning("THROTTLE_429 scope=login ip=%s", self.get_ident(request))
+        return allowed
 
 
 class LoginIPRateThrottle(SimpleRateThrottle):
@@ -44,6 +57,13 @@ class VenteCreateRateThrottle(SimpleRateThrottle):
             "scope": self.scope,
             "ident": str(request.user.pk),
         }
+
+    def allow_request(self, request, view):
+        allowed = super().allow_request(request, view)
+        if not allowed:
+            user_id = getattr(getattr(request, "user", None), "pk", "?")
+            _alert.warning("THROTTLE_429 scope=ventes_create user_id=%s path=%s", user_id, request.path)
+        return allowed
 
 
 class MoutureCreateRateThrottle(SimpleRateThrottle):

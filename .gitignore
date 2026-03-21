@@ -36,3 +36,6 @@ Thumbs.db
 
 # Docker Compose overrides locaux (spécifiques à la machine du développeur)
 docker-compose.override.yml
+
+# DigitalOcean App Spec — contient des secrets de production (ne jamais committer)
+.do/app.yaml

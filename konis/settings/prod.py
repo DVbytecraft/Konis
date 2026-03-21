@@ -166,5 +166,24 @@ LOGGING = {
             "level": "INFO",
             "propagate": False,
         },
+        "konis.alerts": {
+            # Alertes métier critiques (stock bas, dépassement budget, throttle)
+            # Niveau WARNING minimum — toutes les alertes check_alerts passent ici.
+            "handlers": ["console"],
+            "level": "WARNING",
+            "propagate": False,
+        },
     },
 }
+
+# ── Notifications alertes (Slack/Email) ───────────────────────────────────────
+# SLACK_ALERTS_WEBHOOK_URL : webhook Slack pour notifications check_alerts.
+# Laisser vide = désactivé. Format : https://hooks.slack.com/services/T.../B.../...
+# Les alertes CRITICAL (ex: tickets_sans_idempotency_key, throttle répété) sont
+# envoyées immédiatement. Les alertes WARNING sont regroupées dans le résumé final.
+SLACK_ALERTS_WEBHOOK_URL = os.environ.get("SLACK_ALERTS_WEBHOOK_URL", "")
+
+# ALERTS_EMAIL_TO : adresse email pour les résumés d'alertes quotidiens (CSV).
+# Nécessite EMAIL_HOST / EMAIL_HOST_USER / EMAIL_HOST_PASSWORD dans l'environnement.
+# Laisser vide = désactivé.
+ALERTS_EMAIL_TO = os.environ.get("ALERTS_EMAIL_TO", "")

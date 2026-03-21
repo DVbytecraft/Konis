@@ -1,7 +1,7 @@
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, transaction
 from django.db.models import CheckConstraint, Q, UniqueConstraint
 
 from core.models import Lieu
@@ -9,7 +9,21 @@ from produits.models import Produit
 
 
 class Stock(models.Model):
-    """Stock d'un produit dans un lieu. Quantité toujours >= 0."""
+    """
+    Stock d'un produit dans un lieu.
+
+    Dual tracking sacs / kg :
+      - quantite     : nombre d'unités dans l'unité native du produit
+                       (sacs entiers si produit.unite='sac', kg sinon)
+      - quantite_kg  : kg issus de sacs fractionnés/convertis (toujours >= 0)
+                       significatif uniquement si produit.poids_par_sac est défini
+
+    Conversion : convertir_sacs_en_kg(n)
+      quantite -= n ; quantite_kg += n * produit.poids_par_sac
+      quantite reste en "sacs", quantite_kg en "kg"
+
+    Affichage boutique : "{quantite} sacs + {quantite_kg} kg"
+    """
     produit = models.ForeignKey(
         Produit, on_delete=models.CASCADE, related_name="stocks"
     )
@@ -19,15 +33,21 @@ class Stock(models.Model):
     quantite = models.DecimalField(
         max_digits=12, decimal_places=2, default=0
     )
+    quantite_kg = models.DecimalField(
+        max_digits=12, decimal_places=3, default=Decimal("0"),
+        verbose_name="Kg supplémentaires (sacs convertis)",
+        help_text="Kg issus de la conversion de sacs entiers. 0 si aucune conversion.",
+    )
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         verbose_name = "Stock"
         verbose_name_plural = "Stocks"
-        ordering = ["-id"]  # Évite UnorderedObjectListWarning lors de la pagination
+        ordering = ["-id"]
         constraints = [
             UniqueConstraint(fields=["produit", "lieu"], name="unique_stock_produit_lieu"),
-            CheckConstraint(condition=Q(quantite__gte=0), name="stock_quantite_positive"),
+            CheckConstraint(condition=Q(quantite__gte=0),    name="stock_quantite_positive"),
+            CheckConstraint(condition=Q(quantite_kg__gte=0), name="stock_quantite_kg_positive"),
         ]
         indexes = [
             models.Index(fields=["produit", "lieu"]),
@@ -35,14 +55,49 @@ class Stock(models.Model):
         ]
 
     def __str__(self):
+        pps = getattr(self.produit, "poids_par_sac", None)
+        if pps and self.quantite_kg > 0:
+            return f"{self.produit} @ {self.lieu}: {self.quantite} sacs + {self.quantite_kg} kg"
         return f"{self.produit} @ {self.lieu}: {self.quantite}"
 
     def save(self, *args, **kwargs):
         if self.quantite < 0:
-            raise ValidationError(
-                {"quantite": "Le stock ne peut pas être négatif."}
-            )
+            raise ValidationError({"quantite": "Le stock ne peut pas être négatif."})
+        if self.quantite_kg < 0:
+            raise ValidationError({"quantite_kg": "Le stock en kg ne peut pas être négatif."})
         super().save(*args, **kwargs)
+
+    def convertir_sacs_en_kg(self, nombre_sacs: int) -> Decimal:
+        """
+        Convertit nombre_sacs sacs en kg de façon atomique et sans race condition.
+        Décrémente quantite (sacs), incrémente quantite_kg.
+        Retourne le nombre de kg générés.
+        Lève ValueError si le produit n'a pas poids_par_sac défini,
+        ou si le stock en sacs est insuffisant.
+        """
+        if nombre_sacs <= 0:
+            raise ValueError("Le nombre de sacs à convertir doit être > 0.")
+        with transaction.atomic():
+            # Re-fetch avec SELECT FOR UPDATE pour sérialiser les conversions concurrentes.
+            stock = Stock.objects.select_for_update().get(pk=self.pk)
+            pps = stock.produit.poids_par_sac
+            if not pps:
+                raise ValueError(
+                    f"Le produit '{stock.produit.nom}' n'a pas de poids_par_sac défini."
+                )
+            if Decimal(str(nombre_sacs)) > stock.quantite:
+                raise ValueError(
+                    f"Stock insuffisant : {stock.quantite} sac(s) disponible(s), "
+                    f"demande {nombre_sacs}."
+                )
+            kg = Decimal(str(nombre_sacs)) * pps
+            stock.quantite    -= Decimal(str(nombre_sacs))
+            stock.quantite_kg += kg
+            stock.save(update_fields=["quantite", "quantite_kg", "updated_at"])
+            # Sync back so the caller sees the updated values.
+            self.quantite    = stock.quantite
+            self.quantite_kg = stock.quantite_kg
+        return kg
 
 
 class Transfert(models.Model):
@@ -195,11 +250,12 @@ class AchatMPSL(models.Model):
         return f"Achat MPSL {self.produit_nom} x {self.quantite} {self.unite} @ {self.lieu}"
 
     def save(self, *args, **kwargs):
-        if self.prix_unitaire and self.quantite:
-            from decimal import Decimal
-            calculated = Decimal(str(self.quantite)) * Decimal(str(self.prix_unitaire))
+        # Recalcul de prix_total si absent ou nul, quelle que soit la valeur de prix_unitaire.
+        # Couvre le cas achat gratuit (prix_unitaire=0) → prix_total=0 correct.
+        # Le service enregistrer_achat_mpsl pré-calcule toujours prix_total avant create().
+        if self.quantite is not None and self.prix_unitaire is not None:
             if not self.prix_total or self.prix_total == 0:
-                self.prix_total = calculated
+                self.prix_total = Decimal(str(self.quantite)) * Decimal(str(self.prix_unitaire))
         super().save(*args, **kwargs)
 
 
@@ -250,10 +306,8 @@ class AchatUsine(models.Model):
         return f"Achat {self.produit_nom} x {self.quantite} {self.unite} @ {self.lieu}"
 
     def save(self, *args, **kwargs):
-        # Auto-calculer prix_total si pas fourni ou incohérent
-        if self.prix_unitaire and self.quantite:
-            from decimal import Decimal
-            calculated = Decimal(str(self.quantite)) * Decimal(str(self.prix_unitaire))
+        # Recalcul de prix_total si absent ou nul, quelle que soit la valeur de prix_unitaire.
+        if self.quantite is not None and self.prix_unitaire is not None:
             if not self.prix_total or self.prix_total == 0:
-                self.prix_total = calculated
+                self.prix_total = Decimal(str(self.quantite)) * Decimal(str(self.prix_unitaire))
         super().save(*args, **kwargs)

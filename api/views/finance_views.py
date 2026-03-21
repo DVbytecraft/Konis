@@ -10,11 +10,10 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.viewsets import GenericViewSet
-from rest_framework.mixins import ListModelMixin, RetrieveModelMixin, CreateModelMixin
+from rest_framework.mixins import ListModelMixin, RetrieveModelMixin, CreateModelMixin, UpdateModelMixin
 
-from api.permissions import IsDafRole
 from api.throttling import FinanceCreateRateThrottle
-from api.permissions import IsDafRole, IsAdminRole
+from api.permissions import IsDafRole, IsAdminRole, DafReadOnlyMixin, IsCollecteurRole
 from api.serializers_finance import (
     CaisseTransactionCreateSerializer,
     CaisseTransactionSerializer,
@@ -22,6 +21,7 @@ from api.serializers_finance import (
     ClientFinanceSerializer,
     CollecteArgentCreateSerializer,
     CollecteArgentSerializer,
+    CollecteArgentUpdateSerializer,
     CreancierCreateSerializer,
     CreancierSerializer,
     DashboardGlobalSerializer,
@@ -100,7 +100,7 @@ class FinanceResumeView(APIView):
 # CRÉANCIERS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class CreancierViewSet(ListModelMixin, RetrieveModelMixin, CreateModelMixin, GenericViewSet):
+class CreancierViewSet(DafReadOnlyMixin, ListModelMixin, RetrieveModelMixin, CreateModelMixin, GenericViewSet):
     """
     GET    /api/finance/creanciers/       — liste
     POST   /api/finance/creanciers/       — créer
@@ -147,7 +147,7 @@ class CreancierViewSet(ListModelMixin, RetrieveModelMixin, CreateModelMixin, Gen
 # JOURNAUX PAYABLES
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class JournalPayableViewSet(ListModelMixin, RetrieveModelMixin, CreateModelMixin, GenericViewSet):
+class JournalPayableViewSet(DafReadOnlyMixin, ListModelMixin, RetrieveModelMixin, CreateModelMixin, GenericViewSet):
     """
     GET  /api/finance/journaux-payables/             — liste
     POST /api/finance/journaux-payables/             — créer journal
@@ -212,6 +212,33 @@ class JournalPayableViewSet(ListModelMixin, RetrieveModelMixin, CreateModelMixin
     @action(detail=True, methods=["post"])
     def paiement(self, request, pk=None):
         journal = self.get_object()
+        from django.conf import settings
+        from api.utils import (
+            apply_idempotency_warning,
+            find_idempotency_record,
+            get_idempotency_info,
+            record_idempotency_replay,
+            record_idempotency_success,
+        )
+        idempotency_key, missing, payload_hash, _ = get_idempotency_info(
+            request, operation="paiement_payable"
+        )
+        if missing and settings.IDEMPOTENCY_STRICT_MODE:
+            resp = Response({"detail": "Idempotency-Key requis."}, status=status.HTTP_400_BAD_REQUEST)
+            return apply_idempotency_warning(resp, True)
+        if idempotency_key:
+            record = find_idempotency_record(
+                key=idempotency_key,
+                operation="paiement_payable",
+                endpoint=request.path,
+            )
+            if record and record.extra.get("response"):
+                record_idempotency_replay(
+                    request, key=idempotency_key, operation="paiement_payable"
+                )
+                resp = Response(record.extra.get("response"))
+                return apply_idempotency_warning(resp, missing)
+
         ser = PaiementPayableCreateSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         d = ser.validated_data
@@ -226,9 +253,22 @@ class JournalPayableViewSet(ListModelMixin, RetrieveModelMixin, CreateModelMixin
                 notes=d.get("notes", ""),
             )
         except ErreurFinance as e:
-            return _err(e)
+            resp = _err(e)
+            return apply_idempotency_warning(resp, missing)
         journal.refresh_from_db()
-        return Response(JournalPayableSerializer(journal).data)
+        resp_data = JournalPayableSerializer(journal).data
+        if idempotency_key:
+            record_idempotency_success(
+                request=request,
+                key=idempotency_key,
+                operation="paiement_payable",
+                object_type="JournalPayable",
+                object_id=journal.pk,
+                payload_hash=payload_hash,
+                response_data=resp_data,
+            )
+        resp = Response(resp_data)
+        return apply_idempotency_warning(resp, missing)
 
     @action(detail=True, methods=["post"])
     def solder(self, request, pk=None):
@@ -245,7 +285,7 @@ class JournalPayableViewSet(ListModelMixin, RetrieveModelMixin, CreateModelMixin
 # CLIENTS FINANCE
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class ClientFinanceViewSet(ListModelMixin, RetrieveModelMixin, CreateModelMixin, GenericViewSet):
+class ClientFinanceViewSet(DafReadOnlyMixin, ListModelMixin, RetrieveModelMixin, CreateModelMixin, GenericViewSet):
     permission_classes = [IsDafRole]
     throttle_classes = [FinanceCreateRateThrottle]
 
@@ -286,7 +326,7 @@ class ClientFinanceViewSet(ListModelMixin, RetrieveModelMixin, CreateModelMixin,
 # JOURNAUX CRÉANCES
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class JournalCreanceViewSet(ListModelMixin, RetrieveModelMixin, CreateModelMixin, GenericViewSet):
+class JournalCreanceViewSet(DafReadOnlyMixin, ListModelMixin, RetrieveModelMixin, CreateModelMixin, GenericViewSet):
     """
     GET  /api/finance/journaux-creances/               — liste
     POST /api/finance/journaux-creances/               — créer
@@ -368,6 +408,33 @@ class JournalCreanceViewSet(ListModelMixin, RetrieveModelMixin, CreateModelMixin
     @action(detail=True, methods=["post"])
     def paiement(self, request, pk=None):
         journal = self.get_object()
+        from django.conf import settings
+        from api.utils import (
+            apply_idempotency_warning,
+            find_idempotency_record,
+            get_idempotency_info,
+            record_idempotency_replay,
+            record_idempotency_success,
+        )
+        idempotency_key, missing, payload_hash, _ = get_idempotency_info(
+            request, operation="paiement_creance"
+        )
+        if missing and settings.IDEMPOTENCY_STRICT_MODE:
+            resp = Response({"detail": "Idempotency-Key requis."}, status=status.HTTP_400_BAD_REQUEST)
+            return apply_idempotency_warning(resp, True)
+        if idempotency_key:
+            record = find_idempotency_record(
+                key=idempotency_key,
+                operation="paiement_creance",
+                endpoint=request.path,
+            )
+            if record and record.extra.get("response"):
+                record_idempotency_replay(
+                    request, key=idempotency_key, operation="paiement_creance"
+                )
+                resp = Response(record.extra.get("response"))
+                return apply_idempotency_warning(resp, missing)
+
         ser = PaiementCreanceCreateSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         d = ser.validated_data
@@ -382,9 +449,22 @@ class JournalCreanceViewSet(ListModelMixin, RetrieveModelMixin, CreateModelMixin
                 notes=d.get("notes", ""),
             )
         except ErreurFinance as e:
-            return _err(e)
+            resp = _err(e)
+            return apply_idempotency_warning(resp, missing)
         journal.refresh_from_db()
-        return Response(JournalCreanceSerializer(journal).data)
+        resp_data = JournalCreanceSerializer(journal).data
+        if idempotency_key:
+            record_idempotency_success(
+                request=request,
+                key=idempotency_key,
+                operation="paiement_creance",
+                object_type="JournalCreance",
+                object_id=journal.pk,
+                payload_hash=payload_hash,
+                response_data=resp_data,
+            )
+        resp = Response(resp_data)
+        return apply_idempotency_warning(resp, missing)
 
     @action(detail=True, methods=["post"])
     def solder(self, request, pk=None):
@@ -401,7 +481,7 @@ class JournalCreanceViewSet(ListModelMixin, RetrieveModelMixin, CreateModelMixin
 # EMPRUNTS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class EmpruntViewSet(ListModelMixin, RetrieveModelMixin, CreateModelMixin, GenericViewSet):
+class EmpruntViewSet(DafReadOnlyMixin, ListModelMixin, RetrieveModelMixin, CreateModelMixin, GenericViewSet):
     """
     GET  /api/finance/emprunts/                   — liste
     POST /api/finance/emprunts/                   — enregistrer emprunt
@@ -469,7 +549,7 @@ class EmpruntViewSet(ListModelMixin, RetrieveModelMixin, CreateModelMixin, Gener
 # CAISSE SUPRÊME
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class CaisseSupremeViewSet(ListModelMixin, CreateModelMixin, GenericViewSet):
+class CaisseSupremeViewSet(DafReadOnlyMixin, ListModelMixin, CreateModelMixin, GenericViewSet):
     """
     GET  /api/finance/caisse/ — liste des mouvements + solde courant
     POST /api/finance/caisse/ — enregistrer dépôt ou retrait
@@ -537,7 +617,7 @@ class CaisseSupremeViewSet(ListModelMixin, CreateModelMixin, GenericViewSet):
 # PROJETS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class ProjetViewSet(ListModelMixin, RetrieveModelMixin, CreateModelMixin, GenericViewSet):
+class ProjetViewSet(DafReadOnlyMixin, ListModelMixin, RetrieveModelMixin, CreateModelMixin, GenericViewSet):
     """
     GET  /api/finance/projets/               — liste
     POST /api/finance/projets/               — créer
@@ -642,26 +722,41 @@ class ProjetViewSet(ListModelMixin, RetrieveModelMixin, CreateModelMixin, Generi
 # COLLECTE ARGENT — Passages du collectionneur
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class CollecteViewSet(ListModelMixin, RetrieveModelMixin, CreateModelMixin, GenericViewSet):
+class CollecteViewSet(DafReadOnlyMixin, ListModelMixin, RetrieveModelMixin, CreateModelMixin, UpdateModelMixin, GenericViewSet):
     """
-    GET  /api/finance/collectes/        — liste (admin/DAF) avec filtre ?lieu_id= ?debut= ?fin=
-    POST /api/finance/collectes/        — enregistrer un passage collectionneur
-    GET  /api/finance/collectes/{id}/   — détail
+    GET   /api/finance/collectes/        — liste (filtrée par rôle)
+    POST  /api/finance/collectes/        — enregistrer un passage
+    GET   /api/finance/collectes/{id}/   — détail
+    PATCH /api/finance/collectes/{id}/   — correction (montant_trouve/pris/notes)
 
-    Sécurité :
-      - Accessible uniquement par admin et DAF (jamais par boutique)
-      - lieu_id est scopé par entreprise du user (IDOR impossible)
+    Isolation :
+      - Collecteur : voit uniquement SES collectes (collecteur=request.user)
+      - Admin / DAF / Comptable : voient toutes les collectes de l'entreprise
+    Filtres (admin/DAF uniquement) : ?lieu_id= ?debut= ?fin= ?collecteur_id=
     """
-    permission_classes = [IsDafRole | IsAdminRole]
+    permission_classes = [IsDafRole | IsAdminRole | IsCollecteurRole]
     throttle_classes = [FinanceCreateRateThrottle]
+    http_method_names = ["get", "post", "patch", "head", "options"]
 
     def get_queryset(self):
-        ent_id = self.request.user.entreprise_id
+        user = self.request.user
+        ent_id = user.entreprise_id
         if not ent_id:
             return CollecteArgent.objects.none()
+
         qs = CollecteArgent.objects.filter(
             lieu__entreprise_id=ent_id,
         ).select_related("lieu", "collecteur", "created_by", "depot_banque").order_by("-date_collecte", "-created_at")
+
+        # Isolation stricte : le collecteur ne voit que ses propres collectes
+        from core.models import CustomUser as CU
+        if user.role == CU.ROLE_COLLECTEUR:
+            qs = qs.filter(collecteur=user)
+        else:
+            # Admin/DAF peuvent filtrer par collecteur
+            collecteur_id = self.request.query_params.get("collecteur_id")
+            if collecteur_id:
+                qs = qs.filter(collecteur_id=collecteur_id)
 
         lieu_id = self.request.query_params.get("lieu_id")
         if lieu_id:
@@ -677,17 +772,46 @@ class CollecteViewSet(ListModelMixin, RetrieveModelMixin, CreateModelMixin, Gene
         return qs
 
     def get_serializer_class(self):
+        if self.action in ("update", "partial_update"):
+            return CollecteArgentUpdateSerializer
         return CollecteArgentSerializer
 
     def create(self, request, *args, **kwargs):
+        from django.conf import settings
+        from api.utils import (
+            apply_idempotency_warning,
+            find_idempotency_record,
+            get_idempotency_info,
+            record_idempotency_replay,
+            record_idempotency_success,
+        )
+        idempotency_key, missing, payload_hash, _ = get_idempotency_info(
+            request, operation="collecte_create"
+        )
+        if missing and settings.IDEMPOTENCY_STRICT_MODE:
+            resp = Response({"detail": "Idempotency-Key requis."}, status=status.HTTP_400_BAD_REQUEST)
+            return apply_idempotency_warning(resp, True)
+        if idempotency_key:
+            record = find_idempotency_record(
+                key=idempotency_key,
+                operation="collecte_create",
+                endpoint=request.path,
+            )
+            if record and record.extra.get("response"):
+                record_idempotency_replay(
+                    request, key=idempotency_key, operation="collecte_create"
+                )
+                resp = Response(record.extra.get("response"))
+                return apply_idempotency_warning(resp, missing)
+
         if not request.user.entreprise_id:
-            return Response({"detail": "Entreprise requise."}, status=status.HTTP_403_FORBIDDEN)
+            resp = Response({"detail": "Entreprise requise."}, status=status.HTTP_403_FORBIDDEN)
+            return apply_idempotency_warning(resp, missing)
 
         ser = CollecteArgentCreateSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         d = ser.validated_data
 
-        # Scoper le lieu par entreprise (anti-IDOR)
         try:
             lieu = Lieu.objects.get(
                 pk=d["lieu_id"],
@@ -695,7 +819,8 @@ class CollecteViewSet(ListModelMixin, RetrieveModelMixin, CreateModelMixin, Gene
                 type_lieu=Lieu.TYPE_MAGASIN,
             )
         except Lieu.DoesNotExist:
-            return Response({"detail": "Boutique introuvable ou non autorisée."}, status=status.HTTP_400_BAD_REQUEST)
+            resp = Response({"detail": "Boutique introuvable ou non autorisée."}, status=status.HTTP_400_BAD_REQUEST)
+            return apply_idempotency_warning(resp, missing)
 
         entreprise = request.user.entreprise if d.get("deposer_en_banque") else None
 
@@ -712,12 +837,51 @@ class CollecteViewSet(ListModelMixin, RetrieveModelMixin, CreateModelMixin, Gene
                 entreprise=entreprise,
             )
         except ErreurFinance as e:
+            resp = _err(e)
+            return apply_idempotency_warning(resp, missing)
+
+        collecte_qs = CollecteArgent.objects.select_related(
+            "lieu", "collecteur", "created_by", "depot_banque"
+        ).get(pk=collecte.pk)
+        resp_data = CollecteArgentSerializer(collecte_qs).data
+        if idempotency_key:
+            record_idempotency_success(
+                request=request,
+                key=idempotency_key,
+                operation="collecte_create",
+                object_type="CollecteArgent",
+                object_id=collecte.pk,
+                payload_hash=payload_hash,
+                response_data=resp_data,
+            )
+        resp = Response(resp_data, status=status.HTTP_201_CREATED)
+        return apply_idempotency_warning(resp, missing)
+
+    def partial_update(self, request, *args, **kwargs):
+        collecte = self.get_object()
+
+        # Le collecteur ne peut corriger que SES propres collectes
+        from core.models import CustomUser as CU
+        if request.user.role == CU.ROLE_COLLECTEUR and collecte.collecteur_id != request.user.pk:
+            return Response({"detail": "Vous ne pouvez modifier que vos propres collectes."}, status=status.HTTP_403_FORBIDDEN)
+
+        ser = CollecteArgentUpdateSerializer(data=request.data, partial=True)
+        ser.is_valid(raise_exception=True)
+
+        from finance.services import modifier_collecte
+        try:
+            collecte = modifier_collecte(
+                collecte=collecte,
+                updated_by=request.user,
+                **ser.validated_data,
+            )
+        except ErreurFinance as e:
             return _err(e)
 
         collecte_qs = CollecteArgent.objects.select_related(
             "lieu", "collecteur", "created_by", "depot_banque"
         ).get(pk=collecte.pk)
-        return Response(CollecteArgentSerializer(collecte_qs).data, status=status.HTTP_201_CREATED)
+        return Response(CollecteArgentSerializer(collecte_qs).data)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

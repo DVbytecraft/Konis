@@ -17,20 +17,26 @@ import {
   Keyboard,
   Package,
 } from "lucide-react";
-import { cn, fmt } from "@/lib/utils";
+import { buildIdempotencyKey, cn, fmt } from "@/lib/utils";
 
 interface ProduitWithStock {
   id: number;
   nom: string;
   code: string | null;
   unite: string;
-  quantite_dispo: number;
+  quantite_sac: number;
+  quantite_kg: number;
+  quantite_kg_total: number;
+  poids_par_sac: number | null;
+  has_stock: boolean;
+  stock_label: string;
 }
 
 interface LignePanier {
   produit_id: number;
   produit_nom: string;
   produit_unite: string;
+  unite_vente: string;
   quantite: number;
   prix_unitaire: number;
 }
@@ -45,6 +51,7 @@ interface TicketReponse {
     quantite: number;
     prix_unitaire: number;
     total: number;
+    unite?: string;
   }>;
   mouture: boolean;
   cout_mouture: number;
@@ -52,7 +59,19 @@ interface TicketReponse {
   prix_mouture_tonne: number | null;
   prix_mouture_sac: number | null;
   montant_total: number;
+  montant_cash: number;
+  montant_credit: number;
+  type_vente: "cash" | "credit" | "partiel";
+  client_nom: string | null;
   produit_apporte?: string;
+}
+
+type TypeVente = "cash" | "credit" | "partiel";
+
+interface ClientFinance {
+  id: number;
+  nom: string;
+  contact: string;
 }
 
 export default function BoutiqueCaissePage() {
@@ -71,6 +90,15 @@ export default function BoutiqueCaissePage() {
   const [prixMoutureKg, setPrixMoutureKg] = useState("");
   const [prixMoutureTonne, setPrixMoutureTonne] = useState("");
   const [prixMoutureSac, setPrixMoutureSac] = useState("");
+  // ── Type de vente ─────────────────────────────────────────────────────────
+  const [typeVente, setTypeVente] = useState<TypeVente>("cash");
+  const [montantCash, setMontantCash] = useState(""); // acompte si partiel
+  const [clientId, setClientId] = useState<number | null>(null);
+  const [clientSearch, setClientSearch] = useState("");
+  const [clients, setClients] = useState<ClientFinance[]>([]);
+  const [clientsLoading, setClientsLoading] = useState(false);
+  const [showClientDropdown, setShowClientDropdown] = useState(false);
+
   const [ventesDuJour, setVentesDuJour] = useState<
     Array<{ id: number; numero: string; date: string; total: number }>
   >([]);
@@ -83,11 +111,28 @@ export default function BoutiqueCaissePage() {
       (p.code && p.code.toLowerCase().includes(search.toLowerCase()))
   );
 
+  const getDefaultUnite = useCallback((p: ProduitWithStock) => {
+    const isSac = (p.unite || "").toLowerCase().includes("sac");
+    if (isSac) {
+      if (p.quantite_sac > 0) return "sac";
+      if (p.quantite_kg > 0) return "kg";
+      return "sac";
+    }
+    return p.unite || "kg";
+  }, []);
+
+  const getMaxDispo = useCallback((p: ProduitWithStock, unite: string) => {
+    const u = (unite || "").toLowerCase();
+    if (u.includes("kg")) return p.quantite_kg_total || 0;
+    if (u.includes("sac")) return p.quantite_sac || 0;
+    return p.quantite_sac || 0;
+  }, []);
+
   const chargerDonnees = useCallback(async () => {
     try {
       setLoading(true);
       interface Paginated<T> { results: T[] }
-      type StockEntry = { produit: number; quantite: string };
+      type StockEntry = { produit: number; quantite: string; quantite_kg?: string; poids_par_sac?: string | null };
       type ProduitEntry = { id: number; nom: string; code: string | null; unite: string };
       type VenteEntry = { id: number; numero: string; date: string; montant_total?: number; lignes?: Array<{ quantite: number; prix_unitaire: number }> };
       const [produitsRes, stockRes, ventesRes] = await Promise.all([
@@ -95,16 +140,43 @@ export default function BoutiqueCaissePage() {
         apiFetch<Paginated<StockEntry> | StockEntry[]>("/boutique/stock/"),
         apiFetch<Paginated<VenteEntry> | VenteEntry[]>("/boutique/ventes/").catch(() => [] as VenteEntry[]),
       ]);
-      const stockByProduit: Record<number, number> = {};
+      const stockByProduit: Record<number, { quantite_sac: number; quantite_kg: number; poids_par_sac: number | null }> = {};
       const stockArray = Array.isArray(stockRes) ? stockRes : stockRes.results;
       stockArray.forEach((s) => {
-        stockByProduit[s.produit] = parseFloat(s.quantite);
+        const quantiteSac = parseFloat(s.quantite);
+        const quantiteKg = parseFloat((s.quantite_kg ?? "0") as string);
+        const pps = s.poids_par_sac !== null && s.poids_par_sac !== undefined
+          ? parseFloat(String(s.poids_par_sac))
+          : null;
+        stockByProduit[s.produit] = { quantite_sac: quantiteSac, quantite_kg: quantiteKg, poids_par_sac: pps };
       });
       const produitArray = Array.isArray(produitsRes) ? produitsRes : produitsRes.results;
-      const liste = produitArray.map((p) => ({
-        ...p,
-        quantite_dispo: stockByProduit[p.id] ?? 0,
-      }));
+      const liste = produitArray.map((p) => {
+        const stock = stockByProduit[p.id] ?? { quantite_sac: 0, quantite_kg: 0, poids_par_sac: null };
+        const isSac = (p.unite || "").toLowerCase().includes("sac");
+        const quantiteKgTotal = isSac
+          ? (stock.poids_par_sac ? stock.quantite_kg + stock.quantite_sac * stock.poids_par_sac : stock.quantite_kg)
+          : stock.quantite_sac;
+        const hasStock = stock.quantite_sac > 0 || stock.quantite_kg > 0;
+        const stockLabel = isSac
+          ? (stock.quantite_sac > 0 && stock.quantite_kg > 0)
+            ? `${stock.quantite_sac} sacs + ${stock.quantite_kg} kg`
+            : (stock.quantite_sac > 0)
+              ? `${stock.quantite_sac} sacs`
+              : (stock.quantite_kg > 0)
+                ? `${stock.quantite_kg} kg`
+                : "0"
+          : `${stock.quantite_sac} ${p.unite}`;
+        return {
+          ...p,
+          quantite_sac: stock.quantite_sac,
+          quantite_kg: stock.quantite_kg,
+          quantite_kg_total: quantiteKgTotal,
+          poids_par_sac: stock.poids_par_sac,
+          has_stock: hasStock,
+          stock_label: stockLabel,
+        };
+      });
       setProduits(liste);
 
       const ventesList = Array.isArray(ventesRes) ? ventesRes : ventesRes.results;
@@ -143,17 +215,36 @@ export default function BoutiqueCaissePage() {
     setSelectedIndex(0);
   }, [search]);
 
+  // Charger clients quand la recherche change (crédit / partiel)
+  useEffect(() => {
+    if (typeVente === "cash") return;
+    if (!clientSearch.trim()) { setClients([]); return; }
+    const t = setTimeout(async () => {
+      setClientsLoading(true);
+      try {
+        interface ClientPage { results: ClientFinance[] }
+        const res = await apiFetch<ClientPage | ClientFinance[]>(`/boutique/clients/?search=${encodeURIComponent(clientSearch)}`);
+        setClients(Array.isArray(res) ? res : res.results);
+      } catch { setClients([]); }
+      finally { setClientsLoading(false); }
+    }, 300);
+    return () => clearTimeout(t);
+  }, [clientSearch, typeVente]);
+
   const ajouterAuPanier = useCallback(
     (p: ProduitWithStock, qte: number = 1, prix: number = 0) => {
-      if (p.quantite_dispo < 1) return;
+      if (!p.has_stock) return;
       const existant = panier.find((l) => l.produit_id === p.id);
+      const uniteVente = existant?.unite_vente ?? getDefaultUnite(p);
+      const maxDispo = getMaxDispo(p, uniteVente);
+      if (maxDispo < 1) return;
       if (existant) {
         setPanier((prev) =>
           prev.map((l) =>
             l.produit_id === p.id
               ? {
                   ...l,
-                  quantite: Math.min(l.quantite + qte, p.quantite_dispo),
+                  quantite: Math.min(l.quantite + qte, maxDispo),
                   prix_unitaire: l.prix_unitaire || prix,
                 }
               : l
@@ -166,7 +257,8 @@ export default function BoutiqueCaissePage() {
             produit_id: p.id,
             produit_nom: p.nom,
             produit_unite: p.unite,
-            quantite: Math.min(qte, p.quantite_dispo),
+            unite_vente: uniteVente,
+            quantite: Math.min(qte, maxDispo),
             prix_unitaire: prix,
           },
         ]);
@@ -174,18 +266,32 @@ export default function BoutiqueCaissePage() {
       setSearch("");
       searchInputRef.current?.focus();
     },
-    [panier]
+    [panier, getDefaultUnite, getMaxDispo]
   );
 
   const modifierLigne = useCallback(
-    (produit_id: number, field: "quantite" | "prix_unitaire", value: number) => {
+    (produit_id: number, field: "quantite" | "prix_unitaire" | "unite_vente", value: number | string) => {
       setPanier((prev) =>
-        prev.map((l) =>
-          l.produit_id === produit_id ? { ...l, [field]: value } : l
-        )
+        prev.map((l) => {
+          if (l.produit_id !== produit_id) return l;
+          const produit = produits.find((p) => p.id === produit_id);
+          if (!produit) return { ...l, [field]: value } as LignePanier;
+          if (field === "unite_vente") {
+            const unite = String(value);
+            const max = getMaxDispo(produit, unite);
+            const newQuantite = Math.min(l.quantite, max || l.quantite);
+            return { ...l, unite_vente: unite, quantite: newQuantite };
+          }
+          if (field === "quantite") {
+            const max = getMaxDispo(produit, l.unite_vente);
+            const q = Number(value) || 0;
+            return { ...l, quantite: max ? Math.min(q, max) : q };
+          }
+          return { ...l, prix_unitaire: Number(value) || 0 };
+        })
       );
     },
-    []
+    [produits, getMaxDispo]
   );
 
   const retirerLigne = useCallback((produit_id: number) => {
@@ -199,7 +305,7 @@ export default function BoutiqueCaissePage() {
 
   // Calcul mouture en temps réel selon unité du produit
   const coutMouture = panier.reduce((acc, l) => {
-    const unite = (l.produit_unite || "").toLowerCase();
+    const unite = (l.unite_vente || l.produit_unite || "").toLowerCase();
     if (unite.includes("kg") && prixMoutureKg) return acc + l.quantite * +prixMoutureKg;
     if (unite.includes("tonne") && prixMoutureTonne) return acc + l.quantite * +prixMoutureTonne;
     if (unite.includes("sac") && prixMoutureSac) return acc + l.quantite * +prixMoutureSac;
@@ -225,34 +331,63 @@ export default function BoutiqueCaissePage() {
       setErreur("Prix à 0 FCFA non autorisé : " + lignesZero.map((l) => l.produit_nom).join(", ") + ". Saisissez le prix réel.");
       return;
     }
+    if ((typeVente === "credit" || typeVente === "partiel") && !clientId) {
+      setErreur("Sélectionnez un client pour une vente à crédit ou partielle.");
+      return;
+    }
+    if (typeVente === "partiel" && (!montantCash || Number(montantCash) < 0)) {
+      setErreur("Saisissez l'acompte (montant encaissé) pour une vente partielle.");
+      return;
+    }
     setErreur("");
     isPayingRef.current = true;
     setPaiementEnCours(true);
     try {
+      const body: Record<string, unknown> = {
+        lignes: panier.map((l) => ({
+          produit: l.produit_id,
+          quantite: l.quantite,
+          prix_unitaire: l.prix_unitaire,
+          unite: l.unite_vente,
+        })),
+        type_vente: typeVente,
+        mouture,
+        prix_mouture_kg: mouture && prixMoutureKg ? prixMoutureKg : null,
+        prix_mouture_tonne: mouture && prixMoutureTonne ? prixMoutureTonne : null,
+        prix_mouture_sac: mouture && prixMoutureSac ? prixMoutureSac : null,
+      };
+      if (typeVente === "credit" || typeVente === "partiel") {
+        body.client_id = clientId;
+      }
+      if (typeVente === "partiel") {
+        body.montant_cash = montantCash;
+      }
       const ticket = await apiFetch<TicketReponse>("/boutique/ventes/", {
         method: "POST",
-        body: JSON.stringify({
-          lignes: panier.map((l) => ({
-            produit: l.produit_id,
-            quantite: l.quantite,
-            prix_unitaire: l.prix_unitaire,
-          })),
-          mouture,
-          prix_mouture_kg: mouture && prixMoutureKg ? prixMoutureKg : null,
-          prix_mouture_tonne: mouture && prixMoutureTonne ? prixMoutureTonne : null,
-          prix_mouture_sac: mouture && prixMoutureSac ? prixMoutureSac : null,
-        }),
+        headers: { "Idempotency-Key": buildIdempotencyKey("vente") },
+        body: JSON.stringify(body),
       });
       setTicketImprimer(ticket);
       setPanier([]);
+      // Reset type vente après chaque vente
+      setTypeVente("cash");
+      setClientId(null);
+      setClientSearch("");
+      setMontantCash("");
       chargerDonnees();
     } catch (e) {
-      setErreur(e instanceof Error ? e.message : "Erreur paiement");
+      const msg = e instanceof Error ? e.message : "Erreur paiement";
+      // Erreur STRICT_MODE : l'idempotency key n'a pas été transmise (anomalie technique)
+      if (msg.includes("Idempotency-Key")) {
+        setErreur("Erreur technique : impossible d'enregistrer la vente (clé de sécurité manquante). Rechargez la page et réessayez.");
+      } else {
+        setErreur(msg);
+      }
     } finally {
       isPayingRef.current = false;
       setPaiementEnCours(false);
     }
-  }, [panier, mouture, prixMoutureKg, prixMoutureTonne, prixMoutureSac, chargerDonnees]);
+  }, [panier, mouture, prixMoutureKg, prixMoutureTonne, prixMoutureSac, typeVente, clientId, montantCash, chargerDonnees]);
 
   const fermerTicket = useCallback(() => setTicketImprimer(null), []);
 
@@ -290,7 +425,7 @@ export default function BoutiqueCaissePage() {
       if (e.key === "Enter" && !(e.target as HTMLElement).closest("input[type=\"number\"]")) {
         e.preventDefault();
         const p = produitsFiltres[selectedIndex];
-        if (p && p.quantite_dispo > 0) ajouterAuPanier(p);
+        if (p && p.has_stock) ajouterAuPanier(p);
         return;
       }
       // Flèches : changer sélection dans la liste produits
@@ -470,8 +605,9 @@ export default function BoutiqueCaissePage() {
                   <li key={t.id} className="flex justify-between">
                     <span className="font-mono text-green-700 dark:text-green-300">{t.numero}</span>
                     <span className="font-medium">{fmt(t.total)}</span>
-                  </li>
-                ))}
+                    </li>
+                  );
+                })}
                 {ventesDuJour.length > 8 && (
                   <li className="text-muted-foreground">…</li>
                 )}
@@ -497,21 +633,21 @@ export default function BoutiqueCaissePage() {
                 </thead>
                 <tbody>
                   {produits
-                    .filter((p) => p.quantite_dispo > 0)
+                    .filter((p) => p.has_stock)
                     .slice(0, 10)
                     .map((p) => (
                       <tr key={p.id} className="border-b">
                         <td className="py-0.5 truncate max-w-[140px]">{p.nom}</td>
-                        <td className={`py-0.5 text-right font-mono font-medium ${p.quantite_dispo < 5 ? "text-red-600 dark:text-red-400" : "text-green-700 dark:text-green-300"}`}>
-                          {p.quantite_dispo} {p.unite}
+                        <td className={`py-0.5 text-right font-mono font-medium ${p.quantite_sac < 5 ? "text-red-600 dark:text-red-400" : "text-green-700 dark:text-green-300"}`}>
+                          {p.stock_label}
                         </td>
                       </tr>
-                    ))}
+                    );})}
                 </tbody>
               </table>
-              {produits.filter((p) => p.quantite_dispo > 0).length > 10 && (
+              {produits.filter((p) => p.has_stock).length > 10 && (
                 <p className="text-xs text-muted-foreground mt-1">
-                  + {produits.filter((p) => p.quantite_dispo > 0).length - 10} autres
+                  + {produits.filter((p) => p.has_stock).length - 10} autres
                 </p>
               )}
             </div>
@@ -561,9 +697,9 @@ export default function BoutiqueCaissePage() {
                         i === selectedIndex
                           ? "bg-primary text-primary-foreground"
                           : "hover:bg-muted",
-                        p.quantite_dispo < 1 && "opacity-50"
+                        !p.has_stock && "opacity-50"
                       )}
-                      onClick={() => p.quantite_dispo >= 1 && ajouterAuPanier(p)}
+                      onClick={() => p.has_stock && ajouterAuPanier(p)}
                     >
                       <span className="font-medium truncate flex-1">
                         {p.nom}
@@ -574,9 +710,9 @@ export default function BoutiqueCaissePage() {
                         )}
                       </span>
                       <span className="text-sm shrink-0 ml-2">
-                        Stock: {p.quantite_dispo} {p.unite}
+                        Stock: {p.stock_label}
                       </span>
-                      {p.quantite_dispo >= 1 && (
+                      {p.has_stock && (
                         <Plus className="h-4 w-4 shrink-0 ml-1 opacity-70" />
                       )}
                     </li>
@@ -614,16 +750,20 @@ export default function BoutiqueCaissePage() {
               </p>
             ) : (
               <ul className="space-y-2 max-h-[240px] overflow-y-auto">
-                {panier.map((l) => (
-                  <li
-                    key={l.produit_id}
-                    className="flex items-center gap-2 text-sm border-b pb-2"
-                  >
+                {panier.map((l) => {
+                  const produitRef = produits.find((p) => p.id === l.produit_id);
+                  const isSac = (produitRef?.unite || l.produit_unite || "").toLowerCase().includes("sac");
+                  const canKg = isSac && (produitRef?.poids_par_sac ?? 0) > 0;
+                  return (
+                    <li
+                      key={l.produit_id}
+                      className="flex items-center gap-2 text-sm border-b pb-2"
+                    >
                     <div className="flex-1 min-w-0">
                       <p className="font-medium truncate">
                         {l.produit_nom}{" "}
                         <span className="text-xs font-normal text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full">
-                          {l.produit_unite}
+                          {l.unite_vente}
                         </span>
                       </p>
                       <div className="flex gap-2 mt-0.5">
@@ -641,6 +781,18 @@ export default function BoutiqueCaissePage() {
                           }
                           className="w-14 rounded border border-input px-1.5 py-0.5 text-xs"
                         />
+                        {canKg ? (
+                          <select
+                            className="w-16 rounded border border-input px-1 py-0.5 text-xs"
+                            value={l.unite_vente}
+                            onChange={(e) => modifierLigne(l.produit_id, "unite_vente", e.target.value)}
+                          >
+                            <option value="sac">sac</option>
+                            <option value="kg">kg</option>
+                          </select>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">{l.unite_vente}</span>
+                        )}
                         <input
                           type="number"
                           min={0}
@@ -669,8 +821,9 @@ export default function BoutiqueCaissePage() {
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
-                  </li>
-                ))}
+                    </li>
+                  );
+                })}
               </ul>
             )}
 
@@ -725,7 +878,7 @@ export default function BoutiqueCaissePage() {
                             Détail par produit :
                           </p>
                           {panier.map((l) => {
-                            const u = (l.produit_unite || "").toLowerCase();
+                            const u = (l.unite_vente || l.produit_unite || "").toLowerCase();
                             let prix = 0;
                             let label = "";
                             if (u.includes("kg") && prixMoutureKg) { prix = +prixMoutureKg; label = "kg"; }
@@ -772,13 +925,110 @@ export default function BoutiqueCaissePage() {
                     <span className="text-lg text-green-700 dark:text-green-300">{fmt(totalGeneral)} FCFA</span>
                   </div>
                 </div>
+                {/* Type de vente */}
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Mode de paiement</p>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {(["cash", "credit", "partiel"] as TypeVente[]).map((t) => (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => { setTypeVente(t); setClientId(null); setClientSearch(""); setMontantCash(""); }}
+                        className={cn(
+                          "rounded border py-1.5 text-xs font-semibold transition-colors",
+                          typeVente === t
+                            ? t === "cash"
+                              ? "bg-green-600 text-white border-green-600"
+                              : t === "credit"
+                              ? "bg-red-500 text-white border-red-500"
+                              : "bg-amber-500 text-white border-amber-500"
+                            : "bg-background hover:bg-muted border-input"
+                        )}
+                      >
+                        {t === "cash" ? "Cash" : t === "credit" ? "Crédit" : "Partiel"}
+                      </button>
+                    );})}
+                  </div>
+
+                  {/* Recherche client (crédit ou partiel) */}
+                  {(typeVente === "credit" || typeVente === "partiel") && (
+                    <div className="relative">
+                      <Input
+                        placeholder="Rechercher un client…"
+                        value={clientSearch}
+                        onChange={(e) => {
+                          setClientSearch(e.target.value);
+                          setClientId(null);
+                          setShowClientDropdown(true);
+                        }}
+                        onFocus={() => setShowClientDropdown(true)}
+                        className="h-8 text-xs"
+                      />
+                      {clientId && (
+                        <p className="text-xs text-green-700 dark:text-green-300 mt-0.5 pl-1">
+                          ✓ {clientSearch}
+                        </p>
+                      )}
+                      {showClientDropdown && clients.length > 0 && !clientId && (
+                        <ul className="absolute z-50 top-full left-0 right-0 mt-0.5 border rounded-md bg-popover shadow-md max-h-40 overflow-y-auto">
+                          {clientsLoading ? (
+                            <li className="px-3 py-2 text-xs text-muted-foreground">Chargement…</li>
+                          ) : (
+                            clients.map((c) => (
+                              <li
+                                key={c.id}
+                                className="px-3 py-1.5 text-xs hover:bg-muted cursor-pointer"
+                                onMouseDown={(e) => {
+                                  e.preventDefault();
+                                  setClientId(c.id);
+                                  setClientSearch(c.nom);
+                                  setShowClientDropdown(false);
+                                }}
+                              >
+                                <span className="font-medium">{c.nom}</span>
+                                {c.contact && <span className="text-muted-foreground ml-2">{c.contact}</span>}
+                              </li>
+                            ))
+                          )}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Acompte (partiel uniquement) */}
+                  {typeVente === "partiel" && (
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      placeholder={`Acompte encaissé (max ${fmt(totalGeneral)} FCFA)`}
+                      value={montantCash}
+                      onChange={(e) => setMontantCash(e.target.value)}
+                      className="h-8 text-xs"
+                    />
+                  )}
+                </div>
+
                 <Button
-                  className="w-full h-11 bg-green-600 hover:bg-green-700 text-white"
+                  className={cn(
+                    "w-full h-11 text-white",
+                    typeVente === "cash"
+                      ? "bg-green-600 hover:bg-green-700"
+                      : typeVente === "credit"
+                      ? "bg-red-500 hover:bg-red-600"
+                      : "bg-amber-500 hover:bg-amber-600"
+                  )}
                   onClick={payer}
                   disabled={paiementEnCours}
                 >
                   <CreditCard className="h-4 w-4 mr-2" />
-                  {paiementEnCours ? "Enregistrement…" : "Payer (F4)"}
+                  {paiementEnCours
+                    ? "Enregistrement…"
+                    : typeVente === "cash"
+                    ? "Payer Cash (F4)"
+                    : typeVente === "credit"
+                    ? "Vente à Crédit (F4)"
+                    : "Vente Partielle (F4)"}
                 </Button>
               </>
             )}
