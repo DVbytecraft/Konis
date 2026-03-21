@@ -396,7 +396,7 @@ export default function FinanceDashboardPage() {
           )}
 
           {/* ── Collectes ────────────────────────────────────────────────────── */}
-          {global && (global.collectes_par_boutique.length > 0 || parseFloat(global.total_collecte_pris) > 0) && (() => {
+          {global && ((Array.isArray(global.collectes_par_boutique) && global.collectes_par_boutique.length > 0) || parseFloat(global.total_collecte_pris) > 0) && (() => {
             const totalPris   = parseFloat(global.total_collecte_pris);
             const totalLaisse = parseFloat(global.total_collecte_laisse);
             return (
@@ -423,7 +423,7 @@ export default function FinanceDashboardPage() {
                     </CardContent>
                   </Card>
                 </div>
-                {global.collectes_par_boutique.length > 0 && (
+                {Array.isArray(global.collectes_par_boutique) && global.collectes_par_boutique.length > 0 && (
                   <div className="overflow-x-auto rounded-md border">
                     <table className="w-full text-xs sm:text-sm">
                       <thead>

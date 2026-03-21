@@ -92,8 +92,8 @@ export default function AdminRapportPage() {
         apiFetch<BilanData>(`/comptable/bilan/${qs}`),
         apiFetch<Paginated<AchatMPSL> | AchatMPSL[]>(`/mpsl/achats/${qs}`).catch(() => [] as AchatMPSL[]),
       ]);
-      setBoutiques(b);
-      setUsines(u);
+      setBoutiques(Array.isArray(b) ? b : (b as { results?: BoutiqueRapport[] }).results ?? []);
+      setUsines(Array.isArray(u) ? u : (u as { results?: UsineRapport[] }).results ?? []);
       setTickets(Array.isArray(t) ? t : t.results);
       setBilan(bl);
       setAchatsMpsl(Array.isArray(am) ? am : (am as Paginated<AchatMPSL>).results);

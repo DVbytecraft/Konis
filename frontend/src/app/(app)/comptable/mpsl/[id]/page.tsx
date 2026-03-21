@@ -55,7 +55,14 @@ export default function DetailMPSLPage() {
   useEffect(() => {
     const qs = searchParams.toString() ? `?${searchParams.toString()}` : "";
     apiFetch(`/comptable/rapport-mpsl/${id}/${qs}`)
-      .then((d) => setData(d as DetailMPSL))
+      .then((d) => {
+        const raw = d as DetailMPSL;
+        setData({
+          ...raw,
+          achats: Array.isArray(raw.achats) ? raw.achats : [],
+          dettes_en_cours: Array.isArray(raw.dettes_en_cours) ? raw.dettes_en_cours : [],
+        });
+      })
       .catch(() => setData(null))
       .finally(() => setLoading(false));
   }, [id, searchParams]);

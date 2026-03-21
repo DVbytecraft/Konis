@@ -109,9 +109,11 @@ export default function ComptablePage() {
         apiFetch(`/comptable/ventes/${qs}`),
         apiFetch(`/comptable/bilan/${qs}`),
       ]);
-      setBoutiques(b as BoutiqueRapport[]);
-      setMpsl(m as MPSLRapport[]);
-      setTickets((t as { results?: Ticket[] }).results ?? (t as Ticket[]));
+      const bArr = Array.isArray(b) ? (b as BoutiqueRapport[]) : ((b as { results?: BoutiqueRapport[] }).results ?? []);
+      const mArr = Array.isArray(m) ? (m as MPSLRapport[]) : ((m as { results?: MPSLRapport[] }).results ?? []);
+      setBoutiques(bArr);
+      setMpsl(mArr);
+      setTickets(Array.isArray(t) ? (t as Ticket[]) : ((t as { results?: Ticket[] }).results ?? []));
       setBilan(bl as BilanData);
     } catch {
       // silencieux
