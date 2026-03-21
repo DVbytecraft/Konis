@@ -8,12 +8,52 @@ from produits.models import Produit
 
 
 class Ticket(models.Model):
-    """Ticket de vente (ticket thermique) par lieu. Numéro obligatoire, unique (lieu, numero)."""
+    """
+    Ticket de vente (ticket thermique) par lieu.
+    Type de vente :
+      - cash    : encaissé intégralement → montant_cash = montant_total, montant_credit = 0
+      - credit  : tout à crédit          → montant_cash = 0, montant_credit = montant_total
+      - partiel : acompte + solde        → montant_cash + montant_credit = montant_total
+    Numéro obligatoire, unique (lieu, numero).
+    """
+    # ── Types de vente ──────────────────────────────────────────────────────
+    TYPE_CASH    = "cash"
+    TYPE_CREDIT  = "credit"
+    TYPE_PARTIEL = "partiel"
+    TYPE_VENTE_CHOICES = [
+        (TYPE_CASH,    "Cash"),
+        (TYPE_CREDIT,  "Crédit"),
+        (TYPE_PARTIEL, "Partiel"),
+    ]
+
     lieu = models.ForeignKey(
         Lieu, on_delete=models.PROTECT, related_name="tickets"
     )
     date = models.DateTimeField(auto_now_add=True)
     numero = models.CharField(max_length=50)
+
+    # ── Type de vente & répartition financière ──────────────────────────────
+    type_vente = models.CharField(
+        max_length=10, choices=TYPE_VENTE_CHOICES, default=TYPE_CASH, db_index=True,
+        help_text="Cash = encaissé; Crédit = tout à créer; Partiel = acompte + solde.",
+    )
+    montant_cash = models.DecimalField(
+        max_digits=14, decimal_places=2, default=Decimal("0"),
+        help_text="Argent réellement encaissé lors de la vente.",
+    )
+    montant_credit = models.DecimalField(
+        max_digits=14, decimal_places=2, default=Decimal("0"),
+        help_text="Montant dû par le client (créance).",
+    )
+    # Client associé — obligatoire si type_vente = credit ou partiel
+    client = models.ForeignKey(
+        "finance.ClientFinance",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="tickets",
+        help_text="Client requis pour vente à crédit ou partielle.",
+    )
     idempotency_key = models.CharField(
         max_length=128,
         null=True,
@@ -70,6 +110,8 @@ class Ticket(models.Model):
             CheckConstraint(condition=Q(montant_total__gte=0), name="ticket_montant_total_positif"),
             CheckConstraint(condition=Q(cout_mouture__gte=0), name="ticket_cout_mouture_positif"),
             CheckConstraint(condition=Q(quantite_apportee_client__gte=0), name="ticket_quantite_apportee_positif"),
+            CheckConstraint(condition=Q(montant_cash__gte=0), name="ticket_montant_cash_positif"),
+            CheckConstraint(condition=Q(montant_credit__gte=0), name="ticket_montant_credit_positif"),
             CheckConstraint(
                 condition=Q(prix_mouture_kg__isnull=True) | Q(prix_mouture_kg__gte=0),
                 name="ticket_prix_mouture_kg_positif",

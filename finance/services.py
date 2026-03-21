@@ -690,3 +690,202 @@ def get_resume_financier(entreprise: Entreprise) -> dict:
         "projets_en_cours":         nb_projets,
         "projets_en_depassement":   nb_depassement,
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# COLLECTE ARGENT — Passage du collectionneur
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@transaction.atomic
+def enregistrer_collecte(
+    *,
+    lieu,
+    date_collecte,
+    montant_trouve: Decimal,
+    montant_pris: Decimal,
+    collecteur=None,
+    notes: str = "",
+    created_by: CustomUser,
+    deposer_en_banque: bool = False,
+    entreprise: Entreprise | None = None,
+):
+    """
+    Enregistre le passage du collectionneur dans une boutique.
+
+    montant_laisse = montant_trouve - montant_pris  (calculé automatiquement).
+
+    Si deposer_en_banque=True ET entreprise fourni :
+      → crée une CaisseSupremeTransaction (dépôt banque) liée à cette collecte.
+
+    Lève ValueError si montant_pris > montant_trouve.
+    """
+    from finance.models import CollecteArgent
+
+    if montant_pris > montant_trouve:
+        raise ErreurFinance(
+            f"montant_pris ({montant_pris}) ne peut dépasser montant_trouve ({montant_trouve})."
+        )
+    if montant_trouve < Decimal("0"):
+        raise ErreurFinance("montant_trouve doit être >= 0.")
+
+    collecte = CollecteArgent.objects.create(
+        lieu=lieu,
+        collecteur=collecteur,
+        date_collecte=date_collecte,
+        montant_trouve=montant_trouve,
+        montant_pris=montant_pris,
+        montant_laisse=montant_trouve - montant_pris,
+        notes=notes or "",
+        created_by=created_by,
+    )
+
+    if deposer_en_banque and montant_pris > Decimal("0") and entreprise is not None:
+        tx = enregistrer_transaction_caisse(
+            entreprise=entreprise,
+            type_transaction="depot",
+            montant=montant_pris,
+            description=f"Dépôt collecte — {lieu.nom} ({date_collecte})",
+            date=date_collecte,
+            created_by=created_by,
+            reference=f"COLLECTE-{collecte.pk}",
+        )
+        collecte.depot_banque = tx
+        collecte.save(update_fields=["depot_banque"])
+
+    audit_log(
+        user=created_by,
+        action="collecte_enregistrée",
+        object_type="CollecteArgent",
+        object_id=collecte.pk,
+        extra={
+            "lieu": lieu.nom,
+            "date": str(date_collecte),
+            "montant_trouve": str(montant_trouve),
+            "montant_pris": str(montant_pris),
+            "montant_laisse": str(collecte.montant_laisse),
+            "depot_banque": deposer_en_banque,
+        },
+    )
+    return collecte
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# DASHBOARD — Agrégats globaux étendus (ventes + cash + créances + dettes + dépenses)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def get_dashboard_global(entreprise: Entreprise) -> dict:
+    """
+    Dashboard global admin/DAF.
+
+    Retourne :
+      total_ventes          : Σ montant_total de tous les tickets (toutes boutiques)
+      total_cash            : Σ montant_cash des tickets (argent réellement encaissé)
+      total_credit          : Σ montant_credit des tickets (créances)
+      total_creances        : Σ montant_restant des JournalCreance en_cours
+      total_dettes_fourn    : Σ montant_restant des JournalPayable en_cours
+      total_depenses        : Σ montant des Depense (toutes boutiques, entreprise)
+      solde_caisse          : solde CaisseSupremeTransaction
+      argent_theorique      : total_cash + total_credit (= total_ventes)
+      benefice_brut         : total_ventes - total_achats_mpsl
+      benefice_net          : benefice_brut - total_depenses
+    """
+    from django.db.models import Sum, F, ExpressionWrapper, DecimalField, Q
+    from ventes.models import Ticket
+    from inventaire.models import AchatMPSL
+    from depenses.models import Depense
+
+    # Ventes
+    tickets = Ticket.objects.filter(lieu__entreprise=entreprise).aggregate(
+        total_ventes=Sum("montant_total"),
+        total_cash=Sum("montant_cash"),
+        total_credit_ventes=Sum("montant_credit"),
+    )
+
+    # Créances restantes
+    creances = JournalCreance.objects.filter(
+        client__entreprise=entreprise, statut="en_cours"
+    ).aggregate(
+        total=Sum(ExpressionWrapper(
+            F("montant_initial") - F("montant_paye"),
+            output_field=DecimalField(max_digits=14, decimal_places=2),
+        ))
+    )
+
+    # Dettes fournisseurs restantes
+    dettes = JournalPayable.objects.filter(
+        creancier__entreprise=entreprise, statut="en_cours"
+    ).aggregate(
+        total=Sum(ExpressionWrapper(
+            F("montant_initial") - F("montant_paye"),
+            output_field=DecimalField(max_digits=14, decimal_places=2),
+        ))
+    )
+
+    # Achats MPSL (coût d'achat fournisseurs)
+    achats = AchatMPSL.objects.filter(lieu__entreprise=entreprise).aggregate(
+        total=Sum("prix_total")
+    )
+
+    # Dépenses
+    depenses = Depense.objects.filter(entreprise=entreprise).aggregate(
+        total=Sum("montant")
+    )
+
+    tv       = tickets["total_ventes"]        or Decimal("0")
+    tc       = tickets["total_cash"]          or Decimal("0")
+    tcr      = tickets["total_credit_ventes"] or Decimal("0")
+    creances_restantes = creances["total"]    or Decimal("0")
+    dettes_restantes   = dettes["total"]      or Decimal("0")
+    total_achats       = achats["total"]      or Decimal("0")
+    total_dep          = depenses["total"]    or Decimal("0")
+    solde              = get_solde_caisse(entreprise)
+    ben_brut           = tv - total_achats
+    ben_net            = ben_brut - total_dep
+
+    return {
+        "total_ventes":       tv,
+        "total_cash":         tc,
+        "total_credit":       tcr,
+        "total_creances":     creances_restantes,
+        "total_dettes_fourn": dettes_restantes,
+        "total_depenses":     total_dep,
+        "solde_caisse":       solde,
+        "argent_theorique":   tc + creances_restantes,
+        "benefice_brut":      ben_brut,
+        "benefice_net":       ben_net,
+    }
+
+
+def get_dashboard_boutique(lieu) -> dict:
+    """
+    Dashboard par boutique (rôle boutique, admin).
+
+    Retourne : ventes, cash, créances, dépenses, stock_valeur, nb_produits_stock
+    """
+    from django.db.models import Sum, Count, F, ExpressionWrapper, DecimalField, Q
+    from ventes.models import Ticket
+    from depenses.models import Depense
+    from inventaire.models import Stock
+
+    tickets = Ticket.objects.filter(lieu=lieu).aggregate(
+        total_ventes=Sum("montant_total"),
+        total_cash=Sum("montant_cash"),
+        total_credit=Sum("montant_credit"),
+    )
+    creances = JournalCreance.objects.filter(lieu=lieu, statut="en_cours").aggregate(
+        total=Sum(ExpressionWrapper(
+            F("montant_initial") - F("montant_paye"),
+            output_field=DecimalField(max_digits=14, decimal_places=2),
+        ))
+    )
+    depenses = Depense.objects.filter(lieu=lieu).aggregate(total=Sum("montant"))
+    stock_nb = Stock.objects.filter(lieu=lieu, quantite__gt=0).count()
+
+    return {
+        "total_ventes":   tickets["total_ventes"]  or Decimal("0"),
+        "total_cash":     tickets["total_cash"]    or Decimal("0"),
+        "total_credit":   tickets["total_credit"]  or Decimal("0"),
+        "total_creances": creances["total"]         or Decimal("0"),
+        "total_depenses": depenses["total"]         or Decimal("0"),
+        "nb_produits_en_stock": stock_nb,
+    }

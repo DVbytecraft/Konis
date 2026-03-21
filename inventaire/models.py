@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import CheckConstraint, Q, UniqueConstraint
@@ -120,17 +122,52 @@ class AchatMPSL(models.Model):
         (UNITE_TONNES, "Tonnes"),
     ]
 
+    # ── Types de paiement ───────────────────────────────────────────────────
+    TYPE_CASH    = "cash"
+    TYPE_CREDIT  = "credit"
+    TYPE_PARTIEL = "partiel"
+    TYPE_PAIEMENT_CHOICES = [
+        (TYPE_CASH,    "Cash"),
+        (TYPE_CREDIT,  "Crédit"),
+        (TYPE_PARTIEL, "Partiel"),
+    ]
+
     lieu = models.ForeignKey(
         Lieu,
         on_delete=models.PROTECT,
         related_name="achats_mpsl",
         limit_choices_to={"type_lieu": "mpsl"},
     )
+    fournisseur = models.ForeignKey(
+        "finance.Creancier",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="achats_mpsl",
+        help_text="Fournisseur source de cet achat.",
+    )
     produit_nom = models.CharField(max_length=255, verbose_name="Produit acheté")
     quantite = models.DecimalField(max_digits=12, decimal_places=2)
     unite = models.CharField(max_length=10, choices=UNITE_CHOICES, default=UNITE_SACS)
     prix_unitaire = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     prix_total = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    # ── Paiement fournisseur ─────────────────────────────────────────────────
+    type_paiement = models.CharField(
+        max_length=10, choices=TYPE_PAIEMENT_CHOICES, default=TYPE_CASH,
+        help_text="Cash = payé immédiatement; Crédit = dette totale; Partiel = acompte.",
+    )
+    montant_paye_initial = models.DecimalField(
+        max_digits=14, decimal_places=2, default=Decimal("0"),
+        help_text="Acompte versé si type_paiement=partiel.",
+    )
+    journal_payable = models.OneToOneField(
+        "finance.JournalPayable",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="achat_mpsl",
+        help_text="Journal de dette fournisseur auto-créé si crédit ou partiel.",
+    )
     notes = models.TextField(blank=True, default="")
     created_by = models.ForeignKey(
         "core.CustomUser",

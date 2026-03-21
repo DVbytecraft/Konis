@@ -63,12 +63,19 @@ def enregistrer_achat_mpsl(
     prix_unitaire: Decimal = Decimal("0"),
     notes: str = "",
     created_by=None,
+    fournisseur=None,
+    type_paiement: str = "cash",
+    montant_paye_initial: Decimal = Decimal("0"),
 ) -> AchatMPSL:
     """
-    Enregistre un achat de produit au dépôt MPSL (enregistrement comptable uniquement).
-    NE modifie PAS le stock — le MPSL est la source d'approvisionnement, son stock
-    n'est pas contraint. Les transferts vers usines/boutiques gèrent le stock destination.
-    Flux : Fournisseur → MPSL (avec prix d'achat, nom produit libre).
+    Enregistre un achat de produit au dépôt MPSL (enregistrement comptable).
+    NE modifie PAS le stock — le MPSL est la source d'approvisionnement.
+    Flux : Fournisseur → MPSL.
+
+    Si type_paiement = 'credit' ou 'partiel' ET fournisseur fourni :
+      → crée automatiquement un JournalPayable pour la dette fournisseur.
+      credit  : montant_payable = prix_total
+      partiel : montant_payable = prix_total - montant_paye_initial
     """
     if lieu.type_lieu != Lieu.TYPE_MPSL:
         raise ErreurStock(f"Le lieu '{lieu}' n'est pas un dépôt MPSL.")
@@ -78,6 +85,10 @@ def enregistrer_achat_mpsl(
         raise ErreurStock("La quantité doit être strictement positive.")
     if prix_unitaire < 0:
         raise ErreurStock("Le prix unitaire doit être >= 0.")
+    if type_paiement not in ("cash", "credit", "partiel"):
+        raise ErreurStock(f"type_paiement invalide : '{type_paiement}'.")
+    if type_paiement == "partiel" and montant_paye_initial < Decimal("0"):
+        raise ErreurStock("montant_paye_initial doit être >= 0.")
 
     prix_total = Decimal(str(quantite)) * Decimal(str(prix_unitaire))
     nom = produit_nom.strip()
@@ -95,16 +106,41 @@ def enregistrer_achat_mpsl(
             unite=unite,
         )
 
-    return AchatMPSL.objects.create(
-        lieu=lieu,
-        produit_nom=nom,
-        quantite=quantite,
-        unite=unite,
-        prix_unitaire=prix_unitaire,
-        prix_total=prix_total,
-        notes=notes or "",
-        created_by=created_by,
-    )
+    with transaction.atomic():
+        achat = AchatMPSL.objects.create(
+            lieu=lieu,
+            fournisseur=fournisseur,
+            produit_nom=nom,
+            quantite=quantite,
+            unite=unite,
+            prix_unitaire=prix_unitaire,
+            prix_total=prix_total,
+            type_paiement=type_paiement,
+            montant_paye_initial=montant_paye_initial if type_paiement == "partiel" else Decimal("0"),
+            notes=notes or "",
+            created_by=created_by,
+        )
+
+        # ── Auto-créer JournalPayable si crédit ou partiel + fournisseur connu ──
+        if type_paiement in ("credit", "partiel") and fournisseur is not None and created_by is not None:
+            from finance.models import JournalPayable
+            if type_paiement == "credit":
+                montant_dette = prix_total
+            else:
+                montant_dette = prix_total - montant_paye_initial
+            if montant_dette > Decimal("0"):
+                journal = JournalPayable.objects.create(
+                    creancier=fournisseur,
+                    reference=f"ACHAT-MPSL-{achat.pk}",
+                    description=f"Achat MPSL : {nom} x {quantite} {unite}",
+                    montant_initial=montant_dette,
+                    montant_paye=montant_paye_initial if type_paiement == "partiel" else Decimal("0"),
+                    created_by=created_by,
+                )
+                achat.journal_payable = journal
+                achat.save(update_fields=["journal_payable"])
+
+    return achat
 
 
 # ─── Noyau commun des transferts ──────────────────────────────────────────────

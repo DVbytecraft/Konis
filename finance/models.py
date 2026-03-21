@@ -182,9 +182,27 @@ class JournalCreance(models.Model):
     Journal de créance client.
     Chaque vente à crédit = un journal distinct.
     Un journal soldé est verrouillé.
+    lieu  : boutique source (nullable pour rétro-compat, obligatoire à la création).
+    ticket: ticket de vente source (auto-lié si créé via vente boutique).
     """
 
     client          = models.ForeignKey(ClientFinance, on_delete=models.PROTECT, related_name="journaux")
+    lieu            = models.ForeignKey(
+        "core.Lieu",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="creances",
+        help_text="Boutique source de la créance.",
+    )
+    ticket          = models.OneToOneField(
+        "ventes.Ticket",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="creance",
+        help_text="Ticket de vente ayant généré cette créance.",
+    )
     reference       = models.CharField(max_length=100, blank=True)
     description     = models.TextField()
     montant_initial = models.DecimalField(
@@ -213,6 +231,7 @@ class JournalCreance(models.Model):
         indexes             = [
             models.Index(fields=["client", "statut"],         name="jcreance_client_statut_idx"),
             models.Index(fields=["statut", "date_echeance"],  name="jcreance_statut_echeance_idx"),
+            models.Index(fields=["lieu", "statut"],           name="jcreance_lieu_statut_idx"),
         ]
 
     @property
@@ -524,3 +543,93 @@ class DepotProjet(models.Model):
 
     def __str__(self):
         return f"Dépôt {self.montant} FCFA — {self.projet.nom} ({self.date})"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# COLLECTE — Ramassage d'argent dans les boutiques
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CollecteArgent(models.Model):
+    """
+    Passage du collectionneur dans une boutique.
+
+    Règles métier :
+      montant_laisse  = montant_trouve - montant_pris  (calculé automatiquement à la création)
+      depot_banque    : si le collectionneur dépose en banque, lien vers CaisseSupremeTransaction
+
+    Impact caisse boutique :
+      Le collectionneur "prend" montant_pris → la caisse boutique est réduite d'autant.
+      Visible admin / DAF uniquement.
+    """
+    lieu = models.ForeignKey(
+        "core.Lieu",
+        on_delete=models.PROTECT,
+        related_name="collectes",
+        limit_choices_to={"type_lieu": "magasin"},
+        help_text="Boutique visitée.",
+    )
+    collecteur = models.ForeignKey(
+        CustomUser,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="collectes_effectuees",
+        help_text="Utilisateur ayant effectué la collecte.",
+    )
+    date_collecte   = models.DateField(help_text="Date du passage.")
+    montant_trouve  = models.DecimalField(
+        max_digits=14, decimal_places=2,
+        help_text="Argent trouvé dans la caisse boutique.",
+    )
+    montant_pris    = models.DecimalField(
+        max_digits=14, decimal_places=2,
+        help_text="Argent emporté par le collectionneur.",
+    )
+    montant_laisse  = models.DecimalField(
+        max_digits=14, decimal_places=2,
+        help_text="Argent laissé en caisse = montant_trouve - montant_pris (auto).",
+    )
+    depot_banque    = models.ForeignKey(
+        "finance.CaisseSupremeTransaction",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="collectes_source",
+        help_text="Transaction banque issue de ce dépôt (facultatif).",
+    )
+    notes           = models.TextField(blank=True, default="")
+    created_by      = models.ForeignKey(
+        CustomUser,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+    )
+    created_at      = models.DateTimeField(auto_now_add=True)
+    updated_at      = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name        = "Collecte argent"
+        verbose_name_plural = "Collectes argent"
+        ordering            = ["-date_collecte", "-created_at"]
+        constraints         = [
+            CheckConstraint(condition=Q(montant_trouve__gte=0),  name="collecte_trouve_non_negatif"),
+            CheckConstraint(condition=Q(montant_pris__gte=0),    name="collecte_pris_non_negatif"),
+            CheckConstraint(condition=Q(montant_laisse__gte=0),  name="collecte_laisse_non_negatif"),
+            CheckConstraint(
+                condition=Q(montant_pris__lte=models.F("montant_trouve")),
+                name="collecte_pris_lte_trouve",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["lieu", "date_collecte"], name="collecte_lieu_date_idx"),
+            models.Index(fields=["date_collecte"],          name="collecte_date_idx"),
+        ]
+
+    def save(self, *args, **kwargs):
+        """Auto-calcule montant_laisse = montant_trouve - montant_pris."""
+        self.montant_laisse = self.montant_trouve - self.montant_pris
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"Collecte {self.lieu} le {self.date_collecte} — pris {self.montant_pris} FCFA"

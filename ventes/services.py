@@ -6,6 +6,11 @@ Mouture — formule unifiée (toutes unités normalisées en kg) :
     quantite_kg_total = normaliser_quantite_en_kg(apportée) + normaliser_quantite_en_kg(achetée)
     cout_mouture      = calculer_cout_mouture(quantite_kg_total, prix_par_kg)
     montant_total     = products_total + cout_mouture
+
+Type de vente :
+    cash    → montant_cash = montant_total, montant_credit = 0, pas de JournalCreance
+    credit  → montant_cash = 0, montant_credit = montant_total, JournalCreance auto-créé
+    partiel → montant_cash = acompte, montant_credit = montant_total - acompte, JournalCreance pour le solde
 """
 from decimal import Decimal
 
@@ -130,6 +135,35 @@ def generer_numero_ticket(lieu: Lieu) -> str:
 
 # ── Vente boutique (avec ou sans mouture) ───────────────────────────────────
 
+def _creer_journal_creance_pour_ticket(ticket: Ticket, montant: Decimal, created_by) -> None:
+    """
+    Crée automatiquement un JournalCreance lié à un ticket de vente à crédit/partiel.
+    Appelé à l'intérieur d'une transaction atomique.
+    """
+    from finance.models import ClientFinance, JournalCreance
+
+    if ticket.client_id is None:
+        raise ErreurStock(
+            "Un client est requis pour une vente à crédit ou partielle."
+        )
+    if montant <= Decimal("0"):
+        return  # rien à créer
+
+    # Évite le double-create si le ticket a déjà une créance (idempotency replay)
+    if hasattr(ticket, "creance"):
+        return
+
+    JournalCreance.objects.create(
+        client_id=ticket.client_id,
+        lieu=ticket.lieu,
+        ticket=ticket,
+        reference=ticket.numero,
+        description=f"Vente à crédit — ticket {ticket.numero}",
+        montant_initial=montant,
+        created_by=created_by,
+    )
+
+
 def vente_boutique(
     lieu: Lieu,
     lignes: list[tuple[Produit, Decimal, Decimal]],
@@ -138,6 +172,10 @@ def vente_boutique(
     prix_mouture_kg: Decimal | None = None,
     quantite_apportee_client_kg: Decimal = Decimal("0"),
     idempotency_key: str | None = None,
+    type_vente: str = Ticket.TYPE_CASH,
+    montant_cash: Decimal | None = None,
+    client=None,
+    created_by=None,
 ) -> tuple[Ticket, bool]:
     """
     Enregistre une vente en boutique (ticket + lignes + mouture optionnelle).
@@ -147,12 +185,25 @@ def vente_boutique(
     Retourne (ticket, created) :
       created=False si un ticket existant avec la même clé idempotency a été renvoyé.
 
-    lignes : liste de (produit, quantite, prix_unitaire)
-    mouture : True si le client demande la mouture
+    lignes          : liste de (produit, quantite, prix_unitaire)
+    mouture         : True si le client demande la mouture
     prix_mouture_kg : prix FCFA/kg (toutes unités normalisées en kg avant calcul)
     quantite_apportee_client_kg : grain supplémentaire apporté par le client (déjà en kg)
     idempotency_key : clé de déduplication (header Idempotency-Key du client)
+    type_vente      : 'cash' | 'credit' | 'partiel'
+    montant_cash    : acompte si type_vente='partiel' (None = montant total si cash)
+    client          : ClientFinance requis si credit ou partiel
+    created_by      : CustomUser pour l'audit JournalCreance
     """
+    # ── Validation type_vente ────────────────────────────────────────────────
+    if type_vente not in (Ticket.TYPE_CASH, Ticket.TYPE_CREDIT, Ticket.TYPE_PARTIEL):
+        raise ErreurStock(f"type_vente invalide : '{type_vente}'.")
+    if type_vente in (Ticket.TYPE_CREDIT, Ticket.TYPE_PARTIEL) and client is None:
+        raise ErreurStock("Un client est requis pour une vente à crédit ou partielle.")
+    if type_vente == Ticket.TYPE_PARTIEL:
+        if montant_cash is None or montant_cash < Decimal("0"):
+            raise ErreurStock("montant_cash (acompte) est requis et doit être >= 0 pour une vente partielle.")
+
     key = (idempotency_key or "").strip() or None
     if lieu.type_lieu != Lieu.TYPE_MAGASIN:
         raise ErreurStock(f"Le lieu {lieu} n'est pas un magasin.")
@@ -187,6 +238,21 @@ def vente_boutique(
             quantite_apportee_client_kg=quantite_apportee_client_kg,
         )
 
+        # ── Calculer répartition cash / crédit ──────────────────────────────
+        if type_vente == Ticket.TYPE_CASH:
+            m_cash   = montant_total
+            m_credit = Decimal("0")
+        elif type_vente == Ticket.TYPE_CREDIT:
+            m_cash   = Decimal("0")
+            m_credit = montant_total
+        else:  # partiel
+            m_cash   = montant_cash  # type: ignore[assignment]
+            m_credit = montant_total - m_cash
+            if m_credit < Decimal("0"):
+                raise ErreurStock(
+                    f"L'acompte ({m_cash}) dépasse le montant total ({montant_total})."
+                )
+
         ticket = None
         for _ in range(5):
             numero = generer_numero_ticket(lieu)
@@ -200,6 +266,10 @@ def vente_boutique(
                     montant_total=montant_total,
                     quantite_apportee_client=quantite_apportee_client_kg if mouture else Decimal("0"),
                     idempotency_key=key,
+                    type_vente=type_vente,
+                    montant_cash=m_cash,
+                    montant_credit=m_credit,
+                    client=client,
                 )
                 break
             except IntegrityError:
@@ -217,6 +287,10 @@ def vente_boutique(
             stock = Stock.objects.select_for_update().get(produit=produit, lieu=lieu)
             stock.quantite -= quantite
             stock.save(update_fields=["quantite"])
+
+        # ── Auto-créer JournalCreance si crédit ou partiel ──────────────────
+        if type_vente in (Ticket.TYPE_CREDIT, Ticket.TYPE_PARTIEL) and m_credit > Decimal("0"):
+            _creer_journal_creance_pour_ticket(ticket, m_credit, created_by)
 
     return ticket, True
 
