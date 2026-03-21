@@ -304,15 +304,15 @@ export default function BoutiqueDashboardPage() {
 
       {/* Actions rapides */}
       <div className="flex flex-wrap gap-3">
-        <Button asChild className="bg-green-600 hover:bg-green-700">
-          <Link href="/boutique/caisse">Aller à la caisse</Link>
-        </Button>
-        <Button asChild variant="outline">
-          <Link href="/boutique/creances">Gérer les créances</Link>
-        </Button>
-        <Button asChild variant="outline">
-          <Link href="/boutique/tickets">Voir les tickets</Link>
-        </Button>
+        <Link href="/boutique/caisse" className="inline-flex items-center justify-center rounded-md text-sm font-medium h-9 px-4 py-2 bg-green-600 hover:bg-green-700 text-white transition-colors">
+          Aller à la caisse
+        </Link>
+        <Link href="/boutique/creances" className="inline-flex items-center justify-center rounded-md text-sm font-medium h-9 px-4 py-2 border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground transition-colors">
+          Gérer les créances
+        </Link>
+        <Link href="/boutique/tickets" className="inline-flex items-center justify-center rounded-md text-sm font-medium h-9 px-4 py-2 border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground transition-colors">
+          Voir les tickets
+        </Link>
       </div>
     </div>
   );
