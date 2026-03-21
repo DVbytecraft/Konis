@@ -804,6 +804,11 @@ class CollecteViewSet(DafReadOnlyMixin, ListModelMixin, RetrieveModelMixin, Crea
                 resp = Response(record.extra.get("response"))
                 return apply_idempotency_warning(resp, missing)
 
+        # Seul le collecteur peut enregistrer une collecte
+        if request.user.role != CustomUser.ROLE_COLLECTEUR:
+            resp = Response({"detail": "Seul le collecteur peut enregistrer une collecte."}, status=status.HTTP_403_FORBIDDEN)
+            return apply_idempotency_warning(resp, missing)
+
         if not request.user.entreprise_id:
             resp = Response({"detail": "Entreprise requise."}, status=status.HTTP_403_FORBIDDEN)
             return apply_idempotency_warning(resp, missing)
@@ -822,7 +827,8 @@ class CollecteViewSet(DafReadOnlyMixin, ListModelMixin, RetrieveModelMixin, Crea
             resp = Response({"detail": "Boutique introuvable ou non autorisée."}, status=status.HTTP_400_BAD_REQUEST)
             return apply_idempotency_warning(resp, missing)
 
-        entreprise = request.user.entreprise if d.get("deposer_en_banque") else None
+        # Le montant collecté est toujours déposé en caisse suprême automatiquement
+        entreprise = request.user.entreprise
 
         try:
             collecte = enregistrer_collecte(
@@ -833,7 +839,7 @@ class CollecteViewSet(DafReadOnlyMixin, ListModelMixin, RetrieveModelMixin, Crea
                 collecteur=request.user,
                 notes=d.get("notes", ""),
                 created_by=request.user,
-                deposer_en_banque=d.get("deposer_en_banque", False),
+                deposer_en_banque=True,
                 entreprise=entreprise,
             )
         except ErreurFinance as e:

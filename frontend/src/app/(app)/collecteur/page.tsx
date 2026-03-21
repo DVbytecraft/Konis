@@ -39,7 +39,7 @@ function toList<T>(d: Paginated<T> | T[]): T[] {
 
 const EMPTY_CREATE = {
   lieu_id: "", date_collecte: new Date().toISOString().slice(0, 10),
-  montant_trouve: "", montant_pris: "", notes: "", deposer_en_banque: false,
+  montant_trouve: "", montant_pris: "", notes: "",
 };
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
@@ -152,7 +152,7 @@ export default function CollecteurPage() {
           montant_trouve:    createForm.montant_trouve,
           montant_pris:      createForm.montant_pris,
           notes:             createForm.notes,
-          deposer_en_banque: createForm.deposer_en_banque,
+          deposer_en_banque: true,
         }),
       });
       setShowCreate(false);
@@ -460,12 +460,10 @@ export default function CollecteurPage() {
                     className="h-9" />
                 </div>
 
-                <label className="flex items-center gap-2.5 cursor-pointer select-none">
-                  <input type="checkbox" checked={createForm.deposer_en_banque}
-                    onChange={(e) => setCreateForm((f) => ({ ...f, deposer_en_banque: e.target.checked }))}
-                    className="h-4 w-4 rounded border-input" />
-                  <span className="text-sm">Déposer le montant collecté en banque (caisse suprême)</span>
-                </label>
+                <div className="flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 dark:bg-blue-950/20 dark:border-blue-800 px-3 py-2 text-xs text-blue-700 dark:text-blue-300">
+                  <Banknote className="h-3.5 w-3.5 shrink-0" />
+                  Le montant collecté sera automatiquement versé en caisse suprême.
+                </div>
 
                 <div className="flex gap-2 pt-1">
                   <Button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-700 text-white" disabled={creating}>
