@@ -572,14 +572,13 @@ export default function BoutiqueCaissePage() {
             </Button>
             {(ticketImprimer.type_vente === "credit" || ticketImprimer.type_vente === "partiel") &&
               ticketImprimer.client_nom && (
-                <Button variant="outline" className="w-full" asChild>
-                  <Link
-                    href={`/boutique/creances?client=${encodeURIComponent(ticketImprimer.client_nom)}`}
-                  >
-                    <CreditCard className="h-4 w-4 mr-2" />
-                    Journal de {ticketImprimer.client_nom}
-                  </Link>
-                </Button>
+                <Link
+                  href={`/boutique/creances?client=${encodeURIComponent(ticketImprimer.client_nom)}`}
+                  className="w-full inline-flex items-center justify-center rounded-md border border-input bg-background px-4 py-2 text-sm font-medium shadow-sm hover:bg-accent hover:text-accent-foreground transition-colors"
+                >
+                  <CreditCard className="h-4 w-4 mr-2" />
+                  Journal de {ticketImprimer.client_nom}
+                </Link>
             )}
           </div>
           <Button variant="ghost" size="sm" onClick={fermerTicket}>
