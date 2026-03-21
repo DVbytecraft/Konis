@@ -72,9 +72,9 @@ class AlerteLog(models.Model):
         verbose_name_plural = "Alertes"
         ordering = ["-created_at"]
         indexes = [
-            models.Index(fields=["code", "created_at"]),
-            models.Index(fields=["niveau", "resolu", "created_at"]),
-            models.Index(fields=["entreprise", "created_at"]),
+            models.Index(fields=["code", "created_at"], name="audit_alerte_code_idx"),
+            models.Index(fields=["niveau", "resolu", "created_at"], name="audit_alerte_niveau_idx"),
+            models.Index(fields=["entreprise", "created_at"], name="audit_alerte_ent_idx"),
         ]
 
     def __str__(self):

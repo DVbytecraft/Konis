@@ -605,9 +605,8 @@ export default function BoutiqueCaissePage() {
                   <li key={t.id} className="flex justify-between">
                     <span className="font-mono text-green-700 dark:text-green-300">{t.numero}</span>
                     <span className="font-medium">{fmt(t.total)}</span>
-                    </li>
-                  );
-                })}
+                  </li>
+                ))}
                 {ventesDuJour.length > 8 && (
                   <li className="text-muted-foreground">…</li>
                 )}
