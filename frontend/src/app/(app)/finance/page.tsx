@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
   Banknote, FolderKanban, TrendingDown, TrendingUp,
-  RefreshCw, ArrowUpCircle, ArrowDownCircle, DollarSign, Wheat, Truck,
+  RefreshCw, ArrowUpCircle, ArrowDownCircle, DollarSign, Wheat, Truck, Printer,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -96,17 +96,27 @@ export default function FinanceDashboardPage() {
 
   return (
     <div className="space-y-6 min-w-0">
-      <div className="flex items-center justify-between flex-wrap gap-3">
+      <div className="hidden print:block mb-4">
+        <h1 className="text-xl font-bold">Finance — Tableau de bord</h1>
+        <p className="text-sm text-gray-500">Vue d&apos;ensemble complète de la situation financière</p>
+      </div>
+      <div className="flex items-center justify-between flex-wrap gap-3 print:hidden">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Finance — Tableau de bord</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
             Vue d&apos;ensemble complète de la situation financière
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={load} disabled={loading}>
-          <RefreshCw className={cn("h-4 w-4 mr-2", loading && "animate-spin")} />
-          Actualiser
-        </Button>
+        <div className="flex gap-2 print:hidden">
+          <Button variant="outline" size="sm" onClick={() => window.print()}>
+            <Printer className="h-4 w-4 mr-2" />
+            Imprimer
+          </Button>
+          <Button variant="outline" size="sm" onClick={load} disabled={loading}>
+            <RefreshCw className={cn("h-4 w-4 mr-2", loading && "animate-spin")} />
+            Actualiser
+          </Button>
+        </div>
       </div>
 
       {error && (

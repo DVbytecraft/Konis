@@ -142,7 +142,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen min-w-0 bg-muted/20 overflow-x-hidden">
-      <header className="md:hidden border-b border-border bg-card">
+      <header className="md:hidden border-b border-border bg-card print:hidden">
         <div className="flex h-14 items-center justify-between px-4">
           <div className="flex flex-col min-w-0">
             <Link href="/" className="font-bold tracking-tight text-green-600 dark:text-green-400 leading-tight">
@@ -182,7 +182,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </header>
 
       <div className="flex min-w-0">
-        <aside className="hidden md:flex w-52 lg:w-56 shrink-0 flex-col border-r border-border bg-card">
+        <aside className="hidden md:flex print:hidden w-52 lg:w-56 shrink-0 flex-col border-r border-border bg-card">
           <div className="flex h-14 items-center border-b border-border px-4">
             <Link href="/" className="font-bold tracking-tight text-green-600 dark:text-green-400 text-lg">
               KONIS
@@ -224,7 +224,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             </Button>
           </div>
         </aside>
-        <main className="flex-1 min-w-0 overflow-auto">
+        <main className="flex-1 min-w-0 overflow-auto print:overflow-visible">
           <div className="container max-w-7xl mx-auto py-4 sm:py-6 px-3 sm:px-6">
             <ErrorBoundary>{children}</ErrorBoundary>
           </div>
