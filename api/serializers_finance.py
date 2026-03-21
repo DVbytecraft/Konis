@@ -8,6 +8,7 @@ from rest_framework import serializers
 from finance.models import (
     CaisseSupremeTransaction,
     ClientFinance,
+    CollecteArgent,
     Creancier,
     DepenseProjet,
     DepotProjet,
@@ -147,7 +148,9 @@ class PaiementCreanceSerializer(serializers.ModelSerializer):
 
 
 class JournalCreanceSerializer(MontantRestantMixin, serializers.ModelSerializer):
-    client_nom      = serializers.CharField(source="client.nom", read_only=True)
+    client_nom      = serializers.CharField(source="client.nom",  read_only=True)
+    lieu_nom        = serializers.CharField(source="lieu.nom",    read_only=True, default=None)
+    ticket_numero   = serializers.CharField(source="ticket.numero", read_only=True, default=None)
     montant_restant = serializers.SerializerMethodField()
     statut_display  = serializers.CharField(source="get_statut_display", read_only=True)
     lignes          = LigneCreanceSerializer(many=True, read_only=True)
@@ -156,7 +159,10 @@ class JournalCreanceSerializer(MontantRestantMixin, serializers.ModelSerializer)
     class Meta:
         model = JournalCreance
         fields = (
-            "id", "client", "client_nom", "reference", "description",
+            "id", "client", "client_nom",
+            "lieu", "lieu_nom",
+            "ticket", "ticket_numero",
+            "reference", "description",
             "montant_initial", "montant_paye", "montant_restant",
             "statut", "statut_display", "date_echeance", "notes",
             "created_at", "locked_at", "lignes", "paiements",
@@ -173,6 +179,8 @@ class LigneCreanceInputSerializer(serializers.Serializer):
 
 class JournalCreanceCreateSerializer(serializers.Serializer):
     client_id       = serializers.IntegerField()
+    lieu_id         = serializers.IntegerField(required=False, allow_null=True, default=None,
+                          help_text="Boutique source de la créance (recommandé).")
     description     = serializers.CharField()
     montant_initial = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=Decimal("0.01"))
     lignes          = LigneCreanceInputSerializer(many=True, required=False, default=list)
@@ -348,3 +356,65 @@ class ResumeFinancierSerializer(serializers.Serializer):
     solde_caisse             = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
     projets_en_cours         = serializers.IntegerField(read_only=True)
     projets_en_depassement   = serializers.IntegerField(read_only=True)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# COLLECTE ARGENT
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CollecteArgentSerializer(serializers.ModelSerializer):
+    lieu_nom        = serializers.CharField(source="lieu.nom",            read_only=True)
+    collecteur_nom  = serializers.CharField(source="collecteur.username", read_only=True, default=None)
+    created_by_nom  = serializers.CharField(source="created_by.username", read_only=True, default=None)
+    depot_banque_id = serializers.IntegerField(source="depot_banque.id",  read_only=True, default=None)
+
+    class Meta:
+        model  = CollecteArgent
+        fields = (
+            "id",
+            "lieu", "lieu_nom",
+            "collecteur", "collecteur_nom",
+            "date_collecte",
+            "montant_trouve", "montant_pris", "montant_laisse",
+            "depot_banque_id",
+            "notes",
+            "created_by", "created_by_nom",
+            "created_at",
+        )
+        read_only_fields = ("montant_laisse", "depot_banque_id", "created_by", "created_at")
+
+
+class CollecteArgentCreateSerializer(serializers.Serializer):
+    lieu_id           = serializers.IntegerField(help_text="ID de la boutique visitée.")
+    date_collecte     = serializers.DateField()
+    montant_trouve    = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=Decimal("0"))
+    montant_pris      = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=Decimal("0"))
+    notes             = serializers.CharField(max_length=1000, required=False, allow_blank=True, default="")
+    deposer_en_banque = serializers.BooleanField(
+        default=False,
+        help_text="Si True, crée automatiquement un dépôt CaisseSupremeTransaction.",
+    )
+
+    def validate(self, data):
+        if data["montant_pris"] > data["montant_trouve"]:
+            raise serializers.ValidationError(
+                {"montant_pris": "montant_pris ne peut pas dépasser montant_trouve."}
+            )
+        return data
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# DASHBOARD GLOBAL
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class DashboardGlobalSerializer(serializers.Serializer):
+    total_ventes       = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    total_cash         = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    total_credit       = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    total_creances     = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    total_dettes_fourn = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    total_depenses     = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    solde_caisse       = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    argent_theorique   = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    benefice_brut      = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    benefice_net       = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)

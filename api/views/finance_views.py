@@ -14,13 +14,17 @@ from rest_framework.mixins import ListModelMixin, RetrieveModelMixin, CreateMode
 
 from api.permissions import IsDafRole
 from api.throttling import FinanceCreateRateThrottle
+from api.permissions import IsDafRole, IsAdminRole
 from api.serializers_finance import (
     CaisseTransactionCreateSerializer,
     CaisseTransactionSerializer,
     ClientFinanceCreateSerializer,
     ClientFinanceSerializer,
+    CollecteArgentCreateSerializer,
+    CollecteArgentSerializer,
     CreancierCreateSerializer,
     CreancierSerializer,
+    DashboardGlobalSerializer,
     DepenseProjetCreateSerializer,
     DepotProjetCreateSerializer,
     EmpruntCreateSerializer,
@@ -36,9 +40,11 @@ from api.serializers_finance import (
     RemboursementCreateSerializer,
     ResumeFinancierSerializer,
 )
+from core.models import Lieu
 from finance.models import (
     CaisseSupremeTransaction,
     ClientFinance,
+    CollecteArgent,
     Creancier,
     Emprunt,
     JournalCreance,
@@ -51,12 +57,14 @@ from finance.services import (
     creer_journal_creance,
     creer_journal_payable,
     creer_projet,
+    enregistrer_collecte,
     enregistrer_depot_projet,
     enregistrer_depense_projet,
     enregistrer_paiement_creance,
     enregistrer_paiement_payable,
     enregistrer_remboursement,
     enregistrer_transaction_caisse,
+    get_dashboard_global,
     get_resume_financier,
     get_solde_caisse,
     solder_journal_creance,
@@ -325,6 +333,15 @@ class JournalCreanceViewSet(ListModelMixin, RetrieveModelMixin, CreateModelMixin
         except ClientFinance.DoesNotExist:
             return Response({"detail": "Client introuvable."}, status=status.HTTP_404_NOT_FOUND)
 
+        # Résoudre le lieu (boutique source) — scoped par entreprise
+        lieu = None
+        lieu_id = d.get("lieu_id")
+        if lieu_id:
+            try:
+                lieu = Lieu.objects.get(pk=lieu_id, entreprise_id=request.user.entreprise_id)
+            except Lieu.DoesNotExist:
+                return Response({"detail": "Lieu introuvable."}, status=status.HTTP_400_BAD_REQUEST)
+
         try:
             journal = creer_journal_creance(
                 client=client,
@@ -336,6 +353,10 @@ class JournalCreanceViewSet(ListModelMixin, RetrieveModelMixin, CreateModelMixin
                 date_echeance=d.get("date_echeance"),
                 notes=d.get("notes", ""),
             )
+            # Affecter le lieu si fourni (après création, rétrocompatible)
+            if lieu:
+                journal.lieu = lieu
+                journal.save(update_fields=["lieu"])
         except ErreurFinance as e:
             return _err(e)
 
@@ -615,3 +636,105 @@ class ProjetViewSet(ListModelMixin, RetrieveModelMixin, CreateModelMixin, Generi
         projet.statut = nouveau_statut
         projet.save(update_fields=["statut", "updated_at"])
         return Response(ProjetSerializer(projet).data)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# COLLECTE ARGENT — Passages du collectionneur
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CollecteViewSet(ListModelMixin, RetrieveModelMixin, CreateModelMixin, GenericViewSet):
+    """
+    GET  /api/finance/collectes/        — liste (admin/DAF) avec filtre ?lieu_id= ?debut= ?fin=
+    POST /api/finance/collectes/        — enregistrer un passage collectionneur
+    GET  /api/finance/collectes/{id}/   — détail
+
+    Sécurité :
+      - Accessible uniquement par admin et DAF (jamais par boutique)
+      - lieu_id est scopé par entreprise du user (IDOR impossible)
+    """
+    permission_classes = [IsDafRole | IsAdminRole]
+    throttle_classes = [FinanceCreateRateThrottle]
+
+    def get_queryset(self):
+        ent_id = self.request.user.entreprise_id
+        if not ent_id:
+            return CollecteArgent.objects.none()
+        qs = CollecteArgent.objects.filter(
+            lieu__entreprise_id=ent_id,
+        ).select_related("lieu", "collecteur", "created_by", "depot_banque").order_by("-date_collecte", "-created_at")
+
+        lieu_id = self.request.query_params.get("lieu_id")
+        if lieu_id:
+            qs = qs.filter(lieu_id=lieu_id)
+
+        debut = self.request.query_params.get("debut")
+        fin   = self.request.query_params.get("fin")
+        if debut:
+            qs = qs.filter(date_collecte__gte=debut)
+        if fin:
+            qs = qs.filter(date_collecte__lte=fin)
+
+        return qs
+
+    def get_serializer_class(self):
+        return CollecteArgentSerializer
+
+    def create(self, request, *args, **kwargs):
+        if not request.user.entreprise_id:
+            return Response({"detail": "Entreprise requise."}, status=status.HTTP_403_FORBIDDEN)
+
+        ser = CollecteArgentCreateSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        d = ser.validated_data
+
+        # Scoper le lieu par entreprise (anti-IDOR)
+        try:
+            lieu = Lieu.objects.get(
+                pk=d["lieu_id"],
+                entreprise_id=request.user.entreprise_id,
+                type_lieu=Lieu.TYPE_MAGASIN,
+            )
+        except Lieu.DoesNotExist:
+            return Response({"detail": "Boutique introuvable ou non autorisée."}, status=status.HTTP_400_BAD_REQUEST)
+
+        entreprise = request.user.entreprise if d.get("deposer_en_banque") else None
+
+        try:
+            collecte = enregistrer_collecte(
+                lieu=lieu,
+                date_collecte=d["date_collecte"],
+                montant_trouve=d["montant_trouve"],
+                montant_pris=d["montant_pris"],
+                collecteur=request.user,
+                notes=d.get("notes", ""),
+                created_by=request.user,
+                deposer_en_banque=d.get("deposer_en_banque", False),
+                entreprise=entreprise,
+            )
+        except ErreurFinance as e:
+            return _err(e)
+
+        collecte_qs = CollecteArgent.objects.select_related(
+            "lieu", "collecteur", "created_by", "depot_banque"
+        ).get(pk=collecte.pk)
+        return Response(CollecteArgentSerializer(collecte_qs).data, status=status.HTTP_201_CREATED)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# DASHBOARD GLOBAL (Admin / DAF)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class DashboardGlobalView(APIView):
+    """
+    GET /api/finance/dashboard/
+    Agrégats financiers globaux : ventes, cash, créances, dettes, dépenses, bénéfices.
+    Accessible uniquement par admin et DAF.
+    """
+    permission_classes = [IsDafRole | IsAdminRole]
+
+    def get(self, request):
+        if not request.user.entreprise_id:
+            return Response({"detail": "Entreprise requise."}, status=status.HTTP_403_FORBIDDEN)
+        data = get_dashboard_global(request.user.entreprise)
+        ser  = DashboardGlobalSerializer(data)
+        return Response(ser.data)

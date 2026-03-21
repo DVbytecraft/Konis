@@ -6,7 +6,7 @@ from rest_framework.routers import DefaultRouter
 
 from api.views.auth_views import LoginView, RefreshView, LogoutView, MeView
 from api.views.health_views import HealthView, HealthCheckView
-from api.views.boutique_views import StockBoutiqueViewSet, ProduitBoutiqueViewSet, VenteBoutiqueViewSet, MoutureSeuleView, MoutureStatsView, MoutureExportView, MouturePdfExportView, TicketReprintView
+from api.views.boutique_views import StockBoutiqueViewSet, ProduitBoutiqueViewSet, VenteBoutiqueViewSet, MoutureSeuleView, MoutureStatsView, MoutureExportView, MouturePdfExportView, TicketReprintView, DashboardBoutiqueView
 from api.views.admin_views import (
     EntrepriseViewSet,
     FactoryViewSet,
@@ -54,13 +54,15 @@ from api.views.usine_views import (
 )
 from api.views.facture_views import FactureListCreateView, FactureDetailView, FacturePdfView
 from api.views.finance_views import (
-    FinanceResumeView,
-    CreancierViewSet,
-    JournalPayableViewSet,
-    ClientFinanceViewSet,
-    JournalCreanceViewSet,
-    EmpruntViewSet,
+    CollecteViewSet,
     CaisseSupremeViewSet,
+    ClientFinanceViewSet,
+    CreancierViewSet,
+    DashboardGlobalView,
+    EmpruntViewSet,
+    FinanceResumeView,
+    JournalCreanceViewSet,
+    JournalPayableViewSet,
     ProjetViewSet,
 )
 from api.views.mpsl_views import (
@@ -123,6 +125,7 @@ router_finance.register("journaux-creances", JournalCreanceViewSet,  basename="f
 router_finance.register("emprunts",          EmpruntViewSet,         basename="finance-emprunts")
 router_finance.register("caisse",            CaisseSupremeViewSet,   basename="finance-caisse")
 router_finance.register("projets",           ProjetViewSet,          basename="finance-projets")
+router_finance.register("collectes",         CollecteViewSet,        basename="finance-collectes")
 
 # Usine
 router_usine = DefaultRouter()
@@ -143,6 +146,7 @@ urlpatterns = [
     path("boutique/mouture-export/", MoutureExportView.as_view(), name="boutique-mouture-export"),
     path("boutique/mouture-pdf/", MouturePdfExportView.as_view(), name="boutique-mouture-pdf"),
     path("boutique/tickets/<int:ticket_id>/reimprimer/", TicketReprintView.as_view(), name="boutique-ticket-reimprimer"),
+    path("boutique/dashboard/", DashboardBoutiqueView.as_view(), name="boutique-dashboard"),
     path("boutique/", include(router_boutique.urls)),
     path("admin/", include(router_admin.urls)),
     path("comptable/", include(router_comptable.urls)),
@@ -167,6 +171,7 @@ urlpatterns = [
     path("comptable/rapport-usines/<int:lieu_id>/", DetailUsineView.as_view(), name="comptable-detail-usine"),
     path("comptable/bilan/", BilanView.as_view(), name="comptable-bilan"),
     path("finance/resume/", FinanceResumeView.as_view(), name="finance-resume"),
+    path("finance/dashboard/", DashboardGlobalView.as_view(), name="finance-dashboard"),
     path("finance/", include(router_finance.urls)),
     path("factures/", FactureListCreateView.as_view(), name="factures-list-create"),
     path("factures/<int:pk>/", FactureDetailView.as_view(), name="factures-detail"),

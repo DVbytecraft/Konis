@@ -231,6 +231,24 @@ class VenteBoutiqueViewSet(ModelViewSet):
 
         idempotency_key = (request.headers.get("Idempotency-Key") or "").strip()[:128] or None
 
+        # ── Type de vente + client ───────────────────────────────────────────
+        type_vente  = ser.validated_data.get("type_vente", "cash")
+        montant_cash_acompte = ser.validated_data.get("montant_cash")
+        client = None
+        client_id = ser.validated_data.get("client_id")
+        if client_id:
+            from finance.models import ClientFinance
+            try:
+                client = ClientFinance.objects.get(
+                    pk=client_id,
+                    entreprise_id=lieu.entreprise_id,
+                )
+            except ClientFinance.DoesNotExist:
+                return Response(
+                    {"detail": "Client introuvable ou non autorisé."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
         try:
             ticket, created = vente_boutique(
                 lieu,
@@ -239,6 +257,10 @@ class VenteBoutiqueViewSet(ModelViewSet):
                 prix_mouture_kg=prix_mouture_kg,
                 quantite_apportee_client_kg=quantite_apportee_client_kg,
                 idempotency_key=idempotency_key,
+                type_vente=type_vente,
+                montant_cash=montant_cash_acompte,
+                client=client,
+                created_by=request.user,
             )
         except ErreurStock as e:
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
@@ -265,7 +287,11 @@ class VenteBoutiqueViewSet(ModelViewSet):
                 "numero": ticket.numero,
                 "lieu_id": lieu.pk,
                 "mouture": mouture,
+                "type_vente": ticket.type_vente,
                 "montant_total": str(ticket.montant_total),
+                "montant_cash": str(ticket.montant_cash),
+                "montant_credit": str(ticket.montant_credit),
+                "client_id": ticket.client_id,
                 "operateur": request.user.username,
                 **mouture_extra,
             },
@@ -808,3 +834,42 @@ class MouturePdfExportView(APIView):
         response = HttpResponse(buf.read(), content_type="application/pdf")
         response["Content-Disposition"] = f'attachment; filename="{fname}"'
         return response
+
+
+class DashboardBoutiqueView(APIView):
+    """
+    GET /api/boutique/dashboard/
+    Résumé financier du lieu (ventes, cash, créances, dépenses, stock).
+    Boutique : son propre lieu. Admin/DAF : ?lieu_id= requis.
+    """
+    permission_classes = [IsAuthenticated, IsBoutiqueRole | IsAdminRole]
+
+    def get(self, request):
+        from finance.services import get_dashboard_boutique
+
+        if request.user.role in (
+            CustomUser.ROLE_BOUTIQUE,
+        ):
+            lieu = get_lieu_boutique(request)
+            if not lieu:
+                return Response({"detail": "Lieu introuvable."}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            # Admin/DAF : lieu_id obligatoire pour cibler une boutique spécifique
+            lieu_id = request.query_params.get("lieu_id")
+            if not lieu_id:
+                return Response(
+                    {"detail": "Paramètre lieu_id requis (admin/DAF)."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            try:
+                lieu = Lieu.objects.get(
+                    pk=lieu_id,
+                    entreprise_id=request.user.entreprise_id,
+                    type_lieu=Lieu.TYPE_MAGASIN,
+                )
+            except Lieu.DoesNotExist:
+                return Response({"detail": "Boutique introuvable."}, status=status.HTTP_404_NOT_FOUND)
+
+        data = get_dashboard_boutique(lieu)
+        # Convertir Decimal → str pour JSON
+        return Response({k: str(v) for k, v in data.items()})

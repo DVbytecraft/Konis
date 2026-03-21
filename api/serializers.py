@@ -9,6 +9,7 @@ from rest_framework import serializers
 
 from core.models import CustomUser, Entreprise, Lieu
 from depenses.models import CategorieDepense, Depense
+from finance.models import ClientFinance, CollecteArgent, Creancier
 from inventaire.models import AchatMPSL, AchatUsine, MouvementStock, Stock, Transfert
 from produits.models import Categorie, Produit
 from usine.models import LotProduction, TransfertCession, TransfertInterUsine
@@ -372,6 +373,8 @@ class TicketSerializer(serializers.ModelSerializer):
     lieu_nom = serializers.CharField(source="lieu.nom", read_only=True)
     lignes_count = serializers.SerializerMethodField()
     mouture_source = serializers.SerializerMethodField()
+    client_nom = serializers.SerializerMethodField()
+    type_vente_label = serializers.SerializerMethodField()
 
     def get_lignes_count(self, obj):
         return len(obj.lignes.all())
@@ -381,16 +384,27 @@ class TicketSerializer(serializers.ModelSerializer):
             return None
         return "mouture_seule" if self.get_lignes_count(obj) == 0 else "vente_avec_mouture"
 
+    def get_client_nom(self, obj):
+        return obj.client.nom if obj.client_id else None
+
+    def get_type_vente_label(self, obj):
+        return obj.get_type_vente_display()
+
     class Meta:
         model = Ticket
         fields = (
             "id", "lieu", "lieu_nom", "date", "numero", "lignes",
+            # Type de vente
+            "type_vente", "type_vente_label",
+            "montant_cash", "montant_credit",
+            "client", "client_nom",
             # Mouture
             "produit_apporte", "mouture",
             "prix_mouture_kg", "prix_mouture_tonne", "prix_mouture_sac",
             "quantite_apportee_client",
             "cout_mouture", "montant_total", "lignes_count", "mouture_source",
         )
+        read_only_fields = ("type_vente_label", "client_nom", "lignes_count", "mouture_source")
 
 
 class VenteBoutiqueCreateSerializer(serializers.Serializer):
@@ -398,7 +412,22 @@ class VenteBoutiqueCreateSerializer(serializers.Serializer):
         child=serializers.DictField(),
         help_text="[{produit: int, quantite: decimal, prix_unitaire: decimal}, ...]",
     )
-    # Champs mouture — formule unifiée en kg
+    # ── Type de vente ────────────────────────────────────────────────────────
+    type_vente = serializers.ChoiceField(
+        choices=Ticket.TYPE_VENTE_CHOICES,
+        default=Ticket.TYPE_CASH,
+        help_text="'cash' | 'credit' | 'partiel'",
+    )
+    montant_cash = serializers.DecimalField(
+        max_digits=14, decimal_places=2, min_value=Decimal("0"),
+        required=False, allow_null=True, default=None,
+        help_text="Acompte versé si type_vente='partiel'. Ignoré si cash ou credit.",
+    )
+    client_id = serializers.IntegerField(
+        required=False, allow_null=True, default=None,
+        help_text="ID ClientFinance — requis si type_vente = credit ou partiel.",
+    )
+    # ── Champs mouture — formule unifiée en kg ───────────────────────────────
     mouture = serializers.BooleanField(default=False)
     prix_mouture_kg = serializers.DecimalField(
         max_digits=12, decimal_places=2, min_value=Decimal("0"),
@@ -444,6 +473,17 @@ class VenteBoutiqueCreateSerializer(serializers.Serializer):
         return value
 
     def validate(self, data):
+        type_vente = data.get("type_vente", Ticket.TYPE_CASH)
+        if type_vente in (Ticket.TYPE_CREDIT, Ticket.TYPE_PARTIEL):
+            if not data.get("client_id"):
+                raise serializers.ValidationError(
+                    {"client_id": "Un client est requis pour une vente à crédit ou partielle."}
+                )
+        if type_vente == Ticket.TYPE_PARTIEL:
+            if data.get("montant_cash") is None:
+                raise serializers.ValidationError(
+                    {"montant_cash": "L'acompte (montant_cash) est requis pour une vente partielle."}
+                )
         if data.get("mouture"):
             if not data.get("prix_mouture_kg"):
                 raise serializers.ValidationError(
@@ -881,34 +921,59 @@ class TicketReprintCreateSerializer(serializers.Serializer):
 # ---- MPSL ----
 
 class AchatMPSLSerializer(serializers.ModelSerializer):
-    lieu_nom = serializers.CharField(source="lieu.nom", read_only=True)
-    created_by_username = serializers.CharField(source="created_by.username", read_only=True)
+    lieu_nom             = serializers.CharField(source="lieu.nom",              read_only=True)
+    fournisseur_nom      = serializers.CharField(source="fournisseur.nom",       read_only=True, default=None)
+    created_by_username  = serializers.CharField(source="created_by.username",   read_only=True)
+    type_paiement_label  = serializers.SerializerMethodField()
+    journal_payable_id   = serializers.IntegerField(source="journal_payable.id", read_only=True, default=None)
+
+    def get_type_paiement_label(self, obj):
+        return obj.get_type_paiement_display()
 
     class Meta:
         model = AchatMPSL
         fields = (
             "id",
-            "lieu",
-            "lieu_nom",
+            "lieu", "lieu_nom",
+            "fournisseur", "fournisseur_nom",
             "produit_nom",
-            "quantite",
-            "unite",
-            "prix_unitaire",
-            "prix_total",
+            "quantite", "unite",
+            "prix_unitaire", "prix_total",
+            "type_paiement", "type_paiement_label",
+            "montant_paye_initial",
+            "journal_payable_id",
             "notes",
-            "created_by",
-            "created_by_username",
+            "created_by", "created_by_username",
             "date",
         )
-        read_only_fields = ("prix_total", "created_by", "date")
+        read_only_fields = ("prix_total", "created_by", "date", "journal_payable_id", "type_paiement_label")
 
 
 class AchatMPSLCreateSerializer(serializers.Serializer):
-    produit_nom = serializers.CharField(max_length=255)
-    quantite = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal("0.01"))
-    unite = serializers.ChoiceField(choices=AchatMPSL.UNITE_CHOICES, default=AchatMPSL.UNITE_SACS)
+    produit_nom   = serializers.CharField(max_length=255)
+    quantite      = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal("0.01"))
+    unite         = serializers.ChoiceField(choices=AchatMPSL.UNITE_CHOICES, default=AchatMPSL.UNITE_SACS)
     prix_unitaire = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal("0"), default=Decimal("0"))
-    notes = serializers.CharField(max_length=1000, required=False, allow_blank=True, default="")
+    notes         = serializers.CharField(max_length=1000, required=False, allow_blank=True, default="")
+    # Fournisseur & paiement
+    fournisseur_id       = serializers.IntegerField(required=False, allow_null=True, default=None,
+                                help_text="ID du Créancier (fournisseur). Requis si type_paiement ≠ cash.")
+    type_paiement        = serializers.ChoiceField(
+        choices=AchatMPSL.TYPE_PAIEMENT_CHOICES, default=AchatMPSL.TYPE_CASH,
+        help_text="'cash' | 'credit' | 'partiel'",
+    )
+    montant_paye_initial = serializers.DecimalField(
+        max_digits=14, decimal_places=2, min_value=Decimal("0"),
+        required=False, default=Decimal("0"),
+        help_text="Acompte versé si type_paiement='partiel'.",
+    )
+
+    def validate(self, data):
+        if data.get("type_paiement") in ("credit", "partiel") and not data.get("fournisseur_id"):
+            raise serializers.ValidationError(
+                {"fournisseur_id": "Le fournisseur est requis pour un achat à crédit ou partiel."}
+            )
+        return data
 
 
 class TransfertMPSLCreateSerializer(serializers.Serializer):
@@ -993,3 +1058,46 @@ class TransfertDirectUsineCreateSerializer(serializers.Serializer):
         if errors:
             raise serializers.ValidationError(errors)
         return value
+
+
+# ---- CollecteArgent (Collectionneur) ----
+
+class CollecteArgentSerializer(serializers.ModelSerializer):
+    lieu_nom         = serializers.CharField(source="lieu.nom",         read_only=True)
+    collecteur_nom   = serializers.CharField(source="collecteur.username", read_only=True, default=None)
+    created_by_nom   = serializers.CharField(source="created_by.username", read_only=True, default=None)
+    depot_banque_id  = serializers.IntegerField(source="depot_banque.id",  read_only=True, default=None)
+
+    class Meta:
+        model  = CollecteArgent
+        fields = (
+            "id",
+            "lieu", "lieu_nom",
+            "collecteur", "collecteur_nom",
+            "date_collecte",
+            "montant_trouve", "montant_pris", "montant_laisse",
+            "depot_banque_id",
+            "notes",
+            "created_by", "created_by_nom",
+            "created_at",
+        )
+        read_only_fields = ("montant_laisse", "depot_banque_id", "created_by", "created_at")
+
+
+class CollecteArgentCreateSerializer(serializers.Serializer):
+    lieu_id          = serializers.IntegerField(help_text="ID de la boutique visitée.")
+    date_collecte    = serializers.DateField()
+    montant_trouve   = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=Decimal("0"))
+    montant_pris     = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=Decimal("0"))
+    notes            = serializers.CharField(max_length=1000, required=False, allow_blank=True, default="")
+    deposer_en_banque = serializers.BooleanField(
+        default=False,
+        help_text="Si True, crée automatiquement un dépôt CaisseSupremeTransaction.",
+    )
+
+    def validate(self, data):
+        if data["montant_pris"] > data["montant_trouve"]:
+            raise serializers.ValidationError(
+                {"montant_pris": "montant_pris ne peut pas dépasser montant_trouve."}
+            )
+        return data

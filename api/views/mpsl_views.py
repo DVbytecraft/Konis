@@ -58,7 +58,7 @@ class AchatMPSLViewSet(ModelViewSet):
 
     def get_queryset(self):
         qs = AchatMPSL.objects.select_related(
-            "lieu", "created_by"
+            "lieu", "created_by", "fournisseur", "journal_payable"
         ).order_by("-date")
         lieu = get_lieu_mpsl(self.request)
         if self.request.user.role == CustomUser.ROLE_MPSL:
@@ -84,6 +84,22 @@ class AchatMPSLViewSet(ModelViewSet):
         ser.is_valid(raise_exception=True)
         d = ser.validated_data
 
+        # Résoudre le fournisseur (scoping multi-tenant)
+        fournisseur = None
+        fournisseur_id = d.get("fournisseur_id")
+        if fournisseur_id:
+            from finance.models import Creancier
+            try:
+                fournisseur = Creancier.objects.get(
+                    pk=fournisseur_id,
+                    entreprise_id=lieu.entreprise_id,
+                )
+            except Creancier.DoesNotExist:
+                return Response(
+                    {"detail": "Fournisseur introuvable ou non autorisé."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
         try:
             achat = enregistrer_achat_mpsl(
                 lieu=lieu,
@@ -93,6 +109,9 @@ class AchatMPSLViewSet(ModelViewSet):
                 prix_unitaire=d.get("prix_unitaire", Decimal("0")),
                 notes=d.get("notes", ""),
                 created_by=request.user,
+                fournisseur=fournisseur,
+                type_paiement=d.get("type_paiement", "cash"),
+                montant_paye_initial=d.get("montant_paye_initial", Decimal("0")),
             )
         except ErreurStock as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
