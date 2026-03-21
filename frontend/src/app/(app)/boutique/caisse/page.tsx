@@ -642,7 +642,7 @@ export default function BoutiqueCaissePage() {
                           {p.stock_label}
                         </td>
                       </tr>
-                    );})}
+                    ))}
                 </tbody>
               </table>
               {produits.filter((p) => p.has_stock).length > 10 && (
@@ -947,7 +947,7 @@ export default function BoutiqueCaissePage() {
                       >
                         {t === "cash" ? "Cash" : t === "credit" ? "Crédit" : "Partiel"}
                       </button>
-                    );})}
+                    ))}
                   </div>
 
                   {/* Recherche client (crédit ou partiel) */}
