@@ -98,9 +98,11 @@ export default function BoutiqueCaissePage() {
   const [uniteMouture, setUniteMouture] = useState("sac");
   const [clientId, setClientId] = useState<number | null>(null);
   const [clientSearch, setClientSearch] = useState("");
+  const [clientContact, setClientContact] = useState("");
   const [clients, setClients] = useState<ClientFinance[]>([]);
   const [clientsLoading, setClientsLoading] = useState(false);
   const [showClientDropdown, setShowClientDropdown] = useState(false);
+  const [showContactField, setShowContactField] = useState(false);
 
   const [ventesDuJour, setVentesDuJour] = useState<
     Array<{ id: number; numero: string; date: string; total: number }>
@@ -342,15 +344,17 @@ export default function BoutiqueCaissePage() {
 
   const totalGeneral = totalPanier + (mouture ? coutMouture : 0);
 
-  const creerClient = useCallback(async (nom: string) => {
+  const creerClient = useCallback(async (nom: string, contact: string = "") => {
     if (!nom.trim()) return;
     try {
       const res = await apiFetch<ClientFinance>("/boutique/clients/", {
         method: "POST",
-        body: JSON.stringify({ nom: nom.trim() }),
+        body: JSON.stringify({ nom: nom.trim(), contact: contact.trim() }),
       });
       setClientId(res.id);
       setClientSearch(res.nom);
+      setClientContact(res.contact || "");
+      setShowContactField(false);
       setShowClientDropdown(false);
     } catch (e) {
       setErreur(e instanceof Error ? e.message : "Erreur création client");
@@ -441,6 +445,8 @@ export default function BoutiqueCaissePage() {
       setTypeVente("cash");
       setClientId(null);
       setClientSearch("");
+      setClientContact("");
+      setShowContactField(false);
       setMontantCash("");
       chargerDonnees();
     } catch (e) {
@@ -1073,55 +1079,87 @@ export default function BoutiqueCaissePage() {
                     ))}
                   </div>
 
-                  {/* Recherche client (crédit ou partiel) */}
+                  {/* Fiche client (crédit ou partiel) */}
                   {(typeVente === "credit" || typeVente === "partiel") && (
-                    <div className="relative">
-                      <Input
-                        placeholder="Rechercher un client…"
-                        value={clientSearch}
-                        onChange={(e) => {
-                          setClientSearch(e.target.value);
-                          setClientId(null);
-                          setShowClientDropdown(true);
-                        }}
-                        onFocus={() => setShowClientDropdown(true)}
-                        className="h-8 text-xs"
-                      />
-                      {clientId && (
-                        <p className="text-xs text-green-700 dark:text-green-300 mt-0.5 pl-1">
-                          ✓ {clientSearch}
-                        </p>
-                      )}
-                      {showClientDropdown && !clientId && clientSearch.trim() && (
-                        <ul className="absolute z-50 top-full left-0 right-0 mt-0.5 border rounded-md bg-popover shadow-md max-h-40 overflow-y-auto">
-                          {clientsLoading ? (
-                            <li className="px-3 py-2 text-xs text-muted-foreground">Chargement…</li>
-                          ) : (
-                            <>
-                              {clients.map((c) => (
-                                <li
-                                  key={c.id}
-                                  className="px-3 py-1.5 text-xs hover:bg-muted cursor-pointer"
-                                  onMouseDown={(e) => {
-                                    e.preventDefault();
-                                    setClientId(c.id);
-                                    setClientSearch(c.nom);
-                                    setShowClientDropdown(false);
-                                  }}
-                                >
-                                  <span className="font-medium">{c.nom}</span>
-                                  {c.contact && <span className="text-muted-foreground ml-2">{c.contact}</span>}
-                                </li>
-                              ))}
-                              <li
-                                className="px-3 py-1.5 text-xs text-green-700 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-950/20 cursor-pointer border-t font-medium"
-                                onMouseDown={(e) => { e.preventDefault(); creerClient(clientSearch); }}
-                              >
-                                + Créer « {clientSearch} »
-                              </li>
-                            </>
+                    <div className="space-y-1.5">
+                      {clientId ? (
+                        /* ── Client sélectionné ── */
+                        <div className="rounded border border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-950/20 p-2 space-y-1">
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <p className="text-xs font-semibold text-green-800 dark:text-green-300">✓ {clientSearch}</p>
+                              {clientContact && <p className="text-xs text-muted-foreground">{clientContact}</p>}
+                            </div>
+                            <button
+                              type="button"
+                              className="text-xs text-muted-foreground hover:text-destructive shrink-0"
+                              onClick={() => { setClientId(null); setClientSearch(""); setClientContact(""); setShowContactField(false); }}
+                            >
+                              Changer
+                            </button>
+                          </div>
+                          <Link
+                            href={`/boutique/creances?client=${encodeURIComponent(clientSearch)}`}
+                            className="text-xs text-blue-600 hover:underline"
+                          >
+                            → Voir journal créances
+                          </Link>
+                        </div>
+                      ) : showContactField ? (
+                        /* ── Formulaire nouveau client ── */
+                        <div className="rounded border border-blue-200 dark:border-blue-800 bg-blue-50/40 dark:bg-blue-950/20 p-2 space-y-1.5">
+                          <p className="text-xs font-medium">Nouveau client : <span className="font-semibold">{clientSearch}</span></p>
+                          <Input
+                            type="text"
+                            placeholder="Contact (téléphone, email…)"
+                            value={clientContact}
+                            onChange={(e) => setClientContact(e.target.value)}
+                            className="h-8 text-xs"
+                            autoFocus
+                          />
+                          <div className="flex gap-1">
+                            <Button size="sm" className="flex-1 h-7 text-xs" onClick={() => creerClient(clientSearch, clientContact)}>
+                              Créer et sélectionner
+                            </Button>
+                            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setShowContactField(false)}>
+                              Annuler
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        /* ── Recherche ── */
+                        <div className="relative">
+                          <Input
+                            placeholder="Nom du client…"
+                            value={clientSearch}
+                            onChange={(e) => { setClientSearch(e.target.value); setClientId(null); setShowClientDropdown(true); }}
+                            onFocus={() => setShowClientDropdown(true)}
+                            className="h-8 text-xs"
+                          />
+                          {showClientDropdown && clientSearch.trim() && (
+                            <ul className="absolute z-50 top-full left-0 right-0 mt-0.5 border rounded-md bg-popover shadow-md max-h-44 overflow-y-auto">
+                              {clientsLoading ? (
+                                <li className="px-3 py-2 text-xs text-muted-foreground">Chargement…</li>
+                              ) : (
+                                <>
+                                  {clients.map((c) => (
+                                    <li key={c.id} className="px-3 py-2 text-xs hover:bg-muted cursor-pointer"
+                                      onMouseDown={(e) => { e.preventDefault(); setClientId(c.id); setClientSearch(c.nom); setClientContact(c.contact || ""); setShowClientDropdown(false); }}
+                                    >
+                                      <span className="font-medium">{c.nom}</span>
+                                      {c.contact && <span className="text-muted-foreground ml-2 text-xs">{c.contact}</span>}
+                                    </li>
+                                  ))}
+                                  <li className="px-3 py-2 text-xs text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/30 cursor-pointer border-t font-medium"
+                                    onMouseDown={(e) => { e.preventDefault(); setShowContactField(true); setShowClientDropdown(false); }}
+                                  >
+                                    + Créer « {clientSearch} » avec contact…
+                                  </li>
+                                </>
+                              )}
+                            </ul>
                           )}
-                        </ul>
+                        </div>
                       )}
                     </div>
                   )}
