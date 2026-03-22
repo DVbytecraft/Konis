@@ -471,7 +471,7 @@ export default function BoutiqueCaissePage() {
       isPayingRef.current = false;
       setPaiementEnCours(false);
     }
-  }, [panier, mouture, prixMoutureKg, prixMoutureTonne, poidsSacManuel, quantiteTotaleMouture, uniteMouture, typeVente, clientId, montantCash, chargerDonnees]);
+  }, [panier, mouture, prixMoutureKg, prixMoutureTonne, quantiteTotaleMouture, uniteMouture, typeVente, clientId, montantCash, chargerDonnees]);
 
   const fermerTicket = useCallback(() => setTicketImprimer(null), []);
 
