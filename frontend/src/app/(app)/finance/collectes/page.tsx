@@ -45,6 +45,12 @@ const EMPTY_FORM = {
   deposer_en_banque: false,
 };
 
+function genKey() {
+  return typeof crypto !== "undefined" && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function CollectesPage() {
@@ -56,6 +62,7 @@ export default function CollectesPage() {
   const [form, setForm]             = useState(EMPTY_FORM);
   const [submitting, setSubmitting] = useState(false);
   const [formErr, setFormErr]       = useState("");
+  const [idemKey, setIdemKey]       = useState("");
 
   const charger = useCallback(async () => {
     try {
@@ -87,6 +94,7 @@ export default function CollectesPage() {
   const ouvrirForm = () => {
     setForm(EMPTY_FORM);
     setFormErr("");
+    setIdemKey(genKey());
     setShowForm(true);
   };
 
@@ -103,6 +111,7 @@ export default function CollectesPage() {
     try {
       await apiFetch("/finance/collectes/", {
         method: "POST",
+        headers: { "Idempotency-Key": idemKey },
         body: JSON.stringify({
           lieu_id:           parseInt(form.lieu_id),
           date_collecte:     form.date_collecte,
