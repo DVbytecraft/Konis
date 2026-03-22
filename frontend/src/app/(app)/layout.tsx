@@ -35,6 +35,7 @@ const navByRole: Record<string, { href: string; label: string; icon: React.Compo
     { href: "/finance/emprunts", label: "Emprunts", icon: CreditCard },
     { href: "/finance/tresorerie", label: "Trésorerie", icon: Banknote },
     { href: "/finance/projets", label: "Projets", icon: FolderKanban },
+    { href: "/finance/collectes", label: "Collectes", icon: Truck },
   ],
   usine: [
     { href: "/factory", label: "Tableau de bord", icon: Warehouse },

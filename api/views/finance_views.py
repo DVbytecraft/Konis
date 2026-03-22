@@ -13,7 +13,7 @@ from rest_framework.viewsets import GenericViewSet
 from rest_framework.mixins import ListModelMixin, RetrieveModelMixin, CreateModelMixin, UpdateModelMixin
 
 from api.throttling import FinanceCreateRateThrottle
-from api.permissions import IsDafRole, IsAdminRole, DafReadOnlyMixin, IsCollecteurRole
+from api.permissions import IsDafRole, IsAdminRole, DafReadOnlyMixin, IsCollecteurRole, IsComptableRole
 from api.serializers_finance import (
     CaisseTransactionCreateSerializer,
     CaisseTransactionSerializer,
@@ -734,7 +734,7 @@ class CollecteViewSet(DafReadOnlyMixin, ListModelMixin, RetrieveModelMixin, Crea
       - Admin / DAF / Comptable : voient toutes les collectes de l'entreprise
     Filtres (admin/DAF uniquement) : ?lieu_id= ?debut= ?fin= ?collecteur_id=
     """
-    permission_classes = [IsDafRole | IsAdminRole | IsCollecteurRole]
+    permission_classes = [IsDafRole | IsAdminRole | IsCollecteurRole | IsComptableRole]
     throttle_classes = [FinanceCreateRateThrottle]
     http_method_names = ["get", "post", "patch", "head", "options"]
 
