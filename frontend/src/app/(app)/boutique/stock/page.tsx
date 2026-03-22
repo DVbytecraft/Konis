@@ -111,15 +111,12 @@ export default function BoutiqueStockPage() {
 
   // Affichage quantite sacs + kg
   const afficherStock = (item: StockItem) => {
-    const hasPds = item.poids_par_sac && parseFloat(item.poids_par_sac) > 0;
-    const hasKg = parseFloat(item.quantite_kg) > 0;
-    if (hasPds && hasKg) {
-      return `${item.quantite} sacs + ${item.quantite_kg} kg`;
-    }
-    if (hasPds) {
-      return `${item.quantite} sacs`;
-    }
-    return `${item.quantite} ${item.produit_unite}`;
+    const sacs = parseFloat(item.quantite);
+    const kg = parseFloat(item.quantite_kg);
+    if (sacs > 0 && kg > 0) return `${item.quantite} sacs + ${kg.toFixed(3)} kg`;
+    if (sacs > 0) return `${item.quantite} sacs`;
+    if (kg > 0) return `${kg.toFixed(3)} kg`;
+    return `0 ${item.produit_unite}`;
   };
 
   // Peut-on convertir ? Oui si quantite (sacs) > 0
