@@ -61,6 +61,10 @@ export default function CollecteurPage() {
   const [debut, setDebut] = useState("");
   const [fin,   setFin]   = useState("");
 
+  // Caisse disponible par boutique (chargée au démarrage + après chaque collecte)
+  const [caissesMap, setCaissesMap]     = useState<Record<number, number>>({});
+  const [caissesLoading, setCaissesLoading] = useState(false);
+
   // Formulaire correction
   const [editTarget, setEditTarget]     = useState<Collecte | null>(null);
   const [editForm, setEditForm]         = useState({ montant_trouve: "", montant_pris: "", notes: "" });
@@ -71,6 +75,24 @@ export default function CollecteurPage() {
   const [viewByBoutique, setViewByBoutique] = useState(false);
 
   // ── Chargement ──────────────────────────────────────────────────────────────
+
+  const chargerCaisses = useCallback(async (lieuxList: Lieu[]) => {
+    if (!lieuxList.length) return;
+    setCaissesLoading(true);
+    try {
+      const results = await Promise.all(
+        lieuxList.map((l) =>
+          apiFetch<{ lieu_id: number; caisse_disponible: string }>(
+            `/finance/collectes/caisse-disponible/?lieu_id=${l.id}`
+          ).then((r) => [l.id, parseFloat(r.caisse_disponible)] as [number, number])
+           .catch(() => [l.id, 0] as [number, number])
+        )
+      );
+      setCaissesMap(Object.fromEntries(results));
+    } finally {
+      setCaissesLoading(false);
+    }
+  }, []);
 
   const charger = useCallback(async () => {
     try {
@@ -84,14 +106,16 @@ export default function CollecteurPage() {
         apiFetch<Paginated<Collecte> | Collecte[]>(`/finance/collectes/${qs}`),
         apiFetch<Paginated<Lieu> | Lieu[]>("/locations/by-type/?type=magasin"),
       ]);
+      const lieuxList = toList(lieuxRes);
       setCollectes(toList(collectesRes));
-      setLieux(toList(lieuxRes));
+      setLieux(lieuxList);
+      chargerCaisses(lieuxList);
     } catch {
       setErreur("Impossible de charger les données.");
     } finally {
       setLoading(false);
     }
-  }, [debut, fin]);
+  }, [debut, fin, chargerCaisses]);
 
   useEffect(() => { charger(); }, [charger]);
 
@@ -149,6 +173,11 @@ export default function CollecteurPage() {
     if (isNaN(trouve) || trouve < 0) { setCreateErr("Montant trouvé invalide."); return; }
     if (isNaN(pris)   || pris   < 0) { setCreateErr("Montant collecté invalide."); return; }
     if (pris > trouve)               { setCreateErr("Le montant collecté ne peut pas dépasser le montant trouvé."); return; }
+    const lieuCaisse = createForm.lieu_id ? caissesMap[parseInt(createForm.lieu_id)] : undefined;
+    if (lieuCaisse !== undefined && pris > lieuCaisse) {
+      setCreateErr(`Montant collecté (${fmt(pris)} FCFA) supérieur à la caisse disponible (${fmt(lieuCaisse)} FCFA).`);
+      return;
+    }
     setCreating(true);
     try {
       await apiFetch("/finance/collectes/", {
@@ -167,6 +196,7 @@ export default function CollecteurPage() {
       setCreateForm(EMPTY_CREATE);
       flashSuccess("Collecte enregistrée avec succès.");
       charger();
+      chargerCaisses(lieux);
     } catch (err) {
       setCreateErr(err instanceof Error ? err.message : "Erreur d'enregistrement.");
     } finally {
@@ -233,7 +263,7 @@ export default function CollecteurPage() {
             <RefreshCw className={cn("h-4 w-4 mr-2", loading && "animate-spin")} />
             Actualiser
           </Button>
-          <Button size="sm" onClick={() => { setCreateForm(EMPTY_CREATE); setCreateErr(""); setShowCreate(true); }}
+          <Button size="sm" onClick={() => { setCreateForm(EMPTY_CREATE); setCreateErr(""); setCaisseDispo(null); setShowCreate(true); }}
             className="bg-blue-600 hover:bg-blue-700 text-white">
             <Plus className="h-4 w-4 mr-2" /> Nouvelle collecte
           </Button>
@@ -281,6 +311,55 @@ export default function CollecteurPage() {
       )}
       {erreur && (
         <p className="text-sm text-destructive bg-destructive/10 px-3 py-2 rounded">{erreur}</p>
+      )}
+
+      {/* Caisses disponibles par boutique */}
+      {lieux.length > 0 && (
+        <div>
+          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2 flex items-center gap-2">
+            <Banknote className="h-4 w-4" />
+            Caisse disponible par boutique
+          </h2>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+            {lieux.map((l) => {
+              const cd = caissesMap[l.id];
+              const isEmpty = cd !== undefined && cd <= 0;
+              return (
+                <Card
+                  key={l.id}
+                  className={cn(
+                    "cursor-pointer border-l-4 transition-shadow hover:shadow-md",
+                    isEmpty
+                      ? "border-l-red-400"
+                      : "border-l-green-400"
+                  )}
+                  onClick={() => {
+                    setCreateForm({ ...EMPTY_CREATE, lieu_id: String(l.id) });
+                    setCreateErr("");
+                    setShowCreate(true);
+                  }}
+                >
+                  <CardContent className="pt-3 pb-3 px-4">
+                    <p className="text-xs font-semibold truncate mb-1">{l.nom}</p>
+                    {caissesLoading ? (
+                      <p className="text-sm text-muted-foreground">Calcul…</p>
+                    ) : cd !== undefined ? (
+                      <p className={cn(
+                        "text-lg font-bold",
+                        isEmpty ? "text-red-600 dark:text-red-400" : "text-green-700 dark:text-green-300"
+                      )}>
+                        {fmt(cd)}
+                      </p>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">—</p>
+                    )}
+                    <p className="text-xs text-muted-foreground">FCFA</p>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        </div>
       )}
 
       {/* KPIs */}
@@ -460,6 +539,27 @@ export default function CollecteurPage() {
                     {lieux.map((l) => <option key={l.id} value={l.id}>{l.nom}</option>)}
                   </select>
                 </div>
+
+                {createForm.lieu_id && (() => {
+                  const cd = caissesMap[parseInt(createForm.lieu_id)];
+                  return (
+                    <div className={cn(
+                      "flex items-center justify-between rounded px-3 py-2 text-sm border",
+                      cd !== undefined && cd <= 0
+                        ? "bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300"
+                        : "bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800 text-green-700 dark:text-green-300"
+                    )}>
+                      <span className="text-xs font-medium">Caisse disponible</span>
+                      {caissesLoading ? (
+                        <span className="text-xs text-muted-foreground">Calcul…</span>
+                      ) : cd !== undefined ? (
+                        <span className="font-bold">{fmt(cd)} FCFA</span>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 <div className="space-y-1">
                   <label className="text-xs font-medium">Date *</label>

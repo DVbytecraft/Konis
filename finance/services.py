@@ -722,6 +722,34 @@ def get_resume_financier(entreprise: Entreprise) -> dict:
 # COLLECTE ARGENT — Passage du collectionneur
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def get_caisse_physique_boutique(lieu) -> Decimal:
+    """
+    Calcule la caisse physique actuelle d'une boutique (sans filtre de date).
+
+    caisse_physique = Σ montant_cash(tickets) + Σ paiements_créances − Σ montant_pris(collectes)
+
+    C'est le montant réellement disponible dans le tiroir à l'instant T.
+    """
+    from django.db.models import Sum
+    from ventes.models import Ticket
+    from finance.models import CollecteArgent
+
+    cash = (
+        Ticket.objects.filter(lieu=lieu)
+        .exclude(type_mouture=Ticket.TYPE_MOUTURE_INTERNE)
+        .aggregate(t=Sum("montant_cash"))["t"] or Decimal("0")
+    )
+    pcc = (
+        PaiementCreance.objects.filter(journal__lieu=lieu)
+        .aggregate(t=Sum("montant"))["t"] or Decimal("0")
+    )
+    pris = (
+        CollecteArgent.objects.filter(lieu=lieu)
+        .aggregate(t=Sum("montant_pris"))["t"] or Decimal("0")
+    )
+    return cash + pcc - pris
+
+
 @transaction.atomic
 def enregistrer_collecte(
     *,
@@ -753,6 +781,13 @@ def enregistrer_collecte(
         )
     if montant_trouve < Decimal("0"):
         raise ErreurFinance("montant_trouve doit être >= 0.")
+
+    caisse_dispo = get_caisse_physique_boutique(lieu)
+    if montant_pris > caisse_dispo:
+        raise ErreurFinance(
+            f"Montant à collecter ({montant_pris} FCFA) supérieur à la caisse disponible "
+            f"({caisse_dispo} FCFA) dans cette boutique."
+        )
 
     collecte = CollecteArgent.objects.create(
         lieu=lieu,

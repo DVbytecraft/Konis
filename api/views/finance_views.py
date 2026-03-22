@@ -64,6 +64,7 @@ from finance.services import (
     enregistrer_paiement_payable,
     enregistrer_remboursement,
     enregistrer_transaction_caisse,
+    get_caisse_physique_boutique,
     get_dashboard_global,
     get_resume_financier,
     get_solde_caisse,
@@ -889,6 +890,29 @@ class CollecteViewSet(DafReadOnlyMixin, ListModelMixin, RetrieveModelMixin, Crea
             "lieu", "collecteur", "created_by", "depot_banque"
         ).get(pk=collecte.pk)
         return Response(CollecteArgentSerializer(collecte_qs).data)
+
+    @action(detail=False, methods=["get"], url_path="caisse-disponible")
+    def caisse_disponible(self, request):
+        """
+        GET /api/finance/collectes/caisse-disponible/?lieu_id=X
+        Retourne la caisse physique disponible dans une boutique.
+        Accessible par le collecteur (pour pré-valider son saisie).
+        """
+        lieu_id = request.query_params.get("lieu_id")
+        if not lieu_id:
+            return Response({"detail": "lieu_id requis."}, status=status.HTTP_400_BAD_REQUEST)
+        if not request.user.entreprise_id:
+            return Response({"detail": "Entreprise requise."}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            lieu = Lieu.objects.get(
+                pk=lieu_id,
+                entreprise_id=request.user.entreprise_id,
+                type_lieu=Lieu.TYPE_MAGASIN,
+            )
+        except Lieu.DoesNotExist:
+            return Response({"detail": "Boutique introuvable."}, status=status.HTTP_404_NOT_FOUND)
+        caisse = get_caisse_physique_boutique(lieu)
+        return Response({"lieu_id": lieu.pk, "lieu_nom": lieu.nom, "caisse_disponible": str(caisse)})
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
