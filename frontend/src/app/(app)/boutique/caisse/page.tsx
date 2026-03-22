@@ -40,6 +40,7 @@ interface LignePanier {
   unite_vente: string;
   quantite: number;
   prix_unitaire: number;
+  poids_par_sac: number | null;
 }
 
 interface TicketReponse {
@@ -90,6 +91,7 @@ export default function BoutiqueCaissePage() {
   const [mouture, setMouture] = useState(false);
   const [prixMoutureKg, setPrixMoutureKg] = useState("");
   const [prixMoutureTonne, setPrixMoutureTonne] = useState("");
+  const [poidsSacManuel, setPoidsSacManuel] = useState<Record<number, string>>({});
   // ── Type de vente ─────────────────────────────────────────────────────────
   const [typeVente, setTypeVente] = useState<TypeVente>("cash");
   const [montantCash, setMontantCash] = useState(""); // acompte si partiel
@@ -280,6 +282,7 @@ export default function BoutiqueCaissePage() {
             unite_vente: uniteVente,
             quantite: Math.min(qte, maxDispo),
             prix_unitaire: prix,
+            poids_par_sac: p.poids_par_sac,
           },
         ]);
       }
@@ -336,6 +339,10 @@ export default function BoutiqueCaissePage() {
       const unite = (l.unite_vente || l.produit_unite || "").toLowerCase();
       if (unite.includes("kg") && prixMoutureKg) return acc + l.quantite * +prixMoutureKg;
       if (unite.includes("tonne") && prixMoutureTonne) return acc + l.quantite * +prixMoutureTonne;
+      if (unite.includes("sac") && prixMoutureKg) {
+        const pds = l.poids_par_sac ?? parseFloat(poidsSacManuel[l.produit_id] || "0") || 0;
+        if (pds > 0) return acc + l.quantite * pds * +prixMoutureKg;
+      }
       return acc;
     }, 0);
   })();
@@ -459,7 +466,7 @@ export default function BoutiqueCaissePage() {
       isPayingRef.current = false;
       setPaiementEnCours(false);
     }
-  }, [panier, mouture, prixMoutureKg, prixMoutureTonne, quantiteTotaleMouture, uniteMouture, typeVente, clientId, montantCash, chargerDonnees]);
+  }, [panier, mouture, prixMoutureKg, prixMoutureTonne, poidsSacManuel, quantiteTotaleMouture, uniteMouture, typeVente, clientId, montantCash, chargerDonnees]);
 
   const fermerTicket = useCallback(() => setTicketImprimer(null), []);
 
@@ -470,6 +477,7 @@ export default function BoutiqueCaissePage() {
     setMouture(false);
     setPrixMoutureKg("");
     setPrixMoutureTonne("");
+    setPoidsSacManuel({});
     setQuantiteTotaleMouture("");
     setUniteMouture("kg");
     searchInputRef.current?.focus();
@@ -956,6 +964,35 @@ export default function BoutiqueCaissePage() {
                     onChange={(e) => setPrixMoutureTonne(e.target.value)}
                     className="h-8 text-xs"
                   />
+                  {/* Poids par sac — si produit sac sans poids défini */}
+                  {mouture && panier.some((l) => {
+                    const u = (l.unite_vente || l.produit_unite || "").toLowerCase();
+                    return u.includes("sac") && !l.poids_par_sac;
+                  }) && (
+                    <div className="border border-orange-300 dark:border-orange-700 rounded p-2 space-y-1.5 bg-orange-50/40 dark:bg-orange-950/20">
+                      <p className="text-xs font-medium text-orange-700 dark:text-orange-300">
+                        Poids par sac (pour calcul mouture)
+                      </p>
+                      {panier.filter((l) => {
+                        const u = (l.unite_vente || l.produit_unite || "").toLowerCase();
+                        return u.includes("sac") && !l.poids_par_sac;
+                      }).map((l) => (
+                        <div key={l.produit_id} className="flex items-center gap-1.5">
+                          <span className="text-xs text-muted-foreground flex-1 truncate">{l.produit_nom}</span>
+                          <Input
+                            type="number"
+                            min="0.001"
+                            step="0.001"
+                            placeholder="kg/sac"
+                            value={poidsSacManuel[l.produit_id] ?? ""}
+                            onChange={(e) => setPoidsSacManuel((prev) => ({ ...prev, [l.produit_id]: e.target.value }))}
+                            className="h-7 text-xs w-24"
+                          />
+                          <span className="text-xs text-muted-foreground">kg/sac</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   {/* Quantité totale à moudre — peut dépasser ce qui est acheté */}
                   <div className="border-t border-orange-200 dark:border-orange-800 pt-2 mt-1 space-y-1">
                     <p className="text-xs text-muted-foreground font-medium">
@@ -1000,16 +1037,27 @@ export default function BoutiqueCaissePage() {
                             const u = (l.unite_vente || l.produit_unite || "").toLowerCase();
                             let prix = 0;
                             let label = "";
+                            let kgParUnite = 1;
                             if (u.includes("kg") && prixMoutureKg) { prix = +prixMoutureKg; label = "kg"; }
                             else if (u.includes("tonne") && prixMoutureTonne) { prix = +prixMoutureTonne; label = "tonne"; }
+                            else if (u.includes("sac") && prixMoutureKg) {
+                              const pds = l.poids_par_sac ?? parseFloat(poidsSacManuel[l.produit_id] || "0") || 0;
+                              if (pds > 0) { prix = +prixMoutureKg; kgParUnite = pds; label = "sac"; }
+                            }
                             if (!prix) return null;
+                            const totalLigne = label === "sac"
+                              ? l.quantite * kgParUnite * prix
+                              : l.quantite * prix;
                             return (
                               <div key={l.produit_id} className="flex justify-between text-xs text-orange-700 dark:text-orange-300">
                                 <span className="truncate flex-1 mr-2">
-                                  {l.produit_nom} ({l.quantite} {l.produit_unite} × {prix}/{label})
+                                  {l.produit_nom}
+                                  {label === "sac"
+                                    ? ` (${l.quantite} sacs × ${kgParUnite} kg × ${prix}/kg)`
+                                    : ` (${l.quantite} ${l.produit_unite} × ${prix}/${label})`}
                                 </span>
                                 <span className="shrink-0 font-medium">
-                                  {fmt(Number(l.quantite) * prix)} F
+                                  {fmt(totalLigne)} F
                                 </span>
                               </div>
                             );
