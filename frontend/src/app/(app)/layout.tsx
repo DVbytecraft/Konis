@@ -42,6 +42,7 @@ const navByRole: Record<string, { href: string; label: string; icon: React.Compo
     { href: "/factory/transfers", label: "Transferts", icon: Truck },
     { href: "/factory/shop-stock", label: "Stocks boutiques", icon: Store },
     { href: "/factory/mouture", label: "Mouture", icon: Wheat },
+    { href: "/usine/stock", label: "Stock usine", icon: Package },
     { href: "/factures", label: "Factures", icon: Receipt },
   ],
   factory: [
@@ -65,6 +66,7 @@ const navByRole: Record<string, { href: string; label: string; icon: React.Compo
     { href: "/mpsl", label: "Tableau de bord", icon: Truck },
     { href: "/mpsl/achats", label: "Achats", icon: Package },
     { href: "/mpsl/transferts", label: "Transferts", icon: Warehouse },
+    { href: "/mpsl/stock", label: "Stock", icon: Package },
   ],
   collecteur: [
     { href: "/collecteur", label: "Mes collectes", icon: Truck },
