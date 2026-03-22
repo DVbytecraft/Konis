@@ -341,7 +341,7 @@ export default function BoutiqueCaissePage() {
       if (unite.includes("kg") && prixMoutureKg) return acc + l.quantite * +prixMoutureKg;
       if (unite.includes("tonne") && prixMoutureTonne) return acc + l.quantite * +prixMoutureTonne;
       if (unite.includes("sac") && prixMoutureKg) {
-        const pds = l.poids_par_sac ?? parseFloat(poidsSacManuel[l.produit_id] || "0") || 0;
+        const pds = l.poids_par_sac ?? (parseFloat(poidsSacManuel[l.produit_id] || "0") || 0);
         if (pds > 0) return acc + l.quantite * pds * +prixMoutureKg;
       }
       return acc;
@@ -1046,7 +1046,7 @@ export default function BoutiqueCaissePage() {
                             if (u.includes("kg") && prixMoutureKg) { prix = +prixMoutureKg; label = "kg"; }
                             else if (u.includes("tonne") && prixMoutureTonne) { prix = +prixMoutureTonne; label = "tonne"; }
                             else if (u.includes("sac") && prixMoutureKg) {
-                              const pds = l.poids_par_sac ?? parseFloat(poidsSacManuel[l.produit_id] || "0") || 0;
+                              const pds = l.poids_par_sac ?? (parseFloat(poidsSacManuel[l.produit_id] || "0") || 0);
                               if (pds > 0) { prix = +prixMoutureKg; kgParUnite = pds; label = "sac"; }
                             }
                             if (!prix) return null;
