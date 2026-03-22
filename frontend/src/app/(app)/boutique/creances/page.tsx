@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/contexts/auth-context";
 import { apiFetch } from "@/lib/api";
-import { fmt } from "@/lib/utils";
+import { buildIdempotencyKey, fmt } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -129,6 +129,7 @@ export default function CreancesBoutiquePage() {
     try {
       await apiFetch(`/boutique/creances/${selected.id}/paiement/`, {
         method: "POST",
+        headers: { "Idempotency-Key": buildIdempotencyKey("paiement-creance") },
         body: JSON.stringify({
           montant: montantPaiement,
           date: datePaiement,
