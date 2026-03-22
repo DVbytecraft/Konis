@@ -360,8 +360,37 @@ class JournalCreanceViewSet(DafReadOnlyMixin, ListModelMixin, RetrieveModelMixin
         return JournalCreanceSerializer
 
     def create(self, request, *args, **kwargs):
+        from django.conf import settings
+        from api.utils import (
+            apply_idempotency_warning,
+            find_idempotency_record,
+            get_idempotency_info,
+            record_idempotency_replay,
+            record_idempotency_success,
+        )
+
         if not request.user.entreprise_id:
             return Response({"detail": "Entreprise requise."}, status=status.HTTP_403_FORBIDDEN)
+
+        idempotency_key, missing, payload_hash, _ = get_idempotency_info(
+            request, operation="creer_journal_creance"
+        )
+        if missing and settings.IDEMPOTENCY_STRICT_MODE:
+            resp = Response({"detail": "Idempotency-Key requis."}, status=status.HTTP_400_BAD_REQUEST)
+            return apply_idempotency_warning(resp, True)
+        if idempotency_key:
+            record = find_idempotency_record(
+                key=idempotency_key,
+                operation="creer_journal_creance",
+                endpoint=request.path,
+            )
+            if record and record.extra.get("response"):
+                record_idempotency_replay(
+                    request, key=idempotency_key, operation="creer_journal_creance"
+                )
+                resp = Response(record.extra.get("response"), status=status.HTTP_201_CREATED)
+                return apply_idempotency_warning(resp, missing)
+
         ser = JournalCreanceCreateSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         d = ser.validated_data
@@ -410,12 +439,25 @@ class JournalCreanceViewSet(DafReadOnlyMixin, ListModelMixin, RetrieveModelMixin
                 retrancher_caisse=retrancher_caisse,
             )
         except ErreurFinance as e:
-            return _err(e)
+            resp = _err(e)
+            return apply_idempotency_warning(resp, missing)
 
         journal_qs = JournalCreance.objects.prefetch_related(
             "lignes__produit", "paiements"
         ).get(pk=journal.pk)
-        return Response(JournalCreanceSerializer(journal_qs).data, status=status.HTTP_201_CREATED)
+        resp_data = JournalCreanceSerializer(journal_qs).data
+        if idempotency_key:
+            record_idempotency_success(
+                request=request,
+                key=idempotency_key,
+                operation="creer_journal_creance",
+                object_type="JournalCreance",
+                object_id=journal.pk,
+                payload_hash=payload_hash,
+                response_data=resp_data,
+            )
+        resp = Response(resp_data, status=status.HTTP_201_CREATED)
+        return apply_idempotency_warning(resp, missing)
 
     @action(detail=True, methods=["post"])
     def paiement(self, request, pk=None):
@@ -924,6 +966,25 @@ class CollecteViewSet(DafReadOnlyMixin, ListModelMixin, RetrieveModelMixin, Crea
             return Response({"detail": "Boutique introuvable."}, status=status.HTTP_404_NOT_FOUND)
         caisse = get_caisse_physique_boutique(lieu)
         return Response({"lieu_id": lieu.pk, "lieu_nom": lieu.nom, "caisse_disponible": str(caisse)})
+
+    @action(detail=False, methods=["get"], url_path="caisses-disponibles")
+    def caisses_disponibles(self, request):
+        """
+        GET /api/finance/collectes/caisses-disponibles/
+        Retourne la caisse physique disponible pour toutes les boutiques de l'entreprise
+        en une seule requête (évite les N appels parallèles côté frontend).
+        """
+        if not request.user.entreprise_id:
+            return Response({"detail": "Entreprise requise."}, status=status.HTTP_403_FORBIDDEN)
+        lieux = Lieu.objects.filter(
+            entreprise_id=request.user.entreprise_id,
+            type_lieu=Lieu.TYPE_MAGASIN,
+        ).order_by("nom")
+        result = [
+            {"lieu_id": l.pk, "lieu_nom": l.nom, "caisse_disponible": str(get_caisse_physique_boutique(l))}
+            for l in lieux
+        ]
+        return Response(result)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

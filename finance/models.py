@@ -235,6 +235,10 @@ class JournalCreance(models.Model):
             CheckConstraint(condition=Q(montant_initial__gte=Decimal("0.01")), name="jcreance_montant_initial_min"),
             CheckConstraint(condition=Q(montant_paye__gte=0), name="jcreance_montant_paye_non_negatif"),
             CheckConstraint(condition=Q(correction_caisse__gte=0), name="jcreance_correction_caisse_non_negatif"),
+            CheckConstraint(
+                condition=Q(correction_caisse__lte=models.F("montant_initial")),
+                name="jcreance_correction_caisse_max_montant_initial",
+            ),
         ]
         indexes             = [
             models.Index(fields=["client", "statut"],         name="jcreance_client_statut_idx"),

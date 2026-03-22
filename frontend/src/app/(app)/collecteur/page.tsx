@@ -76,19 +76,17 @@ export default function CollecteurPage() {
 
   // ── Chargement ──────────────────────────────────────────────────────────────
 
-  const chargerCaisses = useCallback(async (lieuxList: Lieu[]) => {
-    if (!lieuxList.length) return;
+  const chargerCaisses = useCallback(async () => {
     setCaissesLoading(true);
     try {
-      const results = await Promise.all(
-        lieuxList.map((l) =>
-          apiFetch<{ lieu_id: number; caisse_disponible: string }>(
-            `/finance/collectes/caisse-disponible/?lieu_id=${l.id}`
-          ).then((r) => [l.id, parseFloat(r.caisse_disponible)] as [number, number])
-           .catch(() => [l.id, 0] as [number, number])
-        )
+      const rows = await apiFetch<{ lieu_id: number; caisse_disponible: string }[]>(
+        "/finance/collectes/caisses-disponibles/"
       );
-      setCaissesMap(Object.fromEntries(results));
+      const map: Record<number, number> = {};
+      for (const r of rows) map[r.lieu_id] = parseFloat(r.caisse_disponible);
+      setCaissesMap(map);
+    } catch {
+      // ignore — cards show undefined (loading state)
     } finally {
       setCaissesLoading(false);
     }
@@ -109,7 +107,7 @@ export default function CollecteurPage() {
       const lieuxList = toList(lieuxRes);
       setCollectes(toList(collectesRes));
       setLieux(lieuxList);
-      chargerCaisses(lieuxList);
+      chargerCaisses();
     } catch {
       setErreur("Impossible de charger les données.");
     } finally {
@@ -196,7 +194,7 @@ export default function CollecteurPage() {
       setCreateForm(EMPTY_CREATE);
       flashSuccess("Collecte enregistrée avec succès.");
       charger();
-      chargerCaisses(lieux);
+      chargerCaisses();
     } catch (err) {
       setCreateErr(err instanceof Error ? err.message : "Erreur d'enregistrement.");
     } finally {
@@ -263,7 +261,7 @@ export default function CollecteurPage() {
             <RefreshCw className={cn("h-4 w-4 mr-2", loading && "animate-spin")} />
             Actualiser
           </Button>
-          <Button size="sm" onClick={() => { setCreateForm(EMPTY_CREATE); setCreateErr(""); setCaisseDispo(null); setShowCreate(true); }}
+          <Button size="sm" onClick={() => { setCreateForm(EMPTY_CREATE); setCreateErr(""); setShowCreate(true); }}
             className="bg-blue-600 hover:bg-blue-700 text-white">
             <Plus className="h-4 w-4 mr-2" /> Nouvelle collecte
           </Button>
@@ -281,10 +279,23 @@ export default function CollecteurPage() {
           <label className="text-xs font-medium text-muted-foreground">Au</label>
           <Input type="date" value={fin} onChange={(e) => setFin(e.target.value)} className="h-8 text-sm w-36" />
         </div>
-        <div className="flex gap-1 mb-0.5">
-          <Button variant="outline" size="sm" className="h-8 text-xs"
+        <div className="flex gap-1 mb-0.5 flex-wrap">
+          <Button variant={debut === fin && debut === new Date().toISOString().slice(0,10) ? "default" : "outline"}
+            size="sm" className="h-8 text-xs"
             onClick={() => { const t = new Date().toISOString().slice(0,10); setDebut(t); setFin(t); }}>
-            Aujourd&apos;hui
+            Jour
+          </Button>
+          <Button variant="outline" size="sm" className="h-8 text-xs"
+            onClick={() => {
+              const now = new Date();
+              const day = now.getDay(); // 0=dim, 1=lun...
+              const diffLun = (day === 0 ? -6 : 1 - day);
+              const lun = new Date(now); lun.setDate(now.getDate() + diffLun);
+              const dim = new Date(lun); dim.setDate(lun.getDate() + 6);
+              setDebut(lun.toISOString().slice(0,10));
+              setFin(dim.toISOString().slice(0,10));
+            }}>
+            Semaine
           </Button>
           <Button variant="outline" size="sm" className="h-8 text-xs"
             onClick={() => {
@@ -293,9 +304,16 @@ export default function CollecteurPage() {
               const last  = new Date(now.getFullYear(), now.getMonth()+1, 0).toISOString().slice(0,10);
               setDebut(first); setFin(last);
             }}>
-            Ce mois
+            Mois
           </Button>
           <Button variant="outline" size="sm" className="h-8 text-xs"
+            onClick={() => {
+              const y = new Date().getFullYear();
+              setDebut(`${y}-01-01`); setFin(`${y}-12-31`);
+            }}>
+            Année
+          </Button>
+          <Button variant={!debut && !fin ? "default" : "outline"} size="sm" className="h-8 text-xs"
             onClick={() => { setDebut(""); setFin(""); }}>
             Tout
           </Button>

@@ -22,11 +22,11 @@ from core.models import CustomUser
 # Rôles avec accès admin opérationnel complet
 _ADMIN_ROLES = (CustomUser.ROLE_SUPREME_ADMIN, CustomUser.ROLE_ADMIN)
 
-# Rôles avec accès financier complet (DAF + admins + comptable)
+# Rôles avec accès financier (lecture + écriture pour admin/DAF, lecture seule pour comptable
+# via DafReadOnlyMixin). Les deux niveaux exposent exactement les mêmes rôles — IsDafRole et
+# IsComptableRole partagent ce tuple, la distinction lecture/écriture est gérée par DafReadOnlyMixin.
 _FINANCE_ROLES = (CustomUser.ROLE_SUPREME_ADMIN, CustomUser.ROLE_ADMIN, CustomUser.ROLE_DAF, CustomUser.ROLE_COMPTABLE)
-
-# Rôles avec accès financier en lecture (comptable + DAF + admins)
-_FINANCE_READ_ROLES = (CustomUser.ROLE_SUPREME_ADMIN, CustomUser.ROLE_ADMIN, CustomUser.ROLE_DAF, CustomUser.ROLE_COMPTABLE)
+_FINANCE_READ_ROLES = _FINANCE_ROLES  # alias — même ensemble, séparation conceptuelle conservée
 
 
 class IsSupremeAdminRole(permissions.BasePermission):

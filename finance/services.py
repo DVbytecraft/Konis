@@ -216,7 +216,6 @@ def solder_journal_payable(*, journal: JournalPayable, created_by: CustomUser) -
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @transaction.atomic
-@transaction.atomic
 def creer_journal_creance(
     *,
     client: ClientFinance,
@@ -906,6 +905,17 @@ def modifier_collecte(
     ancien_trouve = collecte.montant_trouve
     ancien_pris   = collecte.montant_pris
 
+    if montant_pris is not None and montant_pris != ancien_pris:
+        # Recalculer la caisse disponible en neutralisant l'ancienne valeur déjà soustraite.
+        # get_caisse_physique_boutique() soustrait déjà montant_pris de cette collecte ;
+        # en rajoutant ancien_pris on obtient la caisse avant cette collecte.
+        caisse_avant = get_caisse_physique_boutique(collecte.lieu) + ancien_pris
+        if montant_pris > caisse_avant:
+            raise ErreurFinance(
+                f"Montant à collecter ({montant_pris} FCFA) supérieur à la caisse disponible "
+                f"({caisse_avant} FCFA) dans cette boutique."
+            )
+
     if montant_trouve is not None:
         collecte.montant_trouve = montant_trouve
     if montant_pris is not None:
@@ -1163,13 +1173,11 @@ def get_dashboard_boutique(lieu, date_debut=None, date_fin=None) -> dict:
     collectes_agg = collectes_qs.aggregate(total_pris=Sum("montant_pris"))
     total_collectes_prises = collectes_agg["total_pris"] or Decimal("0")
 
-    # Corrections de caisse (créances créées manuellement pour corriger des ventes mal enregistrées)
-    # Sans filtre de date : la correction est permanente, indépendante de la période affichée
-    corrections_creances = (
-        JournalCreance.objects.filter(lieu=lieu, correction_caisse__gt=0)
-        .aggregate(t=Sum("correction_caisse"))["t"] or Decimal("0")
-    )
-    caisse_physique = caisse_reelle - total_collectes_prises - corrections_creances
+    # Caisse physique réelle = solde de trésorerie instantané (toutes périodes confondues).
+    # get_caisse_physique_boutique() est la source de vérité unique : elle intègre tous les
+    # tickets cash, paiements créances, collectes et corrections — indépendamment des filtres
+    # de date appliqués aux statistiques de période ci-dessus.
+    caisse_physique = get_caisse_physique_boutique(lieu)
 
     # Dernière collecte pour ce lieu
     derniere_collecte = (

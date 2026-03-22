@@ -10,6 +10,10 @@ Couvre :
   F. Règles métier : paiement excessif, journal soldé, taux intérêt max
   G. CheckConstraints DB : montants négatifs/zéro rejetés
   H. Isolation tenant : une entreprise ne voit pas les données d'une autre
+  I. Caisse physique boutique : formule, collecte bloquée si dépassement, modifier_collecte
+  J. Retrancher caisse (correction créance) : service + API + droits + contrainte DB
+  K. Idempotency JournalCreance : double-tap avec même clé → 1 seul journal
+  L. Endpoint caisse-disponible
 """
 from decimal import Decimal
 
@@ -31,6 +35,10 @@ from finance.models import (
     JournalPayable,
     Projet,
 )
+from django.test import override_settings
+from django.db import IntegrityError
+
+from finance.models import CollecteArgent
 from finance.services import (
     ErreurFinance,
     JournalSoldeError,
@@ -40,15 +48,20 @@ from finance.services import (
     creer_journal_creance,
     creer_journal_payable,
     creer_projet,
+    enregistrer_collecte,
     enregistrer_depot_projet,
     enregistrer_depense_projet,
     enregistrer_paiement_creance,
     enregistrer_paiement_payable,
     enregistrer_remboursement,
     enregistrer_transaction_caisse,
+    get_caisse_physique_boutique,
     get_solde_caisse,
+    modifier_collecte,
     solder_journal_payable,
 )
+from produits.models import Produit
+from ventes.models import Ticket
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -416,3 +429,331 @@ class TestFinanceIsolation(APITestCase):
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         ids = [item["id"] for item in r.json().get("results", r.json())]
         self.assertIn(self.journal_a.pk, ids)
+
+
+# ── I. Caisse physique boutique ───────────────────────────────────────────────
+
+class TestCaissePhysique(TestCase):
+    """
+    Vérifie la formule get_caisse_physique_boutique et les validations de collecte.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.ent = Entreprise.objects.create(nom="EntCaisse")
+        cls.lieu = Lieu.objects.create(
+            entreprise=cls.ent, nom="Boutique C", code="BC", type_lieu=Lieu.TYPE_MAGASIN
+        )
+        cls.user = CustomUser.objects.create_user(
+            username="daf_caisse", password="pass1234",
+            role=CustomUser.ROLE_DAF, entreprise=cls.ent, lieu=cls.lieu,
+        )
+        cls.produit = Produit.objects.create(
+            nom="Café 1kg", code="C1KG", unite="kg", entreprise=cls.ent
+        )
+
+    def _ticket_cash(self, montant):
+        numero = f"T-CAISSE-{Ticket.objects.filter(lieu=self.lieu).count() + 1}"
+        return Ticket.objects.create(
+            lieu=self.lieu,
+            date=datetime.date.today(),
+            numero=numero,
+            montant_total=Decimal(str(montant)),
+            montant_cash=Decimal(str(montant)),
+        )
+
+    def _collecte(self, montant_trouve, montant_pris):
+        return enregistrer_collecte(
+            lieu=self.lieu,
+            date_collecte=datetime.date.today(),
+            montant_trouve=Decimal(str(montant_trouve)),
+            montant_pris=Decimal(str(montant_pris)),
+            created_by=self.user,
+        )
+
+    def test_caisse_vide_sans_tickets(self):
+        self.assertEqual(get_caisse_physique_boutique(self.lieu), Decimal("0"))
+
+    def test_caisse_apres_ticket_cash(self):
+        self._ticket_cash(10000)
+        self.assertEqual(get_caisse_physique_boutique(self.lieu), Decimal("10000"))
+
+    def test_caisse_diminue_apres_collecte(self):
+        self._ticket_cash(10000)
+        self._collecte(10000, 8000)
+        self.assertEqual(get_caisse_physique_boutique(self.lieu), Decimal("2000"))
+
+    def test_collecte_bloquee_si_depasse_caisse(self):
+        # caisse_dispo = 5000, montant_trouve = 7000 (>= montant_pris), montant_pris = 6000 > caisse_dispo
+        self._ticket_cash(5000)
+        with self.assertRaises(ErreurFinance) as ctx:
+            self._collecte(7000, 6000)
+        self.assertIn("caisse disponible", str(ctx.exception).lower())
+
+    def test_modifier_collecte_bloquee_si_depasse_caisse(self):
+        self._ticket_cash(5000)
+        collecte = self._collecte(5000, 3000)
+        # La caisse disponible restante = 5000 - 3000 = 2000
+        # Si on veut prendre 4500 (> 5000-3000+3000=5000 ok mais >5000 non)
+        # caisse_avant = get_caisse() + ancien_pris = 2000 + 3000 = 5000 → ok
+        # montant_pris = 5001 > 5000 → refus
+        with self.assertRaises(ErreurFinance):
+            modifier_collecte(
+                collecte=collecte,
+                updated_by=self.user,
+                montant_pris=Decimal("5001"),
+            )
+
+    def test_modifier_collecte_autorise_dans_la_limite(self):
+        self._ticket_cash(5000)
+        collecte = self._collecte(5000, 3000)
+        # caisse_avant = 2000 + 3000 = 5000 → 4999 autorisé
+        result = modifier_collecte(
+            collecte=collecte,
+            updated_by=self.user,
+            montant_pris=Decimal("4999"),
+        )
+        self.assertEqual(result.montant_pris, Decimal("4999"))
+
+
+# ── J. Retrancher caisse (correction créance) ─────────────────────────────────
+
+class TestRetracherCaisse(APITestCase):
+    """
+    Vérifie le service creer_journal_creance(retrancher_caisse=True) et les gardes API.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.ent = Entreprise.objects.create(nom="EntRetranch")
+        cls.lieu = Lieu.objects.create(
+            entreprise=cls.ent, nom="BoutiqueR", code="BR", type_lieu=Lieu.TYPE_MAGASIN
+        )
+        cls.lieu_col = Lieu.objects.create(
+            entreprise=cls.ent, nom="BoutiqueR2", code="BR2", type_lieu=Lieu.TYPE_MAGASIN
+        )
+        cls.admin = CustomUser.objects.create_user(
+            username="admin_ret", password="pass1234",
+            role=CustomUser.ROLE_ADMIN, entreprise=cls.ent, lieu=cls.lieu,
+        )
+        cls.collecteur = CustomUser.objects.create_user(
+            username="col_ret", password="pass1234",
+            role=CustomUser.ROLE_COLLECTEUR, entreprise=cls.ent, lieu=cls.lieu_col,
+        )
+        cls.client_fin = ClientFinance.objects.create(entreprise=cls.ent, nom="ClientR")
+        cls.produit = Produit.objects.create(
+            nom="Café R", code="CR01", unite="kg", entreprise=cls.ent
+        )
+
+    def _jwt(self, user):
+        return {"HTTP_AUTHORIZATION": f"Bearer {str(RefreshToken.for_user(user).access_token)}"}
+
+    def _ajouter_cash(self, montant):
+        numero = f"T-RET-{Ticket.objects.filter(lieu=self.lieu).count() + 1}"
+        Ticket.objects.create(
+            lieu=self.lieu,
+            date=datetime.date.today(),
+            numero=numero,
+            montant_total=Decimal(str(montant)),
+            montant_cash=Decimal(str(montant)),
+        )
+
+    def test_retrancher_caisse_reduit_caisse_physique(self):
+        self._ajouter_cash(20000)
+        caisse_avant = get_caisse_physique_boutique(self.lieu)
+        creer_journal_creance(
+            client=self.client_fin,
+            description="Correction vente cash",
+            montant_initial=Decimal("5000"),
+            created_by=self.admin,
+            lieu=self.lieu,
+            retrancher_caisse=True,
+        )
+        caisse_apres = get_caisse_physique_boutique(self.lieu)
+        self.assertEqual(caisse_avant - caisse_apres, Decimal("5000"))
+
+    def test_retrancher_caisse_bloque_si_insuffisante(self):
+        # caisse = 0 → impossible de retrancher 1000
+        with self.assertRaises(ErreurFinance) as ctx:
+            creer_journal_creance(
+                client=self.client_fin,
+                description="Mauvaise correction",
+                montant_initial=Decimal("1000"),
+                created_by=self.admin,
+                lieu=self.lieu,
+                retrancher_caisse=True,
+            )
+        self.assertIn("caisse disponible", str(ctx.exception).lower())
+
+    def test_api_collecteur_ne_peut_pas_retrancher(self):
+        """Un collecteur ne peut pas cocher retrancher_caisse via l'API."""
+        r = self.client.post(
+            "/api/finance/journaux-creances/",
+            {
+                "client_id": self.client_fin.pk,
+                "description": "Test",
+                "montant_initial": "1000.00",
+                "retrancher_caisse": True,
+                "lieu_id": self.lieu.pk,
+            },
+            format="json",
+            **self._jwt(self.collecteur),
+        )
+        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_api_admin_peut_retrancher(self):
+        """Un admin peut créer un journal créance avec retrancher_caisse=True si caisse suffisante."""
+        self._ajouter_cash(30000)
+        r = self.client.post(
+            "/api/finance/journaux-creances/",
+            {
+                "client_id": self.client_fin.pk,
+                "description": "Correction vente",
+                "montant_initial": "10000.00",
+                "retrancher_caisse": True,
+                "lieu_id": self.lieu.pk,
+            },
+            format="json",
+            HTTP_IDEMPOTENCY_KEY="test-retranch-admin-001",
+            **self._jwt(self.admin),
+        )
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED, r.json())
+        self.assertEqual(Decimal(r.json()["correction_caisse"]), Decimal("10000.00"))
+
+    def test_db_constraint_correction_superieure_montant_initial(self):
+        """La DB rejette correction_caisse > montant_initial."""
+        with self.assertRaises(IntegrityError):
+            JournalCreance.objects.create(
+                client=self.client_fin,
+                description="Test contrainte",
+                montant_initial=Decimal("1000"),
+                montant_paye=Decimal("0"),
+                correction_caisse=Decimal("1001"),  # > montant_initial
+                created_by=self.admin,
+                statut="en_cours",
+            )
+
+
+# ── K. Idempotency JournalCreance ─────────────────────────────────────────────
+
+class TestIdempotencyJournalCreance(APITestCase):
+    """
+    Double-tap sur POST /api/finance/journaux-creances/ avec même Idempotency-Key
+    → 1 seul journal créé (anti double-débit quand retrancher_caisse=True).
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.ent = Entreprise.objects.create(nom="EntIdemCreance")
+        cls.lieu = Lieu.objects.create(
+            entreprise=cls.ent, nom="BoutiqueI", code="BI", type_lieu=Lieu.TYPE_MAGASIN
+        )
+        cls.admin = CustomUser.objects.create_user(
+            username="admin_idem_cr", password="pass1234",
+            role=CustomUser.ROLE_ADMIN, entreprise=cls.ent, lieu=cls.lieu,
+        )
+        cls.client_fin = ClientFinance.objects.create(entreprise=cls.ent, nom="ClientI")
+        Ticket.objects.create(
+            lieu=cls.lieu,
+            date=datetime.date.today(),
+            numero="T-IDEM-001",
+            montant_total=Decimal("50000"),
+            montant_cash=Decimal("50000"),
+        )
+
+    def _jwt(self):
+        return {"HTTP_AUTHORIZATION": f"Bearer {str(RefreshToken.for_user(self.admin).access_token)}"}
+
+    def _post(self, key=None):
+        headers = self._jwt()
+        if key:
+            headers["HTTP_IDEMPOTENCY_KEY"] = key
+        return self.client.post(
+            "/api/finance/journaux-creances/",
+            {
+                "client_id": self.client_fin.pk,
+                "description": "Créance idempotente",
+                "montant_initial": "10000.00",
+                "retrancher_caisse": True,
+                "lieu_id": self.lieu.pk,
+            },
+            format="json",
+            **headers,
+        )
+
+    def test_double_tap_meme_cle_cree_un_seul_journal(self):
+        key = "idem-creance-001"
+        r1 = self._post(key)
+        r2 = self._post(key)
+        self.assertIn(r1.status_code, [status.HTTP_201_CREATED, status.HTTP_200_OK])
+        self.assertEqual(r2.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(r1.json()["id"], r2.json()["id"])
+
+    def test_double_tap_meme_cle_une_seule_correction_caisse(self):
+        key = "idem-creance-002"
+        caisse_avant = get_caisse_physique_boutique(self.lieu)
+        self._post(key)
+        self._post(key)
+        caisse_apres = get_caisse_physique_boutique(self.lieu)
+        # Exactement 10000 soustrait (pas 20000)
+        self.assertEqual(caisse_avant - caisse_apres, Decimal("10000"))
+
+    @override_settings(IDEMPOTENCY_STRICT_MODE=False)
+    def test_sans_cle_deux_journaux_distincts(self):
+        r1 = self._post()
+        r2 = self._post()
+        self.assertEqual(r1.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(r2.status_code, status.HTTP_201_CREATED)
+        self.assertNotEqual(r1.json()["id"], r2.json()["id"])
+
+
+# ── L. Endpoint caisse-disponible ─────────────────────────────────────────────
+
+class TestCaisseDisponibleEndpoint(APITestCase):
+    """GET /api/finance/collectes/caisse-disponible/?lieu_id=X"""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.ent = Entreprise.objects.create(nom="EntCaisseEP")
+        cls.lieu = Lieu.objects.create(
+            entreprise=cls.ent, nom="BoutiqueEP", code="EP", type_lieu=Lieu.TYPE_MAGASIN
+        )
+        cls.collecteur = CustomUser.objects.create_user(
+            username="col_ep", password="pass1234",
+            role=CustomUser.ROLE_COLLECTEUR, entreprise=cls.ent, lieu=cls.lieu,
+        )
+        Ticket.objects.create(
+            lieu=cls.lieu,
+            date=datetime.date.today(),
+            numero="T-EP-001",
+            montant_total=Decimal("15000"),
+            montant_cash=Decimal("15000"),
+        )
+
+    def _jwt(self):
+        return {"HTTP_AUTHORIZATION": f"Bearer {str(RefreshToken.for_user(self.collecteur).access_token)}"}
+
+    def test_retourne_caisse_disponible(self):
+        r = self.client.get(
+            f"/api/finance/collectes/caisse-disponible/?lieu_id={self.lieu.pk}",
+            **self._jwt(),
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        data = r.json()
+        self.assertEqual(data["lieu_id"], self.lieu.pk)
+        self.assertEqual(Decimal(data["caisse_disponible"]), Decimal("15000"))
+
+    def test_lieu_id_manquant_retourne_400(self):
+        r = self.client.get("/api/finance/collectes/caisse-disponible/", **self._jwt())
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_lieu_autre_entreprise_retourne_404(self):
+        ent2 = Entreprise.objects.create(nom="EntAutre")
+        lieu2 = Lieu.objects.create(
+            entreprise=ent2, nom="AutreBoutique", code="AU", type_lieu=Lieu.TYPE_MAGASIN
+        )
+        r = self.client.get(
+            f"/api/finance/collectes/caisse-disponible/?lieu_id={lieu2.pk}",
+            **self._jwt(),
+        )
+        self.assertEqual(r.status_code, status.HTTP_404_NOT_FOUND)
