@@ -805,7 +805,8 @@ class CollecteViewSet(DafReadOnlyMixin, ListModelMixin, RetrieveModelMixin, Crea
                 return apply_idempotency_warning(resp, missing)
 
         # Seul le collecteur peut enregistrer une collecte
-        if request.user.role != CustomUser.ROLE_COLLECTEUR:
+        from core.models import CustomUser as CU
+        if request.user.role != CU.ROLE_COLLECTEUR:
             resp = Response({"detail": "Seul le collecteur peut enregistrer une collecte."}, status=status.HTTP_403_FORBIDDEN)
             return apply_idempotency_warning(resp, missing)
 
