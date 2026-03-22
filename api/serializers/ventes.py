@@ -25,12 +25,14 @@ class TicketSerializer(serializers.ModelSerializer):
     type_vente_label = serializers.SerializerMethodField()
 
     def get_lignes_count(self, obj):
+        # len() uses prefetch_related cache when available (never bypasses it like .count() would)
         return len(obj.lignes.all())
 
     def get_mouture_source(self, obj):
         if not obj.mouture:
             return None
-        return "mouture_seule" if self.get_lignes_count(obj) == 0 else "vente_avec_mouture"
+        # Re-use the prefetch cache directly — avoids a second queryset evaluation
+        return "mouture_seule" if not obj.lignes.all() else "vente_avec_mouture"
 
     def get_client_nom(self, obj):
         return obj.client.nom if obj.client_id else None

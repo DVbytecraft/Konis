@@ -241,7 +241,7 @@ class RapportBoutiquesView(APIView):
                 "cessions_recues_sacs": Decimal("0"), "cessions_recues_montant": Decimal("0"),
                 "caisse_reelle": Decimal("0"), "nb_produits_en_stock": 0,
             }
-            for l in Lieu.objects.filter(type_lieu=Lieu.TYPE_MAGASIN, entreprise=entreprise)
+            for l in Lieu.objects.filter(type_lieu=Lieu.TYPE_MAGASIN, entreprise=entreprise).order_by("nom")[:200]
         }
 
         # Agrégation SQL sur Ticket.montant_total (inclut mouture + produits)
@@ -392,7 +392,7 @@ class RapportUsinesView(APIView):
                 "transferts_boutiques_sacs": Decimal("0"), "transferts_boutiques_montant": Decimal("0"),
                 "transferts_inter_usines_sacs": Decimal("0"), "transferts_inter_usines_montant": Decimal("0"),
             }
-            for l in Lieu.objects.filter(type_lieu=Lieu.TYPE_USINE, entreprise=entreprise)
+            for l in Lieu.objects.filter(type_lieu=Lieu.TYPE_USINE, entreprise=entreprise).order_by("nom")[:200]
         }
 
         # Agrégation SQL des achats par usine
@@ -768,7 +768,7 @@ class RapportMPSLView(APIView):
                 "nb_achats": 0, "total_achats": Decimal("0"),
                 "nb_dettes_en_cours": 0, "total_dettes": Decimal("0"),
             }
-            for l in Lieu.objects.filter(type_lieu=Lieu.TYPE_MPSL, entreprise=entreprise)
+            for l in Lieu.objects.filter(type_lieu=Lieu.TYPE_MPSL, entreprise=entreprise).order_by("nom")[:200]
         }
 
         # Agrégation SQL des achats par dépôt

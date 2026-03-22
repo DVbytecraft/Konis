@@ -327,15 +327,16 @@ export default function BoutiqueCaissePage() {
   );
 
   // Calcul mouture — si quantité totale saisie manuellement, elle prime sur le panier
+  // Math.round() élimine les imprécisions float (FCFA = entier, pas de centimes)
   const coutMouture = (() => {
     if (quantiteTotaleMouture && parseFloat(quantiteTotaleMouture) > 0) {
       const q = parseFloat(quantiteTotaleMouture);
       const u = uniteMouture.toLowerCase();
-      if (u === "kg" && prixMoutureKg) return q * +prixMoutureKg;
-      if (u === "tonne" && prixMoutureTonne) return q * +prixMoutureTonne;
+      if (u === "kg" && prixMoutureKg) return Math.round(q * +prixMoutureKg);
+      if (u === "tonne" && prixMoutureTonne) return Math.round(q * +prixMoutureTonne);
       return 0;
     }
-    return panier.reduce((acc, l) => {
+    return Math.round(panier.reduce((acc, l) => {
       const unite = (l.unite_vente || l.produit_unite || "").toLowerCase();
       if (unite.includes("kg") && prixMoutureKg) return acc + l.quantite * +prixMoutureKg;
       if (unite.includes("tonne") && prixMoutureTonne) return acc + l.quantite * +prixMoutureTonne;
@@ -344,7 +345,7 @@ export default function BoutiqueCaissePage() {
         if (pds > 0) return acc + l.quantite * pds * +prixMoutureKg;
       }
       return acc;
-    }, 0);
+    }, 0));
   })();
 
   const totalGeneral = totalPanier + (mouture ? coutMouture : 0);
@@ -456,8 +457,12 @@ export default function BoutiqueCaissePage() {
       chargerDonnees();
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Erreur paiement";
-      // Erreur STRICT_MODE : l'idempotency key n'a pas été transmise (anomalie technique)
-      if (msg.includes("Idempotency-Key")) {
+      // Erreur STRICT_MODE : le backend rejette les requêtes sans Idempotency-Key
+      const isIdempotencyError =
+        msg.includes("Idempotency-Key") ||
+        msg.includes("idempotency") ||
+        msg.toLowerCase().includes("clé de sécurité");
+      if (isIdempotencyError) {
         setErreur("Erreur technique : impossible d'enregistrer la vente (clé de sécurité manquante). Rechargez la page et réessayez.");
       } else {
         setErreur(msg);
