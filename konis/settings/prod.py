@@ -21,6 +21,11 @@ if not SECRET_KEY:
     raise ValueError("DJANGO_SECRET_KEY doit être défini en production")
 
 _internal_secret = os.environ.get("INTERNAL_API_SECRET", "")
+if not _internal_secret:
+    raise ValueError(
+        "INTERNAL_API_SECRET doit être défini en production. "
+        "Générer une clé avec : python -c \"import secrets; print(secrets.token_urlsafe(32))\""
+    )
 if _internal_secret == "dev-konis-internal-secret":
     raise ValueError(
         "INTERNAL_API_SECRET ne peut pas être la valeur dev en production. "
