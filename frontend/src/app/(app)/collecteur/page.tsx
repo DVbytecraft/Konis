@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import {
   Truck, RefreshCw, Plus, X, Banknote, AlertCircle,
-  CheckCircle2, Pencil, ChevronDown, ChevronUp, Calendar,
+  CheckCircle2, Pencil, ChevronDown, ChevronUp, Calendar, Printer,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -73,6 +73,9 @@ export default function CollecteurPage() {
 
   // Vue par boutique (toggle)
   const [viewByBoutique, setViewByBoutique] = useState(false);
+
+  // Impression
+  const [collecteAPrimer, setCollecteAPrimer] = useState<Collecte | null>(null);
 
   // ── Chargement ──────────────────────────────────────────────────────────────
 
@@ -160,6 +163,16 @@ export default function CollecteurPage() {
   const flashSuccess = (msg: string) => {
     setSuccess(msg);
     setTimeout(() => setSuccess(""), 4000);
+  };
+
+  const imprimerCollecte = (c: Collecte) => {
+    setCollecteAPrimer(c);
+    setTimeout(() => window.print(), 150);
+  };
+
+  const imprimerListe = () => {
+    setCollecteAPrimer(null);
+    setTimeout(() => window.print(), 150);
   };
 
   const soumettre = async (e: React.FormEvent) => {
@@ -256,11 +269,16 @@ export default function CollecteurPage() {
             Enregistrez vos passages en boutique et corrigez si nécessaire
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <Button variant="outline" size="sm" onClick={charger} disabled={loading}>
             <RefreshCw className={cn("h-4 w-4 mr-2", loading && "animate-spin")} />
             Actualiser
           </Button>
+          {collectes.length > 0 && (
+            <Button variant="outline" size="sm" onClick={imprimerListe} className="print:hidden">
+              <Printer className="h-4 w-4 mr-2" /> Imprimer la liste
+            </Button>
+          )}
           <Button size="sm" onClick={() => { setCreateForm(EMPTY_CREATE); setCreateErr(""); setShowCreate(true); }}
             className="bg-blue-600 hover:bg-blue-700 text-white">
             <Plus className="h-4 w-4 mr-2" /> Nouvelle collecte
@@ -508,13 +526,22 @@ export default function CollecteurPage() {
                         {c.notes || "—"}
                       </td>
                       <td className="py-2 px-3 text-center">
-                        <button
-                          onClick={() => ouvrirCorrection(c)}
-                          className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
-                          title="Corriger"
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </button>
+                        <div className="flex items-center justify-center gap-1">
+                          <button
+                            onClick={() => imprimerCollecte(c)}
+                            className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground print:hidden"
+                            title="Imprimer le reçu"
+                          >
+                            <Printer className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            onClick={() => ouvrirCorrection(c)}
+                            className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground print:hidden"
+                            title="Corriger"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -632,6 +659,71 @@ export default function CollecteurPage() {
               </form>
             </CardContent>
           </Card>
+        </div>
+      )}
+
+      {/* ── Reçu imprimable (reçu unitaire) ────────────────────────────────── */}
+      {collecteAPrimer && (
+        <div className="hidden print:block fixed inset-0 bg-white text-black p-8 text-sm font-sans z-[9999]">
+          <div className="max-w-sm mx-auto">
+            <div className="text-center mb-6">
+              <h1 className="text-xl font-bold uppercase tracking-widest">KONIS</h1>
+              <p className="text-xs uppercase tracking-wide text-gray-500 mt-1">Reçu de collecte</p>
+              <div className="border-t border-b border-gray-300 my-3 py-1 text-xs text-gray-600">
+                N° {collecteAPrimer.id} — {new Date(collecteAPrimer.date_collecte).toLocaleDateString("fr-FR", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
+              </div>
+            </div>
+
+            <table className="w-full text-sm mb-6">
+              <tbody>
+                <tr className="border-b border-gray-200">
+                  <td className="py-1.5 text-gray-500 w-40">Boutique</td>
+                  <td className="py-1.5 font-semibold">{collecteAPrimer.lieu_nom}</td>
+                </tr>
+                {collecteAPrimer.collecteur_nom && (
+                  <tr className="border-b border-gray-200">
+                    <td className="py-1.5 text-gray-500">Collecteur</td>
+                    <td className="py-1.5">{collecteAPrimer.collecteur_nom}</td>
+                  </tr>
+                )}
+                <tr className="border-b border-gray-200">
+                  <td className="py-1.5 text-gray-500">Montant trouvé</td>
+                  <td className="py-1.5 font-mono">{fmt(parseFloat(collecteAPrimer.montant_trouve))} FCFA</td>
+                </tr>
+                <tr className="border-b border-gray-200 bg-gray-50">
+                  <td className="py-1.5 text-gray-500 pl-1">Montant collecté</td>
+                  <td className="py-1.5 font-mono font-bold text-base">{fmt(parseFloat(collecteAPrimer.montant_pris))} FCFA</td>
+                </tr>
+                <tr className="border-b border-gray-200">
+                  <td className="py-1.5 text-gray-500">Laissé en caisse</td>
+                  <td className="py-1.5 font-mono">{fmt(parseFloat(collecteAPrimer.montant_laisse))} FCFA</td>
+                </tr>
+                <tr className="border-b border-gray-200">
+                  <td className="py-1.5 text-gray-500">Dépôt banque</td>
+                  <td className="py-1.5">{collecteAPrimer.depot_banque_id ? "Oui" : "Non"}</td>
+                </tr>
+                {collecteAPrimer.notes && (
+                  <tr>
+                    <td className="py-1.5 text-gray-500 align-top">Notes</td>
+                    <td className="py-1.5 italic text-gray-700">{collecteAPrimer.notes}</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+
+            <div className="grid grid-cols-2 gap-6 mt-10">
+              <div className="text-center">
+                <div className="border-t border-gray-400 pt-2 text-xs text-gray-500">Signature collecteur</div>
+              </div>
+              <div className="text-center">
+                <div className="border-t border-gray-400 pt-2 text-xs text-gray-500">Signature boutique</div>
+              </div>
+            </div>
+
+            <p className="text-center text-xs text-gray-400 mt-8">
+              Imprimé le {new Date().toLocaleString("fr-FR")}
+            </p>
+          </div>
         </div>
       )}
 
