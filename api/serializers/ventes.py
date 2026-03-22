@@ -21,6 +21,7 @@ class TicketSerializer(serializers.ModelSerializer):
     lignes_count = serializers.SerializerMethodField()
     mouture_source = serializers.SerializerMethodField()
     client_nom = serializers.SerializerMethodField()
+    client_contact = serializers.SerializerMethodField()
     type_vente_label = serializers.SerializerMethodField()
 
     def get_lignes_count(self, obj):
@@ -34,6 +35,9 @@ class TicketSerializer(serializers.ModelSerializer):
     def get_client_nom(self, obj):
         return obj.client.nom if obj.client_id else None
 
+    def get_client_contact(self, obj):
+        return obj.client.contact if obj.client_id and obj.client else None
+
     def get_type_vente_label(self, obj):
         return obj.get_type_vente_display()
 
@@ -44,14 +48,14 @@ class TicketSerializer(serializers.ModelSerializer):
             # Type de vente
             "type_vente", "type_vente_label",
             "montant_cash", "montant_credit",
-            "client", "client_nom",
+            "client", "client_nom", "client_contact",
             # Mouture
             "produit_apporte", "mouture", "type_mouture",
             "prix_mouture_kg", "prix_mouture_tonne", "prix_mouture_sac",
             "quantite_apportee_client", "nombre_sacs", "poids_par_sac",
             "cout_mouture", "montant_total", "lignes_count", "mouture_source",
         )
-        read_only_fields = ("type_vente_label", "client_nom", "lignes_count", "mouture_source")
+        read_only_fields = ("type_vente_label", "client_nom", "client_contact", "lignes_count", "mouture_source")
 
 
 class VenteBoutiqueCreateSerializer(serializers.Serializer):

@@ -64,6 +64,7 @@ interface TicketReponse {
   montant_credit: number;
   type_vente: "cash" | "credit" | "partiel";
   client_nom: string | null;
+  client_contact: string | null;
   produit_apporte?: string;
 }
 
@@ -103,6 +104,7 @@ export default function BoutiqueCaissePage() {
   const [clientsLoading, setClientsLoading] = useState(false);
   const [showClientDropdown, setShowClientDropdown] = useState(false);
   const [showContactField, setShowContactField] = useState(false);
+  const [showClientForCash, setShowClientForCash] = useState(false);
 
   const [ventesDuJour, setVentesDuJour] = useState<
     Array<{ id: number; numero: string; date: string; total: number }>
@@ -428,7 +430,7 @@ export default function BoutiqueCaissePage() {
         body.quantite_apportee_mouture = parseFloat(quantiteTotaleMouture);
         body.unite_quantite_apportee = uniteMouture;
       }
-      if (typeVente === "credit" || typeVente === "partiel") {
+      if (clientId) {
         body.client_id = clientId;
       }
       if (typeVente === "partiel") {
@@ -447,6 +449,7 @@ export default function BoutiqueCaissePage() {
       setClientSearch("");
       setClientContact("");
       setShowContactField(false);
+      setShowClientForCash(false);
       setMontantCash("");
       chargerDonnees();
     } catch (e) {
@@ -549,6 +552,8 @@ export default function BoutiqueCaissePage() {
       prix_mouture_tonne: ticketImprimer.prix_mouture_tonne ?? null,
       prix_mouture_sac: ticketImprimer.prix_mouture_sac ?? null,
       produit_apporte: ticketImprimer.produit_apporte,
+      client_nom: ticketImprimer.client_nom,
+      client_contact: ticketImprimer.client_contact,
     });
   }, [ticketImprimer]);
 
@@ -589,6 +594,8 @@ export default function BoutiqueCaissePage() {
             prixMoutureTonne={ticketImprimer.prix_mouture_tonne != null ? Number(ticketImprimer.prix_mouture_tonne) : undefined}
             prixMoutureSac={ticketImprimer.prix_mouture_sac != null ? Number(ticketImprimer.prix_mouture_sac) : undefined}
             produitApporte={ticketImprimer.produit_apporte}
+            clientNom={ticketImprimer.client_nom}
+            clientContact={ticketImprimer.client_contact}
           />
         </div>
         <Card className="print:hidden absolute bottom-4 left-1/2 -translate-x-1/2 max-w-sm w-full flex flex-col gap-3 p-4">
@@ -620,6 +627,8 @@ export default function BoutiqueCaissePage() {
                     prix_mouture_tonne: ticketImprimer.prix_mouture_tonne ?? null,
                     prix_mouture_sac: ticketImprimer.prix_mouture_sac ?? null,
                     produit_apporte: ticketImprimer.produit_apporte,
+                    client_nom: ticketImprimer.client_nom,
+                    client_contact: ticketImprimer.client_contact,
                   },
                   { autoPrint: false }
                 )
@@ -1079,8 +1088,17 @@ export default function BoutiqueCaissePage() {
                     ))}
                   </div>
 
-                  {/* Fiche client (crédit ou partiel) */}
-                  {(typeVente === "credit" || typeVente === "partiel") && (
+                  {/* Fiche client (crédit/partiel = obligatoire, cash = optionnel) */}
+                  {typeVente === "cash" && !showClientForCash && !clientId && (
+                    <button
+                      type="button"
+                      className="text-xs text-blue-600 hover:underline"
+                      onClick={() => setShowClientForCash(true)}
+                    >
+                      + Associer un client à cette vente (optionnel)
+                    </button>
+                  )}
+                  {(typeVente === "credit" || typeVente === "partiel" || showClientForCash || clientId) && (
                     <div className="space-y-1.5">
                       {clientId ? (
                         /* ── Client sélectionné ── */
@@ -1160,6 +1178,16 @@ export default function BoutiqueCaissePage() {
                             </ul>
                           )}
                         </div>
+                      )}
+                      {/* Annuler association client (vente cash uniquement) */}
+                      {typeVente === "cash" && showClientForCash && !clientId && (
+                        <button
+                          type="button"
+                          className="text-xs text-muted-foreground hover:text-destructive"
+                          onClick={() => { setShowClientForCash(false); setClientSearch(""); setClientContact(""); setShowContactField(false); }}
+                        >
+                          Annuler (vente sans client)
+                        </button>
                       )}
                     </div>
                   )}

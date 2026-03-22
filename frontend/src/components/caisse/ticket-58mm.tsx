@@ -36,6 +36,9 @@ interface Ticket58mmProps {
   prixMoutureKg?: number;
   prixMoutureTonne?: number;
   prixMoutureSac?: number;
+  /** Client (optionnel) */
+  clientNom?: string | null;
+  clientContact?: string | null;
 }
 
 export function Ticket58mm({
@@ -53,6 +56,8 @@ export function Ticket58mm({
   printStyle = true,
   copie = false,
   prixMoutureKg,
+  clientNom,
+  clientContact,
 }: Ticket58mmProps) {
   const moutureSeule = mouture && lignes.length === 0;
   const totalProduits = lignes.reduce((a, l) => a + Number(l.total), 0);
@@ -86,6 +91,12 @@ export function Ticket58mm({
       <div className="text-center text-[9px] opacity-80">
         {date}
       </div>
+      {clientNom && (
+        <div className="text-[9px] border-t border-dashed border-black mt-1 pt-1">
+          <span className="font-semibold">Client :</span> {clientNom}
+          {clientContact && <div><span className="font-semibold">Tél :</span> {clientContact}</div>}
+        </div>
+      )}
       {copie && (
         <div className="text-center text-[9px] font-bold tracking-widest border border-dashed border-black py-0.5 mt-1">
           ── COPIE ──

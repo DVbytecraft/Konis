@@ -920,9 +920,26 @@ class DashboardBoutiqueView(APIView):
             except Lieu.DoesNotExist:
                 return Response({"detail": "Boutique introuvable."}, status=status.HTTP_404_NOT_FOUND)
 
-        data = get_dashboard_boutique(lieu)
-        # Convertir Decimal → str pour JSON (nb_produits_en_stock est un int)
-        return Response({k: str(v) if not isinstance(v, int) else v for k, v in data.items()})
+        from datetime import datetime
+        date_debut = None
+        date_fin = None
+        raw_debut = request.query_params.get("date_debut")
+        raw_fin = request.query_params.get("date_fin")
+        for raw, name in ((raw_debut, "date_debut"), (raw_fin, "date_fin")):
+            if raw:
+                try:
+                    datetime.strptime(raw, "%Y-%m-%d")
+                except ValueError:
+                    return Response(
+                        {"detail": f"Format invalide pour {name} : attendu YYYY-MM-DD."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+        date_debut = raw_debut
+        date_fin = raw_fin
+
+        data = get_dashboard_boutique(lieu, date_debut=date_debut, date_fin=date_fin)
+        # Convertir Decimal → str pour JSON (nb_produits_en_stock est un int, derniere_collecte est un dict)
+        return Response({k: str(v) if not isinstance(v, (int, dict, list)) else v for k, v in data.items()})
 
 
 # ─── Conversion sacs → kg ─────────────────────────────────────────────────────
@@ -1077,7 +1094,7 @@ class ClientsBoutiqueView(APIView):
     permission_classes = [IsAuthenticated, IsBoutiqueRole | IsAdminRole]
 
     def get(self, request):
-        from django.db.models import Q
+        from django.db.models import Count, Max, Q, Sum
         from finance.models import ClientFinance
         from api.serializers_finance import ClientFinanceSerializer
 
@@ -1089,8 +1106,32 @@ class ClientsBoutiqueView(APIView):
         search = request.query_params.get("search", "").strip()
         if search:
             qs = qs.filter(Q(nom__icontains=search) | Q(contact__icontains=search))
+            return Response(ClientFinanceSerializer(qs[:20], many=True).data)
 
-        return Response(ClientFinanceSerializer(qs[:20], many=True).data)
+        # Liste complète avec stats par boutique
+        lieu = get_lieu_boutique(request)
+        if lieu:
+            ticket_filter = Q(tickets__lieu=lieu)
+            qs = qs.annotate(
+                nb_achats=Count("tickets", filter=ticket_filter, distinct=True),
+                dernier_achat=Max("tickets__date", filter=ticket_filter),
+                total_achats=Sum("tickets__montant_total", filter=ticket_filter),
+            )
+        else:
+            qs = qs.annotate(
+                nb_achats=Count("tickets", distinct=True),
+                dernier_achat=Max("tickets__date"),
+                total_achats=Sum("tickets__montant_total"),
+            )
+
+        data = []
+        for c in qs:
+            row = ClientFinanceSerializer(c).data
+            row["nb_achats"] = getattr(c, "nb_achats", 0) or 0
+            row["dernier_achat"] = str(getattr(c, "dernier_achat", None) or "") or None
+            row["total_achats"] = str(getattr(c, "total_achats", None) or "0")
+            data.append(row)
+        return Response(data)
 
     def post(self, request):
         from finance.models import ClientFinance

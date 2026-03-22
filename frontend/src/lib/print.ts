@@ -25,6 +25,9 @@ export interface TicketPrintData {
   prix_mouture_sac?: number | null;
   produit_apporte?: string;
   copie?: boolean;
+  // Client optionnel
+  client_nom?: string | null;
+  client_contact?: string | null;
 }
 
 export interface FacturePrintLine {
@@ -140,6 +143,13 @@ function buildTicketHtml(ticket: TicketPrintData): string {
       </div>`
     : `<div class="muted">MOUTURE : NON</div>`;
 
+  const clientSection = ticket.client_nom
+    ? `<div class="client">
+        <span class="client-label">Client :</span> ${escapeHtml(ticket.client_nom)}
+        ${ticket.client_contact ? `<br/><span class="client-label">Tél :</span> ${escapeHtml(ticket.client_contact)}` : ""}
+       </div>`
+    : "";
+
   return `<!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -154,6 +164,8 @@ function buildTicketHtml(ticket: TicketPrintData): string {
     .copie { font-size: 10px; font-weight: bold; color: #b91c1c; margin-top: 2px; }
     .lieu { font-size: 10px; }
     .date { font-size: 9px; }
+    .client { font-size: 9px; border-bottom: 1px dashed #000; padding-bottom: 3px; margin-bottom: 3px; }
+    .client-label { font-weight: bold; }
     .ligne { display: flex; justify-content: space-between; margin: 2px 0; gap: 8px; }
     .lignes { border-bottom: 1px dashed #000; padding-bottom: 4px; margin-bottom: 4px; }
     .section-title { text-align: center; font-weight: bold; margin: 2px 0; }
@@ -171,6 +183,7 @@ function buildTicketHtml(ticket: TicketPrintData): string {
     <div class="lieu">${escapeHtml(ticket.lieu_nom)}</div>
     <div class="date">${escapeHtml(ticket.date)}</div>
   </div>
+  ${clientSection}
   <div class="lignes">${lignesHtml}</div>
   ${moutureSection}
   <div class="total">TOTAL: ${formatNumber(ticket.montant_total)} FCFA</div>

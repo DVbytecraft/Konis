@@ -1009,13 +1009,14 @@ def get_dashboard_global(entreprise: Entreprise) -> dict:
     }
 
 
-def get_dashboard_boutique(lieu) -> dict:
+def get_dashboard_boutique(lieu, date_debut=None, date_fin=None) -> dict:
     """
     Dashboard par boutique (rôle boutique, admin).
 
     Règles métier :
       - caisse_reelle    = Σ montant_cash(tickets) + Σ paiements reçus sur créances
       - argent_theorique = caisse_reelle + total_creances_restantes
+    date_debut / date_fin : filtrage optionnel sur tickets et dépenses.
     """
     from django.db.models import Q, Sum, F, ExpressionWrapper, DecimalField
     from ventes.models import Ticket
@@ -1023,9 +1024,15 @@ def get_dashboard_boutique(lieu) -> dict:
     from inventaire.models import Stock
     from finance.models import CollecteArgent
 
-    tickets = Ticket.objects.filter(lieu=lieu).exclude(
+    tickets_qs = Ticket.objects.filter(lieu=lieu).exclude(
         type_mouture=Ticket.TYPE_MOUTURE_INTERNE
-    ).aggregate(
+    )
+    if date_debut:
+        tickets_qs = tickets_qs.filter(date__gte=date_debut)
+    if date_fin:
+        tickets_qs = tickets_qs.filter(date__lte=date_fin)
+
+    tickets = tickets_qs.aggregate(
         total_ventes=Sum("montant_total"),
         total_cash=Sum("montant_cash"),
         total_credit=Sum("montant_credit"),
@@ -1038,11 +1045,19 @@ def get_dashboard_boutique(lieu) -> dict:
         ))
     )
     # Paiements reçus sur créances liées à ce lieu (argent encaissé en retard)
-    paiements_creances = PaiementCreance.objects.filter(
-        journal__lieu=lieu
-    ).aggregate(total=Sum("montant"))
+    paiements_creances_qs = PaiementCreance.objects.filter(journal__lieu=lieu)
+    if date_debut:
+        paiements_creances_qs = paiements_creances_qs.filter(date__gte=date_debut)
+    if date_fin:
+        paiements_creances_qs = paiements_creances_qs.filter(date__lte=date_fin)
+    paiements_creances = paiements_creances_qs.aggregate(total=Sum("montant"))
 
-    depenses = Depense.objects.filter(lieu=lieu).aggregate(total=Sum("montant"))
+    depenses_qs = Depense.objects.filter(lieu=lieu)
+    if date_debut:
+        depenses_qs = depenses_qs.filter(date__gte=date_debut)
+    if date_fin:
+        depenses_qs = depenses_qs.filter(date__lte=date_fin)
+    depenses = depenses_qs.aggregate(total=Sum("montant"))
     # Nombre de produits ayant encore du stock (sacs OU kg > 0).
     # Q(quantite__gt=0) | Q(quantite_kg__gt=0) est équivalent à get_quantite_equivalente_kg > 0
     # pour tous les cas (produit en sacs avec poids_par_sac, ou produit en kg natif).

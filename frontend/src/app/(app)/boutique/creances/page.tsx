@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { AlertCircle, CheckCircle2, RefreshCw, Search, Users, CreditCard } from "lucide-react";
+import { AlertCircle, CheckCircle2, RefreshCw, Search, Users, CreditCard, Printer } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -158,7 +158,17 @@ export default function CreancesBoutiquePage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between flex-wrap gap-3">
+      {/* En-tête impression uniquement */}
+      <div className="hidden print:block mb-4">
+        <h1 className="text-xl font-bold">Créances clients — {lieuNom}</h1>
+        <p className="text-sm text-gray-600">
+          {filtre === "en_cours" ? "Créances en cours" : filtre === "solde" ? "Créances soldées" : "Toutes les créances"}
+          {searchClient.trim() ? ` · Client : ${searchClient}` : ""}
+        </p>
+        <p className="text-xs text-gray-400">Imprimé le {new Date().toLocaleString("fr-FR")}</p>
+      </div>
+
+      <div className="flex items-center justify-between flex-wrap gap-3 print:hidden">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
             <Users className="h-6 w-6 text-amber-500" />
@@ -168,13 +178,18 @@ export default function CreancesBoutiquePage() {
             Ventes à crédit et paiements en attente
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={charger}>
-          <RefreshCw className="h-4 w-4 mr-2" /> Actualiser
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={charger}>
+            <RefreshCw className="h-4 w-4 mr-2" /> Actualiser
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => window.print()}>
+            <Printer className="h-4 w-4 mr-2" /> Imprimer
+          </Button>
+        </div>
       </div>
 
       {/* Filtre statut */}
-      <div className="flex gap-2">
+      <div className="flex gap-2 print:hidden">
         {(["en_cours", "solde", "tous"] as const).map((f) => (
           <button
             key={f}
@@ -197,7 +212,7 @@ export default function CreancesBoutiquePage() {
       </div>
 
       {/* Recherche client */}
-      <div className="relative max-w-xs">
+      <div className="relative max-w-xs print:hidden">
         <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
         <Input
           placeholder="Filtrer par client…"
@@ -335,7 +350,7 @@ export default function CreancesBoutiquePage() {
                   {c.statut === "en_cours" && (
                     <Button
                       size="sm"
-                      className="w-full mt-1 bg-amber-500 hover:bg-amber-600 text-white"
+                      className="w-full mt-1 bg-amber-500 hover:bg-amber-600 text-white print:hidden"
                       onClick={() => ouvrirModal(c)}
                     >
                       <CreditCard className="h-3.5 w-3.5 mr-1.5" />
@@ -351,7 +366,7 @@ export default function CreancesBoutiquePage() {
 
       {/* Modal paiement */}
       {selected && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 print:hidden">
           <Card className="w-full max-w-sm">
             <CardHeader>
               <CardTitle className="text-base">
