@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ChevronDown, ChevronRight, Plus, Printer, X } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronRight, Plus, Printer, X } from "lucide-react";
 
 interface Paiement {
   id: number;
@@ -20,11 +20,14 @@ interface JournalCreance {
   id: number;
   client: number;
   client_nom: string;
+  lieu: number | null;
+  lieu_nom: string | null;
   reference: string;
   description: string;
   montant_initial: string;
   montant_paye: string;
   montant_restant: string;
+  correction_caisse: string;
   statut: string;
   statut_display: string;
   date_echeance: string | null;
@@ -35,6 +38,7 @@ interface JournalCreance {
 }
 
 interface ClientFinance { id: number; nom: string; }
+interface Lieu { id: number; nom: string; }
 
 interface Paginated<T> { results: T[]; count?: number; }
 function toList<T>(data: Paginated<T> | T[]): T[] {
@@ -56,11 +60,13 @@ function StatutBadge({ statut, label }: { statut: string; label: string }) {
 const MODE_OPTIONS = ["virement", "especes", "cheque", "mobile", "autre"];
 const emptyJournalForm = {
   client_id: "",
+  lieu_id: "",
   description: "",
   montant_initial: "",
   reference: "",
   date_echeance: "",
   notes: "",
+  retrancher_caisse: false,
 };
 const emptyPaiementForm = {
   montant: "",
@@ -77,6 +83,7 @@ export default function JournauxCreancesPage() {
   const [success, setSuccess] = useState<string | null>(null);
   const [journaux, setJournaux] = useState<JournalCreance[]>([]);
   const [clients, setClients] = useState<ClientFinance[]>([]);
+  const [lieux, setLieux] = useState<Lieu[]>([]);
   const [form, setForm] = useState(emptyJournalForm);
   const [showForm, setShowForm] = useState(false);
   const [expanded, setExpanded] = useState<number | null>(null);
@@ -114,12 +121,14 @@ export default function JournauxCreancesPage() {
   const load = useCallback(async () => {
     try {
       setLoading(true);
-      const [journauxRes, clientsRes] = await Promise.all([
+      const [journauxRes, clientsRes, lieuxRes] = await Promise.all([
         apiFetch<Paginated<JournalCreance> | JournalCreance[]>("/finance/journaux-creances/"),
         apiFetch<Paginated<ClientFinance> | ClientFinance[]>("/finance/clients/"),
+        apiFetch<Paginated<Lieu> | Lieu[]>("/locations/by-type/?type=magasin"),
       ]);
       setJournaux(toList(journauxRes));
       setClients(toList(clientsRes));
+      setLieux(toList(lieuxRes));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erreur de chargement");
     } finally {
@@ -146,12 +155,20 @@ export default function JournauxCreancesPage() {
     setSubmitting(true);
     setError(null);
     setSuccess(null);
+    if (form.retrancher_caisse && !form.lieu_id) {
+      setError("Sélectionnez une boutique pour retrancher la caisse.");
+      setSubmitting(false);
+      return;
+    }
+
     try {
       const payload: Record<string, unknown> = {
         client_id: Number(form.client_id),
         description: form.description,
         montant_initial: form.montant_initial,
+        retrancher_caisse: form.retrancher_caisse,
       };
+      if (form.lieu_id) payload.lieu_id = Number(form.lieu_id);
       if (form.reference) payload.reference = form.reference;
       if (form.date_echeance) payload.date_echeance = form.date_echeance;
       if (form.notes) payload.notes = form.notes;
@@ -306,6 +323,19 @@ export default function JournauxCreancesPage() {
                 </select>
               </div>
               <div className="space-y-2">
+                <Label>Boutique source</Label>
+                <select
+                  value={form.lieu_id}
+                  onChange={handleChange("lieu_id")}
+                  className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                >
+                  <option value="">Sélectionner...</option>
+                  {lieux.map((l) => (
+                    <option key={l.id} value={l.id}>{l.nom}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-2">
                 <Label>Montant initial *</Label>
                 <Input
                   type="number"
@@ -332,6 +362,35 @@ export default function JournauxCreancesPage() {
                 <Label>Notes</Label>
                 <Input value={form.notes} onChange={handleChange("notes")} className="h-9" />
               </div>
+
+              {/* Toggle correction caisse */}
+              <div className="sm:col-span-2">
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={form.retrancher_caisse}
+                    onChange={(e) => setForm((f) => ({ ...f, retrancher_caisse: e.target.checked }))}
+                    className="mt-0.5 h-4 w-4 rounded border-input accent-destructive"
+                  />
+                  <div>
+                    <p className="text-sm font-medium">Retrancher de la caisse de la boutique</p>
+                    <p className="text-xs text-muted-foreground">
+                      À cocher uniquement si la vente a été mal enregistrée en cash alors qu&apos;elle devait être à crédit.
+                      Le montant sera déduit de la caisse physique de la boutique sélectionnée.
+                    </p>
+                  </div>
+                </label>
+                {form.retrancher_caisse && (
+                  <div className="mt-2 flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-700 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
+                    <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                    <span>
+                      <strong>Action irréversible.</strong> La caisse physique de la boutique sera réduite de ce montant.
+                      Assurez-vous qu&apos;une boutique est sélectionnée et que le montant est correct.
+                    </span>
+                  </div>
+                )}
+              </div>
+
               <div className="sm:col-span-2 flex flex-col gap-2">
                 {error && <p className="text-sm text-destructive">{error}</p>}
                 {success && <p className="text-sm text-emerald-600">{success}</p>}
@@ -401,9 +460,16 @@ export default function JournauxCreancesPage() {
                     <div className="border-t p-3 bg-muted/10 space-y-3">
                       <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
                         <span>Encaissé: {fmt(j.montant_paye)} FCFA</span>
+                        {j.lieu_nom && <span>Boutique: {j.lieu_nom}</span>}
                         {j.date_echeance && <span>Échéance: {j.date_echeance}</span>}
                         {j.notes && <span>Notes: {j.notes}</span>}
                       </div>
+                      {Number(j.correction_caisse) > 0 && (
+                        <div className="flex items-center gap-1.5 text-xs rounded border border-amber-300 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-700 text-amber-800 dark:text-amber-300 px-2 py-1 w-fit">
+                          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                          Correction caisse appliquée : −{fmt(j.correction_caisse)} FCFA sur {j.lieu_nom ?? "boutique"}
+                        </div>
+                      )}
 
                       {j.paiements.length > 0 && (
                         <div className="overflow-x-auto">

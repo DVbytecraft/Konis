@@ -383,9 +383,23 @@ class JournalCreanceViewSet(DafReadOnlyMixin, ListModelMixin, RetrieveModelMixin
             except Lieu.DoesNotExist:
                 return Response({"detail": "Lieu introuvable."}, status=status.HTTP_400_BAD_REQUEST)
 
+        retrancher_caisse = d.get("retrancher_caisse", False)
+
+        # Sécurité : seuls Admin/DAF/Comptable peuvent retrancher la caisse
+        # (correction d'erreur — action irréversible sur les données comptables)
+        if retrancher_caisse:
+            from core.models import CustomUser as CU
+            ROLES_AUTORISES = {CU.ROLE_ADMIN, CU.ROLE_DAF, CU.ROLE_COMPTABLE}
+            if request.user.role not in ROLES_AUTORISES:
+                return Response(
+                    {"detail": "Seul un admin, DAF ou comptable peut retrancher la caisse."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
         try:
             journal = creer_journal_creance(
                 client=client,
+                lieu=lieu,
                 description=d["description"],
                 montant_initial=d["montant_initial"],
                 created_by=request.user,
@@ -393,11 +407,8 @@ class JournalCreanceViewSet(DafReadOnlyMixin, ListModelMixin, RetrieveModelMixin
                 reference=d.get("reference", ""),
                 date_echeance=d.get("date_echeance"),
                 notes=d.get("notes", ""),
+                retrancher_caisse=retrancher_caisse,
             )
-            # Affecter le lieu si fourni (après création, rétrocompatible)
-            if lieu:
-                journal.lieu = lieu
-                journal.save(update_fields=["lieu"])
         except ErreurFinance as e:
             return _err(e)
 

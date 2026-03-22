@@ -216,6 +216,13 @@ class JournalCreance(models.Model):
     statut          = models.CharField(max_length=10, choices=STATUT_JOURNAL, default="en_cours")
     date_echeance   = models.DateField(null=True, blank=True)
     notes           = models.TextField(blank=True)
+    # Correction caisse : montant retranché de la caisse physique de la boutique lors de la
+    # création manuelle d'une créance (pour corriger une vente mal enregistrée en cash).
+    # 0 par défaut (pas de correction). Ne peut pas dépasser montant_initial.
+    correction_caisse = models.DecimalField(
+        max_digits=14, decimal_places=2, default=Decimal("0"),
+        help_text="Montant retranché de la caisse boutique lors de la création (correction d'une vente mal enregistrée).",
+    )
     created_by      = models.ForeignKey(CustomUser, on_delete=models.PROTECT, related_name="+")
     created_at      = models.DateTimeField(auto_now_add=True)
     locked_at       = models.DateTimeField(null=True, blank=True)
@@ -227,6 +234,7 @@ class JournalCreance(models.Model):
         constraints         = [
             CheckConstraint(condition=Q(montant_initial__gte=Decimal("0.01")), name="jcreance_montant_initial_min"),
             CheckConstraint(condition=Q(montant_paye__gte=0), name="jcreance_montant_paye_non_negatif"),
+            CheckConstraint(condition=Q(correction_caisse__gte=0), name="jcreance_correction_caisse_non_negatif"),
         ]
         indexes             = [
             models.Index(fields=["client", "statut"],         name="jcreance_client_statut_idx"),

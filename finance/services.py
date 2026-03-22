@@ -216,6 +216,7 @@ def solder_journal_payable(*, journal: JournalPayable, created_by: CustomUser) -
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @transaction.atomic
+@transaction.atomic
 def creer_journal_creance(
     *,
     client: ClientFinance,
@@ -226,20 +227,42 @@ def creer_journal_creance(
     reference: str = "",
     date_echeance=None,
     notes: str = "",
+    lieu=None,
+    retrancher_caisse: bool = False,
 ) -> JournalCreance:
     """
     Crée un journal de créance client.
     Si `lignes` est fourni, crée aussi les LigneCreance.
     Format lignes : [{"description": str, "quantite": Decimal, "prix_unitaire": Decimal, "produit_id": int|None}]
+
+    retrancher_caisse=True : correction d'une vente mal enregistrée en cash.
+      - Requiert `lieu` (boutique source).
+      - Enregistre correction_caisse = montant_initial sur le journal.
+      - La caisse physique de la boutique est donc réduite de ce montant.
+      - Sécurité : montant_initial ne peut pas dépasser la caisse physique actuelle.
     """
+    if retrancher_caisse:
+        if lieu is None:
+            raise ErreurFinance("Une boutique (lieu) est requise pour retrancher de la caisse.")
+        caisse_dispo = get_caisse_physique_boutique(lieu)
+        if montant_initial > caisse_dispo:
+            raise ErreurFinance(
+                f"Montant à retrancher ({montant_initial} FCFA) supérieur à la caisse disponible "
+                f"({caisse_dispo} FCFA) de la boutique."
+            )
+
+    correction = montant_initial if retrancher_caisse else Decimal("0")
+
     journal = JournalCreance.objects.create(
         client=client,
+        lieu=lieu,
         description=description,
         montant_initial=montant_initial,
         montant_paye=Decimal("0"),
         reference=reference,
         date_echeance=date_echeance,
         notes=notes,
+        correction_caisse=correction,
         created_by=created_by,
     )
 
@@ -263,6 +286,9 @@ def creer_journal_creance(
         extra={
             "client": client.nom,
             "montant": str(montant_initial),
+            "lieu": lieu.nom if lieu else None,
+            "retrancher_caisse": retrancher_caisse,
+            "correction_caisse": str(correction),
             "nb_lignes": len(lignes) if lignes else 0,
         },
     )
@@ -726,9 +752,14 @@ def get_caisse_physique_boutique(lieu) -> Decimal:
     """
     Calcule la caisse physique actuelle d'une boutique (sans filtre de date).
 
-    caisse_physique = Σ montant_cash(tickets) + Σ paiements_créances − Σ montant_pris(collectes)
+    caisse_physique = Σ montant_cash(tickets)
+                    + Σ paiements_créances
+                    − Σ montant_pris(collectes)
+                    − Σ correction_caisse(JournalCreance du lieu)
 
     C'est le montant réellement disponible dans le tiroir à l'instant T.
+    correction_caisse : montant retranché lors de la création manuelle d'une créance
+    (correction d'une vente enregistrée en cash à tort).
     """
     from django.db.models import Sum
     from ventes.models import Ticket
@@ -747,7 +778,11 @@ def get_caisse_physique_boutique(lieu) -> Decimal:
         CollecteArgent.objects.filter(lieu=lieu)
         .aggregate(t=Sum("montant_pris"))["t"] or Decimal("0")
     )
-    return cash + pcc - pris
+    corrections = (
+        JournalCreance.objects.filter(lieu=lieu, correction_caisse__gt=0)
+        .aggregate(t=Sum("correction_caisse"))["t"] or Decimal("0")
+    )
+    return cash + pcc - pris - corrections
 
 
 @transaction.atomic
@@ -1007,9 +1042,15 @@ def get_dashboard_global(entreprise: Entreprise) -> dict:
     pcc_global         = paiements_creances_global["total"] or Decimal("0")
     total_collecte_pris   = collectes_agg["total_pris"]   or Decimal("0")
     total_collecte_laisse = collectes_agg["total_laisse"] or Decimal("0")
+    # Corrections de caisse globales (créances manuelles avec retrancher_caisse)
+    corrections_globales = (
+        JournalCreance.objects.filter(
+            lieu__entreprise=entreprise, correction_caisse__gt=0
+        ).aggregate(t=Sum("correction_caisse"))["t"] or Decimal("0")
+    )
     solde              = get_solde_caisse(entreprise)
     caisse_reelle      = tc + pcc_global
-    caisse_physique_globale = caisse_reelle - total_collecte_pris
+    caisse_physique_globale = caisse_reelle - total_collecte_pris - corrections_globales
     ben_brut           = tv - total_achats_mpsl
     ben_net            = ben_brut - total_dep
     # Montant fictif = ce qu'on aurait si tous les clients payaient et toutes les dettes réglées
@@ -1113,7 +1154,7 @@ def get_dashboard_boutique(lieu, date_debut=None, date_fin=None) -> dict:
     # Montant fictif boutique = si tous les clients payaient (hors dettes fourn / dépenses non locales)
     montant_fictif   = argent_theorique - total_dep_boutique
 
-    # Caisse physique = argent réellement dans le tiroir (encaissé − collecté)
+    # Caisse physique = argent réellement dans le tiroir (encaissé − collecté − corrections)
     collectes_qs = CollecteArgent.objects.filter(lieu=lieu)
     if date_debut:
         collectes_qs = collectes_qs.filter(date_collecte__gte=date_debut)
@@ -1121,7 +1162,14 @@ def get_dashboard_boutique(lieu, date_debut=None, date_fin=None) -> dict:
         collectes_qs = collectes_qs.filter(date_collecte__lte=date_fin)
     collectes_agg = collectes_qs.aggregate(total_pris=Sum("montant_pris"))
     total_collectes_prises = collectes_agg["total_pris"] or Decimal("0")
-    caisse_physique = caisse_reelle - total_collectes_prises
+
+    # Corrections de caisse (créances créées manuellement pour corriger des ventes mal enregistrées)
+    # Sans filtre de date : la correction est permanente, indépendante de la période affichée
+    corrections_creances = (
+        JournalCreance.objects.filter(lieu=lieu, correction_caisse__gt=0)
+        .aggregate(t=Sum("correction_caisse"))["t"] or Decimal("0")
+    )
+    caisse_physique = caisse_reelle - total_collectes_prises - corrections_creances
 
     # Dernière collecte pour ce lieu
     derniere_collecte = (

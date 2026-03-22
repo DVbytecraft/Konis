@@ -165,10 +165,11 @@ class JournalCreanceSerializer(MontantRestantMixin, serializers.ModelSerializer)
             "ticket", "ticket_numero",
             "reference", "description",
             "montant_initial", "montant_paye", "montant_restant",
+            "correction_caisse",
             "statut", "statut_display", "date_echeance", "notes",
             "created_at", "locked_at", "lignes", "paiements",
         )
-        read_only_fields = ("id", "montant_paye", "statut", "created_at", "locked_at")
+        read_only_fields = ("id", "montant_paye", "statut", "created_at", "locked_at", "correction_caisse")
 
 
 class LigneCreanceInputSerializer(serializers.Serializer):
@@ -179,15 +180,26 @@ class LigneCreanceInputSerializer(serializers.Serializer):
 
 
 class JournalCreanceCreateSerializer(serializers.Serializer):
-    client_id       = serializers.IntegerField()
-    lieu_id         = serializers.IntegerField(required=False, allow_null=True, default=None,
-                          help_text="Boutique source de la créance (recommandé).")
-    description     = serializers.CharField()
-    montant_initial = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=Decimal("0.01"))
-    lignes          = LigneCreanceInputSerializer(many=True, required=False, default=list)
-    reference       = serializers.CharField(required=False, allow_blank=True, default="")
-    date_echeance   = serializers.DateField(required=False, allow_null=True, default=None)
-    notes           = serializers.CharField(required=False, allow_blank=True, default="")
+    client_id         = serializers.IntegerField()
+    lieu_id           = serializers.IntegerField(required=False, allow_null=True, default=None,
+                            help_text="Boutique source de la créance (recommandé).")
+    description       = serializers.CharField()
+    montant_initial   = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=Decimal("0.01"))
+    lignes            = LigneCreanceInputSerializer(many=True, required=False, default=list)
+    reference         = serializers.CharField(required=False, allow_blank=True, default="")
+    date_echeance     = serializers.DateField(required=False, allow_null=True, default=None)
+    notes             = serializers.CharField(required=False, allow_blank=True, default="")
+    retrancher_caisse = serializers.BooleanField(
+        required=False, default=False,
+        help_text="Retrancher le montant de la caisse physique de la boutique (correction d'une vente mal enregistrée).",
+    )
+
+    def validate(self, data):
+        if data.get("retrancher_caisse") and not data.get("lieu_id"):
+            raise serializers.ValidationError(
+                {"lieu_id": "Une boutique est requise pour retrancher de la caisse."}
+            )
+        return data
 
 
 class PaiementCreanceCreateSerializer(serializers.Serializer):
