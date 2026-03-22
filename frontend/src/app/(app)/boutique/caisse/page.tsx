@@ -58,7 +58,6 @@ interface TicketReponse {
   cout_mouture: number;
   prix_mouture_kg: number | null;
   prix_mouture_tonne: number | null;
-  prix_mouture_sac: number | null;
   montant_total: number;
   montant_cash: number;
   montant_credit: number;
@@ -91,12 +90,11 @@ export default function BoutiqueCaissePage() {
   const [mouture, setMouture] = useState(false);
   const [prixMoutureKg, setPrixMoutureKg] = useState("");
   const [prixMoutureTonne, setPrixMoutureTonne] = useState("");
-  const [prixMoutureSac, setPrixMoutureSac] = useState("");
   // ── Type de vente ─────────────────────────────────────────────────────────
   const [typeVente, setTypeVente] = useState<TypeVente>("cash");
   const [montantCash, setMontantCash] = useState(""); // acompte si partiel
   const [quantiteTotaleMouture, setQuantiteTotaleMouture] = useState("");
-  const [uniteMouture, setUniteMouture] = useState("sac");
+  const [uniteMouture, setUniteMouture] = useState("kg");
   const [clientId, setClientId] = useState<number | null>(null);
   const [clientSearch, setClientSearch] = useState("");
   const [clientContact, setClientContact] = useState("");
@@ -332,14 +330,12 @@ export default function BoutiqueCaissePage() {
       const u = uniteMouture.toLowerCase();
       if (u === "kg" && prixMoutureKg) return q * +prixMoutureKg;
       if (u === "tonne" && prixMoutureTonne) return q * +prixMoutureTonne;
-      if (u === "sac" && prixMoutureSac) return q * +prixMoutureSac;
       return 0;
     }
     return panier.reduce((acc, l) => {
       const unite = (l.unite_vente || l.produit_unite || "").toLowerCase();
       if (unite.includes("kg") && prixMoutureKg) return acc + l.quantite * +prixMoutureKg;
       if (unite.includes("tonne") && prixMoutureTonne) return acc + l.quantite * +prixMoutureTonne;
-      if (unite.includes("sac") && prixMoutureSac) return acc + l.quantite * +prixMoutureSac;
       return acc;
     }, 0);
   })();
@@ -424,7 +420,6 @@ export default function BoutiqueCaissePage() {
         mouture,
         prix_mouture_kg: mouture && prixMoutureKg ? prixMoutureKg : null,
         prix_mouture_tonne: mouture && prixMoutureTonne ? prixMoutureTonne : null,
-        prix_mouture_sac: mouture && prixMoutureSac ? prixMoutureSac : null,
       };
       if (mouture && quantiteTotaleMouture && parseFloat(quantiteTotaleMouture) > 0) {
         body.quantite_apportee_mouture = parseFloat(quantiteTotaleMouture);
@@ -464,7 +459,7 @@ export default function BoutiqueCaissePage() {
       isPayingRef.current = false;
       setPaiementEnCours(false);
     }
-  }, [panier, mouture, prixMoutureKg, prixMoutureTonne, prixMoutureSac, quantiteTotaleMouture, uniteMouture, typeVente, clientId, montantCash, chargerDonnees]);
+  }, [panier, mouture, prixMoutureKg, prixMoutureTonne, quantiteTotaleMouture, uniteMouture, typeVente, clientId, montantCash, chargerDonnees]);
 
   const fermerTicket = useCallback(() => setTicketImprimer(null), []);
 
@@ -475,9 +470,8 @@ export default function BoutiqueCaissePage() {
     setMouture(false);
     setPrixMoutureKg("");
     setPrixMoutureTonne("");
-    setPrixMoutureSac("");
     setQuantiteTotaleMouture("");
-    setUniteMouture("sac");
+    setUniteMouture("kg");
     searchInputRef.current?.focus();
   }, []);
 
@@ -550,7 +544,6 @@ export default function BoutiqueCaissePage() {
       cout_mouture: Number(ticketImprimer.cout_mouture ?? 0),
       prix_mouture_kg: ticketImprimer.prix_mouture_kg ?? null,
       prix_mouture_tonne: ticketImprimer.prix_mouture_tonne ?? null,
-      prix_mouture_sac: ticketImprimer.prix_mouture_sac ?? null,
       produit_apporte: ticketImprimer.produit_apporte,
       client_nom: ticketImprimer.client_nom,
       client_contact: ticketImprimer.client_contact,
@@ -592,7 +585,6 @@ export default function BoutiqueCaissePage() {
             coutMouture={Number(ticketImprimer.cout_mouture ?? 0)}
             prixMoutureKg={ticketImprimer.prix_mouture_kg != null ? Number(ticketImprimer.prix_mouture_kg) : undefined}
             prixMoutureTonne={ticketImprimer.prix_mouture_tonne != null ? Number(ticketImprimer.prix_mouture_tonne) : undefined}
-            prixMoutureSac={ticketImprimer.prix_mouture_sac != null ? Number(ticketImprimer.prix_mouture_sac) : undefined}
             produitApporte={ticketImprimer.produit_apporte}
             clientNom={ticketImprimer.client_nom}
             clientContact={ticketImprimer.client_contact}
@@ -625,7 +617,6 @@ export default function BoutiqueCaissePage() {
                     cout_mouture: Number(ticketImprimer.cout_mouture ?? 0),
                     prix_mouture_kg: ticketImprimer.prix_mouture_kg ?? null,
                     prix_mouture_tonne: ticketImprimer.prix_mouture_tonne ?? null,
-                    prix_mouture_sac: ticketImprimer.prix_mouture_sac ?? null,
                     produit_apporte: ticketImprimer.produit_apporte,
                     client_nom: ticketImprimer.client_nom,
                     client_contact: ticketImprimer.client_contact,
@@ -965,15 +956,6 @@ export default function BoutiqueCaissePage() {
                     onChange={(e) => setPrixMoutureTonne(e.target.value)}
                     className="h-8 text-xs"
                   />
-                  <Input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    placeholder="Prix mouture/sac (FCFA)"
-                    value={prixMoutureSac}
-                    onChange={(e) => setPrixMoutureSac(e.target.value)}
-                    className="h-8 text-xs"
-                  />
                   {/* Quantité totale à moudre — peut dépasser ce qui est acheté */}
                   <div className="border-t border-orange-200 dark:border-orange-800 pt-2 mt-1 space-y-1">
                     <p className="text-xs text-muted-foreground font-medium">
@@ -994,7 +976,6 @@ export default function BoutiqueCaissePage() {
                         onChange={(e) => setUniteMouture(e.target.value)}
                         className="h-8 rounded border border-input px-1.5 text-xs"
                       >
-                        <option value="sac">sac</option>
                         <option value="kg">kg</option>
                         <option value="tonne">tonne</option>
                       </select>
@@ -1021,7 +1002,6 @@ export default function BoutiqueCaissePage() {
                             let label = "";
                             if (u.includes("kg") && prixMoutureKg) { prix = +prixMoutureKg; label = "kg"; }
                             else if (u.includes("tonne") && prixMoutureTonne) { prix = +prixMoutureTonne; label = "tonne"; }
-                            else if (u.includes("sac") && prixMoutureSac) { prix = +prixMoutureSac; label = "sac"; }
                             if (!prix) return null;
                             return (
                               <div key={l.produit_id} className="flex justify-between text-xs text-orange-700 dark:text-orange-300">
