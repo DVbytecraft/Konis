@@ -57,6 +57,7 @@ interface DashboardGlobal {
   total_ventes_produits: string;
   total_collecte_pris: string;
   total_collecte_laisse: string;
+  caisse_physique_globale: string;
   collectes_par_boutique: CollecteParBoutique[];
 }
 
@@ -264,12 +265,14 @@ export default function FinanceDashboardPage() {
                   <Card className="border-l-4 border-l-blue-600">
                     <CardContent className="pt-4 pb-4 px-4">
                       <p className="text-xs text-muted-foreground uppercase tracking-wide flex items-center gap-1">
-                        <Banknote className="h-3.5 w-3.5" /> Cash encaissé (boutiques)
+                        <Banknote className="h-3.5 w-3.5" /> En caisse (toutes boutiques)
                       </p>
                       <p className="text-lg font-bold text-blue-700 dark:text-blue-300 mt-1">
-                        {fmt(global.caisse_reelle)} F
+                        {fmt(global.caisse_physique_globale)} F
                       </p>
-                      <p className="text-xs text-muted-foreground mt-0.5">Cash ventes + paiements créances</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Encaissé ({fmt(global.caisse_reelle)} F) − collecté ({fmt(global.total_collecte_pris)} F)
+                      </p>
                     </CardContent>
                   </Card>
                   <Card className="border-l-4 border-l-purple-400">

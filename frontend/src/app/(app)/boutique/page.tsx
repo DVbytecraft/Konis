@@ -36,6 +36,8 @@ interface DashboardData {
   total_creances: string;
   total_paiements_creances: string;
   caisse_reelle: string;
+  caisse_physique: string;
+  total_collectes_prises: string;
   argent_theorique: string;
   montant_fictif: string;
   total_depenses: string;
@@ -125,6 +127,8 @@ export default function BoutiqueDashboardPage() {
   const tcr  = parseFloat(data.total_credit);
   const cre  = parseFloat(data.total_creances);
   const cais = parseFloat(data.caisse_reelle);
+  const cp   = parseFloat(data.caisse_physique   || "0");
+  const tcp  = parseFloat(data.total_collectes_prises || "0");
   const at   = parseFloat(data.argent_theorique);
   const mf   = parseFloat(data.montant_fictif || "0");
   const dep  = parseFloat(data.total_depenses);
@@ -209,15 +213,16 @@ export default function BoutiqueDashboardPage() {
           <CardHeader className="pb-1 pt-4 px-4">
             <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
               <Wallet className="h-3.5 w-3.5 text-blue-500" />
-              Caisse réelle
+              En caisse (physique)
             </CardTitle>
           </CardHeader>
           <CardContent className="px-4 pb-4">
-            <p className="text-2xl font-bold text-blue-700 dark:text-blue-300">{fmt(cais)}</p>
-            <p className="text-xs text-muted-foreground mt-0.5">FCFA encaissés</p>
-            <p className="text-xs text-muted-foreground mt-1">
-              Cash ventes + paiements créances
-            </p>
+            <p className="text-2xl font-bold text-blue-700 dark:text-blue-300">{fmt(cp)}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">FCFA dans le tiroir</p>
+            <div className="mt-2 flex flex-col gap-0.5 text-xs text-muted-foreground">
+              <span>Encaissé : {fmt(cais)} F</span>
+              {tcp > 0 && <span className="text-amber-600">Collecté : −{fmt(tcp)} F</span>}
+            </div>
           </CardContent>
         </Card>
 

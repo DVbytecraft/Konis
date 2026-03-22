@@ -974,6 +974,7 @@ def get_dashboard_global(entreprise: Entreprise) -> dict:
     total_collecte_laisse = collectes_agg["total_laisse"] or Decimal("0")
     solde              = get_solde_caisse(entreprise)
     caisse_reelle      = tc + pcc_global
+    caisse_physique_globale = caisse_reelle - total_collecte_pris
     ben_brut           = tv - total_achats_mpsl
     ben_net            = ben_brut - total_dep
     # Montant fictif = ce qu'on aurait si tous les clients payaient et toutes les dettes réglées
@@ -995,8 +996,9 @@ def get_dashboard_global(entreprise: Entreprise) -> dict:
         "total_mouture":         total_mouture,
         "total_ventes_produits": tv - total_mouture,
         "total_achats_mpsl":     total_achats_mpsl,
-        "total_collecte_pris":   total_collecte_pris,
-        "total_collecte_laisse": total_collecte_laisse,
+        "total_collecte_pris":    total_collecte_pris,
+        "total_collecte_laisse":  total_collecte_laisse,
+        "caisse_physique_globale": caisse_physique_globale,
         "collectes_par_boutique": [
             {
                 "lieu_id":      row["lieu_id"],
@@ -1076,6 +1078,16 @@ def get_dashboard_boutique(lieu, date_debut=None, date_fin=None) -> dict:
     # Montant fictif boutique = si tous les clients payaient (hors dettes fourn / dépenses non locales)
     montant_fictif   = argent_theorique - total_dep_boutique
 
+    # Caisse physique = argent réellement dans le tiroir (encaissé − collecté)
+    collectes_qs = CollecteArgent.objects.filter(lieu=lieu)
+    if date_debut:
+        collectes_qs = collectes_qs.filter(date_collecte__gte=date_debut)
+    if date_fin:
+        collectes_qs = collectes_qs.filter(date_collecte__lte=date_fin)
+    collectes_agg = collectes_qs.aggregate(total_pris=Sum("montant_pris"))
+    total_collectes_prises = collectes_agg["total_pris"] or Decimal("0")
+    caisse_physique = caisse_reelle - total_collectes_prises
+
     # Dernière collecte pour ce lieu
     derniere_collecte = (
         CollecteArgent.objects.filter(lieu=lieu)
@@ -1107,5 +1119,7 @@ def get_dashboard_boutique(lieu, date_debut=None, date_fin=None) -> dict:
         "nb_produits_en_stock":     stock_nb,
         "total_mouture":            total_mouture,
         "total_ventes_produits":    (tickets["total_ventes"] or Decimal("0")) - total_mouture,
+        "total_collectes_prises":   total_collectes_prises,
+        "caisse_physique":          caisse_physique,
         "derniere_collecte":        derniere_collecte_data,
     }

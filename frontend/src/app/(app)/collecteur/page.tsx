@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import {
   Truck, RefreshCw, Plus, X, Banknote, AlertCircle,
-  CheckCircle2, Pencil, ChevronDown, ChevronUp,
+  CheckCircle2, Pencil, ChevronDown, ChevronUp, Calendar,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -57,6 +57,10 @@ export default function CollecteurPage() {
   const [createErr, setCreateErr]       = useState("");
   const [creating, setCreating]         = useState(false);
 
+  // Filtres date
+  const [debut, setDebut] = useState("");
+  const [fin,   setFin]   = useState("");
+
   // Formulaire correction
   const [editTarget, setEditTarget]     = useState<Collecte | null>(null);
   const [editForm, setEditForm]         = useState({ montant_trouve: "", montant_pris: "", notes: "" });
@@ -72,8 +76,12 @@ export default function CollecteurPage() {
     try {
       setLoading(true);
       setErreur("");
+      const params = new URLSearchParams();
+      if (debut) params.set("debut", debut);
+      if (fin)   params.set("fin",   fin);
+      const qs = params.toString() ? `?${params}` : "";
       const [collectesRes, lieuxRes] = await Promise.all([
-        apiFetch<Paginated<Collecte> | Collecte[]>("/finance/collectes/"),
+        apiFetch<Paginated<Collecte> | Collecte[]>(`/finance/collectes/${qs}`),
         apiFetch<Paginated<Lieu> | Lieu[]>("/locations/by-type/?type=magasin"),
       ]);
       setCollectes(toList(collectesRes));
@@ -83,7 +91,7 @@ export default function CollecteurPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [debut, fin]);
 
   useEffect(() => { charger(); }, [charger]);
 
@@ -228,6 +236,38 @@ export default function CollecteurPage() {
           <Button size="sm" onClick={() => { setCreateForm(EMPTY_CREATE); setCreateErr(""); setShowCreate(true); }}
             className="bg-blue-600 hover:bg-blue-700 text-white">
             <Plus className="h-4 w-4 mr-2" /> Nouvelle collecte
+          </Button>
+        </div>
+      </div>
+
+      {/* Filtres date */}
+      <div className="flex items-end gap-3 flex-wrap">
+        <Calendar className="h-4 w-4 text-muted-foreground mb-2 shrink-0" />
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-muted-foreground">Du</label>
+          <Input type="date" value={debut} onChange={(e) => setDebut(e.target.value)} className="h-8 text-sm w-36" />
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-muted-foreground">Au</label>
+          <Input type="date" value={fin} onChange={(e) => setFin(e.target.value)} className="h-8 text-sm w-36" />
+        </div>
+        <div className="flex gap-1 mb-0.5">
+          <Button variant="outline" size="sm" className="h-8 text-xs"
+            onClick={() => { const t = new Date().toISOString().slice(0,10); setDebut(t); setFin(t); }}>
+            Aujourd&apos;hui
+          </Button>
+          <Button variant="outline" size="sm" className="h-8 text-xs"
+            onClick={() => {
+              const now = new Date();
+              const first = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0,10);
+              const last  = new Date(now.getFullYear(), now.getMonth()+1, 0).toISOString().slice(0,10);
+              setDebut(first); setFin(last);
+            }}>
+            Ce mois
+          </Button>
+          <Button variant="outline" size="sm" className="h-8 text-xs"
+            onClick={() => { setDebut(""); setFin(""); }}>
+            Tout
           </Button>
         </div>
       </div>
