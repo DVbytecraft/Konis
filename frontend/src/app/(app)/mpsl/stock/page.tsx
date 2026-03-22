@@ -26,6 +26,7 @@ export default function MpslStockPage() {
 
   const [convertTarget, setConvertTarget] = useState<StockItem | null>(null);
   const [nombreSacs, setNombreSacs] = useState("");
+  const [poidsSaisi, setPoidsSaisi] = useState("");
   const [converting, setConverting] = useState(false);
 
   const load = useCallback(async () => {
@@ -46,6 +47,7 @@ export default function MpslStockPage() {
   const openConvert = (item: StockItem) => {
     setConvertTarget(item);
     setNombreSacs("");
+    setPoidsSaisi("");
     setSuccess(null);
     setError(null);
   };
@@ -53,24 +55,28 @@ export default function MpslStockPage() {
   const closeConvert = () => {
     setConvertTarget(null);
     setNombreSacs("");
+    setPoidsSaisi("");
   };
 
   const handleConvert = async () => {
     if (!convertTarget) return;
     const n = parseInt(nombreSacs, 10);
-    if (isNaN(n) || n <= 0) {
-      setError("Nombre de sacs invalide.");
-      return;
+    if (isNaN(n) || n <= 0) { setError("Nombre de sacs invalide."); return; }
+    const needsPoids = !convertTarget.poids_par_sac || parseFloat(convertTarget.poids_par_sac) === 0;
+    if (needsPoids && (!poidsSaisi || isNaN(parseFloat(poidsSaisi)) || parseFloat(poidsSaisi) <= 0)) {
+      setError("Veuillez saisir le poids par sac en kg."); return;
     }
     setConverting(true);
     setError(null);
     try {
+      const body: Record<string, unknown> = { nombre_sacs: n };
+      if (needsPoids) body.poids_par_sac = parseFloat(poidsSaisi);
       const res = await apiFetch<{ kg_generes: string; quantite_sacs: string; quantite_kg: string }>(
         `/mpsl/stock/${convertTarget.produit_id}/convertir/`,
         {
           method: "POST",
           headers: { "Idempotency-Key": buildIdempotencyKey("conversion") },
-          body: JSON.stringify({ nombre_sacs: n }),
+          body: JSON.stringify(body),
         },
       );
       setSuccess(
@@ -99,10 +105,7 @@ export default function MpslStockPage() {
     return `${sacs} ${item.unite}`;
   };
 
-  const peutConvertir = (item: StockItem) =>
-    item.poids_par_sac !== null &&
-    parseFloat(item.poids_par_sac) > 0 &&
-    parseFloat(item.quantite) > 0;
+  const peutConvertir = (item: StockItem) => parseFloat(item.quantite) > 0;
 
   return (
     <div className="p-4 space-y-4 max-w-4xl mx-auto">
@@ -189,13 +192,22 @@ export default function MpslStockPage() {
               {convertTarget.poids_par_sac && <> · {convertTarget.poids_par_sac} kg/sac</>}
             </p>
 
-            {convertTarget.poids_par_sac && (
-              <p className="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded p-2">
-                {nombreSacs && !isNaN(parseInt(nombreSacs, 10)) && parseInt(nombreSacs, 10) > 0
-                  ? `→ ${(parseInt(nombreSacs, 10) * parseFloat(convertTarget.poids_par_sac)).toFixed(3)} kg générés`
-                  : "Entrez un nombre de sacs pour voir le calcul."}
-              </p>
+            {(!convertTarget.poids_par_sac || parseFloat(convertTarget.poids_par_sac) === 0) && (
+              <div className="space-y-1">
+                <label className="text-sm font-medium">Poids par sac (kg) <span className="text-red-500">*</span></label>
+                <Input type="number" min={0.001} step={0.001} value={poidsSaisi} onChange={(e) => setPoidsSaisi(e.target.value)} placeholder="ex : 50.000" autoFocus />
+              </div>
             )}
+
+            {(() => {
+              const pds = convertTarget.poids_par_sac ? parseFloat(convertTarget.poids_par_sac) : parseFloat(poidsSaisi);
+              const n = parseInt(nombreSacs, 10);
+              return pds > 0 && n > 0 ? (
+                <p className="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded p-2">→ {(n * pds).toFixed(3)} kg générés</p>
+              ) : (
+                <p className="text-xs text-muted-foreground bg-muted/30 rounded p-2">Renseignez le nombre de sacs{(!convertTarget.poids_par_sac || parseFloat(convertTarget.poids_par_sac) === 0) ? " et le poids" : ""} pour voir le calcul.</p>
+              );
+            })()}
 
             <div className="space-y-1">
               <div className="flex items-center justify-between">
@@ -203,23 +215,9 @@ export default function MpslStockPage() {
                   Nombre de sacs
                   <span className="text-muted-foreground font-normal ml-1">(max {parseInt(convertTarget.quantite)})</span>
                 </label>
-                <button
-                  type="button"
-                  onClick={() => setNombreSacs(convertTarget.quantite)}
-                  className="text-xs text-blue-600 hover:underline"
-                >
-                  Tout
-                </button>
+                <button type="button" onClick={() => setNombreSacs(convertTarget.quantite)} className="text-xs text-blue-600 hover:underline">Tout</button>
               </div>
-              <Input
-                type="number"
-                min={1}
-                max={parseInt(convertTarget.quantite)}
-                value={nombreSacs}
-                onChange={(e) => setNombreSacs(e.target.value)}
-                placeholder={`1 – ${parseInt(convertTarget.quantite)}`}
-                autoFocus
-              />
+              <Input type="number" min={1} max={parseInt(convertTarget.quantite)} value={nombreSacs} onChange={(e) => setNombreSacs(e.target.value)} placeholder={`1 – ${parseInt(convertTarget.quantite)}`} autoFocus={!(!convertTarget.poids_par_sac || parseFloat(convertTarget.poids_par_sac) === 0)} />
             </div>
 
             <div className="flex gap-2 justify-end pt-1">

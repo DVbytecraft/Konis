@@ -975,6 +975,18 @@ class ConvertirSacEnKgView(APIView):
             resp = Response({"detail": "nombre_sacs doit être un entier."}, status=status.HTTP_400_BAD_REQUEST)
             return apply_idempotency_warning(resp, missing)
 
+        poids_par_sac_override = None
+        pps_raw = request.data.get("poids_par_sac")
+        if pps_raw is not None:
+            try:
+                from decimal import InvalidOperation
+                poids_par_sac_override = Decimal(str(pps_raw))
+                if poids_par_sac_override <= 0:
+                    raise ValueError
+            except (InvalidOperation, ValueError):
+                resp = Response({"detail": "poids_par_sac doit être un nombre positif."}, status=status.HTTP_400_BAD_REQUEST)
+                return apply_idempotency_warning(resp, missing)
+
         try:
             if idempotency_key and len(idempotency_key) > 128:
                 resp = Response(
@@ -1027,6 +1039,7 @@ class ConvertirSacEnKgView(APIView):
                 stock=stock,
                 nombre_sacs=nombre_sacs,
                 updated_by=request.user,
+                poids_par_sac_override=poids_par_sac_override,
                 idempotency_key=idempotency_key,
                 log_request=request,
             )

@@ -585,16 +585,18 @@ def convertir_sac_en_kg(
     nombre_sacs: int,
     updated_by,
     *,
+    poids_par_sac_override: Decimal | None = None,
     idempotency_key: str | None = None,
     log_request=None,
 ) -> Decimal:
     """
-    Convertit nombre_sacs sacs en kg pour le stock d'une boutique.
+    Convertit nombre_sacs sacs en kg pour le stock.
 
     - Décrémente stock.quantite de nombre_sacs
-    - Incrémente stock.quantite_kg de (nombre_sacs × produit.poids_par_sac)
+    - Incrémente stock.quantite_kg de (nombre_sacs × poids_par_sac)
+    - poids_par_sac utilisé : poids_par_sac_override si fourni, sinon produit.poids_par_sac
     - Retourne le nombre de kg générés
-    - Lève ErreurStock si poids_par_sac absent, si stock insuffisant ou si
+    - Lève ErreurStock si aucun poids disponible, si stock insuffisant ou si
       nombre_sacs <= 0.
 
     Atomique (select_for_update + transaction).
@@ -607,10 +609,11 @@ def convertir_sac_en_kg(
     with transaction.atomic():
         locked = Stock.objects.select_for_update().get(pk=stock.pk)
 
-        pps = locked.produit.poids_par_sac
+        pps = poids_par_sac_override or locked.produit.poids_par_sac
         if not pps:
             raise ErreurStock(
-                f"Le produit '{locked.produit.nom}' n'a pas de poids_par_sac défini."
+                f"Le produit '{locked.produit.nom}' n'a pas de poids_par_sac défini. "
+                "Veuillez saisir le poids par sac manuellement."
             )
         if Decimal(str(nombre_sacs)) > locked.quantite:
             raise ErreurStock(
