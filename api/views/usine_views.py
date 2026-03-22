@@ -464,10 +464,137 @@ class FactoryStockView(APIView):
                 "produit_nom": s.produit.nom,
                 "produit_code": s.produit.code or "",
                 "quantite": str(s.quantite),
+                "quantite_kg": str(s.quantite_kg),
+                "poids_par_sac": str(s.produit.poids_par_sac) if s.produit.poids_par_sac is not None else None,
                 "unite": s.produit.unite,
             }
             for s in stocks
         ])
+
+
+class ConvertirSacEnKgUsineView(APIView):
+    """
+    POST /api/factory/stock/<produit_id>/convertir/
+    Convertit N sacs entiers en kg pour le stock de l'usine.
+    Body : { "nombre_sacs": <int> }
+    """
+    permission_classes = [IsAuthenticated, IsFactoryUser]
+
+    def post(self, request, produit_id):
+        from inventaire.services import convertir_sac_en_kg
+        from audit.models import AuditLog
+        from django.conf import settings
+        from api.utils import (
+            apply_idempotency_warning,
+            find_idempotency_record,
+            get_idempotency_info,
+            record_idempotency_replay,
+            record_idempotency_success,
+        )
+
+        idempotency_key, missing, payload_hash, _ = get_idempotency_info(
+            request, operation="conversion_sac_en_kg"
+        )
+        if missing and settings.IDEMPOTENCY_STRICT_MODE:
+            resp = Response(
+                {"detail": "Idempotency-Key requis."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+            return apply_idempotency_warning(resp, True)
+
+        lieu = get_lieu_usine(request)
+        if not lieu:
+            resp = Response({"detail": "Lieu usine introuvable."}, status=status.HTTP_400_BAD_REQUEST)
+            return apply_idempotency_warning(resp, missing)
+
+        try:
+            stock = Stock.objects.get(produit_id=produit_id, lieu=lieu)
+        except Stock.DoesNotExist:
+            resp = Response({"detail": "Stock introuvable."}, status=status.HTTP_404_NOT_FOUND)
+            return apply_idempotency_warning(resp, missing)
+
+        nombre_sacs = request.data.get("nombre_sacs")
+        try:
+            nombre_sacs = int(nombre_sacs)
+        except (TypeError, ValueError):
+            resp = Response({"detail": "nombre_sacs doit être un entier."}, status=status.HTTP_400_BAD_REQUEST)
+            return apply_idempotency_warning(resp, missing)
+
+        try:
+            if idempotency_key and len(idempotency_key) > 128:
+                resp = Response(
+                    {"detail": "Header Idempotency-Key trop long (max 128)."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+                return apply_idempotency_warning(resp, missing)
+            if idempotency_key:
+                record = find_idempotency_record(
+                    key=idempotency_key,
+                    operation="conversion_sac_en_kg",
+                    endpoint=request.path,
+                )
+                if record and record.extra.get("response"):
+                    record_idempotency_replay(
+                        request, key=idempotency_key, operation="conversion_sac_en_kg"
+                    )
+                    resp = Response(record.extra.get("response"))
+                    return apply_idempotency_warning(resp, missing)
+
+                existing = (
+                    AuditLog.objects
+                    .filter(
+                        action="conversion_sac_en_kg",
+                        object_type="Stock",
+                        object_id=stock.pk,
+                        extra__idempotency_key=idempotency_key,
+                    )
+                    .order_by("-created_at")
+                    .first()
+                )
+                if existing:
+                    stock.refresh_from_db()
+                    resp = Response({
+                        "kg_generes": str(existing.extra.get("kg_generes") or "0"),
+                        "quantite_sacs": str(stock.quantite),
+                        "quantite_kg": str(stock.quantite_kg),
+                    })
+                    return apply_idempotency_warning(resp, missing)
+
+            kg = convertir_sac_en_kg(
+                stock=stock,
+                nombre_sacs=nombre_sacs,
+                updated_by=request.user,
+                idempotency_key=idempotency_key,
+                log_request=request,
+            )
+        except ErreurStock as e:
+            resp = Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            return apply_idempotency_warning(resp, missing)
+
+        stock.refresh_from_db()
+        resp_data = {
+            "kg_generes": str(kg),
+            "quantite_sacs": str(stock.quantite),
+            "quantite_kg": str(stock.quantite_kg),
+        }
+        if idempotency_key:
+            record_idempotency_success(
+                request=request,
+                key=idempotency_key,
+                operation="conversion_sac_en_kg",
+                object_type="Stock",
+                object_id=stock.pk,
+                response_data=resp_data,
+            )
+        audit_log(
+            user=request.user,
+            action="conversion_sac_en_kg",
+            object_type="Stock",
+            object_id=stock.pk,
+            extra={"nombre_sacs": nombre_sacs, "kg_generes": str(kg), "idempotency_key": idempotency_key},
+            request=request,
+        )
+        return apply_idempotency_warning(Response(resp_data), missing)
 
 
 # --- Catalogue matieres premieres -----------------------------------------

@@ -60,6 +60,7 @@ export default function MpslDashboardPage() {
         <div className="flex flex-wrap gap-3 text-sm">
           <Link href="/mpsl/achats" className="text-orange-600 dark:text-orange-400 hover:underline font-medium">Achats</Link>
           <Link href="/mpsl/transferts" className="text-blue-600 dark:text-blue-400 hover:underline font-medium">Transferts</Link>
+          <Link href="/mpsl/stock" className="text-emerald-600 dark:text-emerald-400 hover:underline font-medium">Stock</Link>
         </div>
       </div>
 

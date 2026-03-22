@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -48,9 +49,14 @@ export default function UsinePage() {
 
   return (
     <div className="space-y-6 min-w-0">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Usine</h1>
-        <p className="text-sm text-muted-foreground">Lots de production, cessions et stocks boutiques.</p>
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Usine</h1>
+          <p className="text-sm text-muted-foreground">Lots de production, cessions et stocks boutiques.</p>
+        </div>
+        <Link href="/usine/stock" className="text-sm text-emerald-600 dark:text-emerald-400 hover:underline font-medium">
+          Stock usine
+        </Link>
       </div>
 
       <Card>
