@@ -145,6 +145,7 @@ class MoutureEndpointsTests(APITestCase):
             {"quantite_apportee": "10", "quantite_achetee": "0", "unite": "kg", "prix_par_kg": "50"},
             format="json",
             **self._auth(self.boutique_user),
+            HTTP_IDEMPOTENCY_KEY="mouture-calcul-kg-001",
         )
         self.assertEqual(r.status_code, status.HTTP_201_CREATED, r.json())
         data = r.json()
@@ -158,6 +159,7 @@ class MoutureEndpointsTests(APITestCase):
             {"quantite_apportee": "5", "quantite_achetee": "3", "unite": "kg", "prix_par_kg": "100"},
             format="json",
             **self._auth(self.boutique_user),
+            HTTP_IDEMPOTENCY_KEY="mouture-calcul-mixte-001",
         )
         self.assertEqual(r.status_code, status.HTTP_201_CREATED, r.json())
         data = r.json()
@@ -182,6 +184,7 @@ class MoutureEndpointsTests(APITestCase):
             },
             format="json",
             **self._auth(self.boutique_user),
+            HTTP_IDEMPOTENCY_KEY="mouture-sac-conversion-001",
         )
         self.assertEqual(r.status_code, status.HTTP_201_CREATED, r.json())
         data = r.json()
@@ -224,6 +227,7 @@ class MoutureEndpointsTests(APITestCase):
             },
             format="json",
             **self._auth(self.boutique_user),
+            HTTP_IDEMPOTENCY_KEY="vente-mouture-grain-achete-001",
         )
         self.assertEqual(r.status_code, status.HTTP_201_CREATED, r.json())
         data = r.json()
@@ -245,6 +249,7 @@ class MoutureEndpointsTests(APITestCase):
             },
             format="json",
             **self._auth(self.boutique_user),
+            HTTP_IDEMPOTENCY_KEY="vente-mouture-grain-apporte-001",
         )
         self.assertEqual(r.status_code, status.HTTP_201_CREATED, r.json())
         data = r.json()
@@ -269,6 +274,7 @@ class MoutureEndpointsTests(APITestCase):
             },
             format="json",
             **self._auth(self.boutique_user),
+            HTTP_IDEMPOTENCY_KEY="vente-mouture-grain-sac-001",
         )
         self.assertEqual(r.status_code, status.HTTP_201_CREATED, r.json())
         data = r.json()
@@ -286,6 +292,7 @@ class MoutureEndpointsTests(APITestCase):
             {"quantite_apportee": "10", "quantite_achetee": "0", "unite": "kg", "prix_par_kg": "50"},
             format="json",
             **self._auth(self.boutique_user),
+            HTTP_IDEMPOTENCY_KEY="mouture-history-setup-1",
         )
         self.client.post(
             "/api/boutique/mouture-seule/",
@@ -298,6 +305,7 @@ class MoutureEndpointsTests(APITestCase):
             },
             format="json",
             **self._auth(self.boutique_user),
+            HTTP_IDEMPOTENCY_KEY="mouture-history-setup-2",
         )
         response = self.client.get("/api/boutique/mouture-seule/", **self._auth(self.boutique_user))
         self.assertEqual(response.status_code, status.HTTP_200_OK, response.json())
@@ -317,6 +325,7 @@ class MoutureEndpointsTests(APITestCase):
             },
             format="json",
             **self._auth(self.boutique_user),
+            HTTP_IDEMPOTENCY_KEY="mouture-history-inclut-seule-001",
         )
         vente = self.client.post(
             "/api/boutique/ventes/",
@@ -327,6 +336,7 @@ class MoutureEndpointsTests(APITestCase):
             },
             format="json",
             **self._auth(self.boutique_user),
+            HTTP_IDEMPOTENCY_KEY="mouture-history-inclut-vente-001",
         )
         self.assertEqual(vente.status_code, status.HTTP_201_CREATED, vente.json())
 

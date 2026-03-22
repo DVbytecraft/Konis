@@ -81,8 +81,8 @@ class TestSupremeAdminStockCreate(APITestCase):
         cls.ent = _entreprise("EntS1")
         cls.boutique = _boutique(cls.ent)
         cls.usine = _usine(cls.ent)
-        cls.supreme = _user(cls.ent, cls.boutique, "supreme1", CustomUser.ROLE_SUPREME_ADMIN)
-        cls.admin = _user(cls.ent, cls.boutique, "admin1", CustomUser.ROLE_ADMIN)
+        cls.supreme = _user(cls.ent, None, "supreme1", CustomUser.ROLE_SUPREME_ADMIN)
+        cls.admin = _user(cls.ent, None, "admin1", CustomUser.ROLE_ADMIN)
         cls.vendeur = _user(cls.ent, cls.boutique, "vendeur1", CustomUser.ROLE_BOUTIQUE)
         cls.produit = _produit(cls.ent)
 
@@ -93,8 +93,9 @@ class TestSupremeAdminStockCreate(APITestCase):
         """supreme_admin doit pouvoir créer du stock direct en boutique."""
         self._auth(self.supreme)
         r = self.client.post("/api/boutique/stock/", {
-            "produit": self.produit.pk,
+            "product_id": self.produit.pk,
             "quantity": "5.00",
+            "lieu": self.boutique.pk,
         }, format="json")
         self.assertEqual(r.status_code, status.HTTP_201_CREATED, r.json())
         stock = Stock.objects.get(produit=self.produit, lieu=self.boutique)
@@ -104,8 +105,9 @@ class TestSupremeAdminStockCreate(APITestCase):
         """admin peut créer du stock direct — comportement inchangé."""
         self._auth(self.admin)
         r = self.client.post("/api/boutique/stock/", {
-            "produit": self.produit.pk,
+            "product_id": self.produit.pk,
             "quantity": "3.00",
+            "lieu": self.boutique.pk,
         }, format="json")
         self.assertEqual(r.status_code, status.HTTP_201_CREATED, r.json())
 
@@ -180,17 +182,16 @@ class TestTransfertInterEntreprises(APITestCase):
         from usine.services import creer_lot_production
         lot = creer_lot_production(
             lieu_usine=self.usine_a,
-            produit=self.produit_a,
-            quantite=Decimal("30"),
-            prix_unitaire=Decimal("100"),
+            produit_fini=self.produit_a,
+            nom_lot="TestLotCession",
+            quantite_sacs=Decimal("30"),
         )
         admin_a = _user(self.ent_a, self.usine_a, "admin_a_cession", CustomUser.ROLE_ADMIN)
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(admin_a)}")
         r = self.client.post("/api/usine/cessions/", {
-            "lot_id": lot.pk,
-            "boutique_id": self.boutique_b.pk,
-            "quantite": "5",
-            "prix_unitaire": "100",
+            "lot": lot.pk,
+            "boutique": self.boutique_b.pk,
+            "quantite_sacs": "5",
         }, format="json")
         self.assertIn(r.status_code, [status.HTTP_400_BAD_REQUEST, status.HTTP_403_FORBIDDEN])
         body = r.json()
@@ -248,7 +249,7 @@ class TestConversionsMultiples(TestCase):
         _stock(produit2, self.boutique, quantite=10, quantite_kg=0)
 
         r = client.post(
-            f"/api/boutique/stock/{produit2.pk}/convertir/",
+            f"/api/boutique/stock/{produit2.pk}/convertir/?lieu={self.boutique.pk}",
             {"nombre_sacs": 2},
             format="json",
             HTTP_IDEMPOTENCY_KEY="e2e-conversion-api-test-001",

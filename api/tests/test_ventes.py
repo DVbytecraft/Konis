@@ -40,9 +40,12 @@ class VenteBoutiqueTests(APITestCase):
             produit=cls.produit, lieu=cls.lieu, quantite=Decimal("50")
         )
 
-    def _auth_headers(self):
+    def _auth_headers(self, idempotency_key=None):
         refresh = RefreshToken.for_user(self.user)
-        return {"HTTP_AUTHORIZATION": f"Bearer {str(refresh.access_token)}"}
+        headers = {"HTTP_AUTHORIZATION": f"Bearer {str(refresh.access_token)}"}
+        if idempotency_key:
+            headers["HTTP_IDEMPOTENCY_KEY"] = idempotency_key
+        return headers
 
     def test_vente_ok_stock_diminue(self):
         """Créer une vente valide diminue le stock en base."""
@@ -57,7 +60,7 @@ class VenteBoutiqueTests(APITestCase):
             ]
         }
         r = self.client.post(
-            url, payload, format="json", **self._auth_headers()
+            url, payload, format="json", **self._auth_headers(idempotency_key="test-vente-ok-1")
         )
         self.assertEqual(r.status_code, status.HTTP_201_CREATED)
 
@@ -77,7 +80,7 @@ class VenteBoutiqueTests(APITestCase):
             ]
         }
         r = self.client.post(
-            url, payload, format="json", **self._auth_headers()
+            url, payload, format="json", **self._auth_headers(idempotency_key="test-stock-insuf-1")
         )
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("Stock insuffisant", r.json().get("detail", ""))

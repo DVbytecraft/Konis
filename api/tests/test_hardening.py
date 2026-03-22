@@ -12,7 +12,7 @@ Couvre :
 """
 from decimal import Decimal
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -106,6 +106,7 @@ class TestIdempotencyVenteBoutique(APITestCase):
         stock_apres = Stock.objects.get(produit=self.produit, lieu=self.lieu).quantite
         self.assertEqual(stock_avant - stock_apres, Decimal("5"))
 
+    @override_settings(IDEMPOTENCY_STRICT_MODE=False)
     def test_sans_cle_deux_ventes_distinctes(self):
         """Sans Idempotency-Key deux POST créent deux tickets distincts."""
         r1 = self._post_vente()

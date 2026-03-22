@@ -49,7 +49,8 @@ class StockConversionTests(APITestCase):
         """Convertit 2 sacs -> 100 kg et met à jour le stock."""
         url = reverse("boutique-stock-convertir", args=[self.produit_sac.pk])
         r = self.client.post(
-            url, {"nombre_sacs": 2}, format="json", **self._auth_headers()
+            url, {"nombre_sacs": 2}, format="json", **self._auth_headers(),
+            HTTP_IDEMPOTENCY_KEY="conversion-sac-kg-test-001",
         )
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         stock = Stock.objects.get(produit=self.produit_sac, lieu=self.lieu)

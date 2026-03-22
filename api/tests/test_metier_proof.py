@@ -63,6 +63,7 @@ class TestsMetierProof(TestCase):
             "/api/boutique/ventes/",
             {"lignes": [{"produit": self.produit.id, "quantite": 10, "prix_unitaire": 100}]},
             format="json",
+            HTTP_IDEMPOTENCY_KEY="metier-test-1-vente",
         )
         self.assertEqual(r.status_code, status.HTTP_201_CREATED, r.json())
         self.assertIn("id", r.json())
@@ -78,6 +79,7 @@ class TestsMetierProof(TestCase):
             "/api/boutique/ventes/",
             {"lignes": [{"produit": self.produit.id, "quantite": 99999, "prix_unitaire": 100}]},
             format="json",
+            HTTP_IDEMPOTENCY_KEY="metier-test-2-stock-insuf",
         )
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST, r.json())
         detail = str(r.json().get("detail", ""))

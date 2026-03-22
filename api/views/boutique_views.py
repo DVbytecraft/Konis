@@ -45,7 +45,15 @@ from inventaire.models import Stock
 from inventaire.services import ErreurStock
 from produits.models import Produit
 from ventes.models import Ticket, TicketReprint
-from ventes.services import normaliser_quantite_en_kg, vente_boutique, vente_mouture_seule
+from ventes.services import (
+    charger_client_vente,
+    normaliser_quantite_en_kg,
+    preparer_lignes_vente,
+    preparer_mouture_vente,
+    valider_prix_mouture,
+    vente_boutique,
+    vente_mouture_seule,
+)
 
 
 class StockBoutiqueViewSet(ModelViewSet):
@@ -176,109 +184,30 @@ class VenteBoutiqueViewSet(ModelViewSet):
                 {"detail": "Lieu requis (boutique : votre magasin ; admin : fournir ?lieu= ou body lieu)."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
         ser = VenteBoutiqueCreateSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
-        lignes_data = ser.validated_data["lignes"]
-
-        # Chargement des produits en 1 seule requête (évite N+1)
-        produit_ids = [
-            item["produit"] if isinstance(item["produit"], int) else item["produit"].pk
-            for item in lignes_data
-        ]
-        produits_map = {
-            p.pk: p
-            for p in Produit.objects.filter(pk__in=produit_ids, entreprise=lieu.entreprise)
-        }
-        lignes = []
-        for item in lignes_data:
-            produit_id = item["produit"] if isinstance(item["produit"], int) else item["produit"].pk
-            produit = produits_map.get(produit_id)
-            if produit is None:
-                return Response(
-                    {"detail": f"Produit inconnu ou non autorisé : {produit_id}"},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            quantite = Decimal(str(item["quantite"]))
-            prix_unitaire = Decimal(str(item["prix_unitaire"]))
-            raw_unite = (item.get("unite") or "").strip().lower()
-            if raw_unite:
-                if raw_unite not in ("kg", "sac", "sacs"):
-                    return Response(
-                        {"detail": f"Unité invalide pour {produit.nom} : '{raw_unite}'."},
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
-                unite_ligne = "sac" if raw_unite in ("sac", "sacs") else "kg"
-            else:
-                unite_ligne = produit.unite or "kg"
-            lignes.append((produit, quantite, prix_unitaire, unite_ligne))
 
         mouture = ser.validated_data.get("mouture", False)
         prix_mouture_kg = ser.validated_data.get("prix_mouture_kg")
-
-        # ── Garde-fou prix mouture ──────────────────────────────────────────
-        if mouture and prix_mouture_kg and lieu.prix_mouture_max and prix_mouture_kg > lieu.prix_mouture_max:
-            return Response(
-                {
-                    "detail": (
-                        f"Prix mouture {prix_mouture_kg} FCFA/kg dépasse le plafond autorisé "
-                        f"({lieu.prix_mouture_max} FCFA/kg). Contactez l'administrateur."
-                    )
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # Grain apporté par le client — normaliser en kg
-        quantite_apportee_client_kg = Decimal("0")
-        if mouture:
-            qty_apportee = ser.validated_data.get("quantite_apportee_mouture") or Decimal("0")
-            if qty_apportee > 0:
-                unite_apportee = ser.validated_data.get("unite_apportee_mouture", "kg")
-                produit_ref_apportee = None
-                produit_id_apportee = ser.validated_data.get("produit_id_apportee")
-                if produit_id_apportee:
-                    try:
-                        produit_ref_apportee = Produit.objects.get(
-                            pk=produit_id_apportee, entreprise=lieu.entreprise
-                        )
-                    except Produit.DoesNotExist:
-                        return Response(
-                            {"detail": f"Produit apportée {produit_id_apportee} introuvable."},
-                            status=status.HTTP_400_BAD_REQUEST,
-                        )
-                try:
-                    quantite_apportee_client_kg = normaliser_quantite_en_kg(
-                        qty_apportee, unite_apportee, produit_ref_apportee
-                    )
-                except ErreurStock as e:
-                    return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         idempotency_key = (request.headers.get("Idempotency-Key") or "").strip()[:128] or None
         if not idempotency_key:
             from django.conf import settings
             if settings.IDEMPOTENCY_STRICT_MODE:
-                return Response(
-                    {"detail": "Idempotency-Key requis."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
+                return Response({"detail": "Idempotency-Key requis."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # ── Type de vente + client ───────────────────────────────────────────
-        type_vente  = ser.validated_data.get("type_vente", "cash")
-        montant_cash_acompte = ser.validated_data.get("montant_cash")
-        client = None
-        client_id = ser.validated_data.get("client_id")
-        if client_id:
-            from finance.models import ClientFinance
-            try:
-                client = ClientFinance.objects.get(
-                    pk=client_id,
-                    entreprise_id=lieu.entreprise_id,
-                )
-            except ClientFinance.DoesNotExist:
-                return Response(
-                    {"detail": "Client introuvable ou non autorisé."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
+        # ── Préparation métier (produits, mouture, client) ───────────────────
+        try:
+            lignes = preparer_lignes_vente(lieu, ser.validated_data["lignes"])
+            if mouture:
+                valider_prix_mouture(lieu, prix_mouture_kg)
+            quantite_apportee_client_kg = preparer_mouture_vente(lieu, ser.validated_data) if mouture else Decimal("0")
+            client = charger_client_vente(lieu, ser.validated_data.get("client_id"))
+        except ErreurStock as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
+        # ── Enregistrement ───────────────────────────────────────────────────
         try:
             ticket, created = vente_boutique(
                 lieu,
@@ -287,8 +216,8 @@ class VenteBoutiqueViewSet(ModelViewSet):
                 prix_mouture_kg=prix_mouture_kg,
                 quantite_apportee_client_kg=quantite_apportee_client_kg,
                 idempotency_key=idempotency_key,
-                type_vente=type_vente,
-                montant_cash=montant_cash_acompte,
+                type_vente=ser.validated_data.get("type_vente", "cash"),
+                montant_cash=ser.validated_data.get("montant_cash"),
                 client=client,
                 created_by=request.user,
             )
@@ -296,10 +225,7 @@ class VenteBoutiqueViewSet(ModelViewSet):
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         if not created:
-            return Response(
-                TicketSerializer(ticket).data,
-                status=status.HTTP_200_OK,
-            )
+            return Response(TicketSerializer(ticket).data, status=status.HTTP_200_OK)
 
         mouture_extra = {}
         if mouture:

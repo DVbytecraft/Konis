@@ -117,6 +117,88 @@ def _compute_boutique_totals(
     return montant_produits, cout_mouture, montant_produits + cout_mouture
 
 
+# ── Helpers pré-vente (extraits de la vue pour testabilité) ─────────────────
+
+def preparer_lignes_vente(lieu: Lieu, lignes_data: list) -> list:
+    """
+    Charge les produits en 1 requête, valide l'appartenance à l'entreprise et
+    les unités, retourne une liste de tuples (produit, quantite, prix_unitaire, unite).
+    Lève ErreurStock si un produit est inconnu/non autorisé ou si l'unité est invalide.
+    """
+    produit_ids = [
+        item["produit"] if isinstance(item["produit"], int) else item["produit"].pk
+        for item in lignes_data
+    ]
+    produits_map = {
+        p.pk: p
+        for p in Produit.objects.filter(pk__in=produit_ids, entreprise=lieu.entreprise)
+    }
+    lignes = []
+    for item in lignes_data:
+        produit_id = item["produit"] if isinstance(item["produit"], int) else item["produit"].pk
+        produit = produits_map.get(produit_id)
+        if produit is None:
+            raise ErreurStock(f"Produit inconnu ou non autorisé : {produit_id}")
+        quantite = Decimal(str(item["quantite"]))
+        prix_unitaire = Decimal(str(item["prix_unitaire"]))
+        raw_unite = (item.get("unite") or "").strip().lower()
+        if raw_unite:
+            if raw_unite not in ("kg", "sac", "sacs"):
+                raise ErreurStock(f"Unité invalide pour {produit.nom} : '{raw_unite}'.")
+            unite_ligne = "sac" if raw_unite in ("sac", "sacs") else "kg"
+        else:
+            unite_ligne = produit.unite or "kg"
+        lignes.append((produit, quantite, prix_unitaire, unite_ligne))
+    return lignes
+
+
+def valider_prix_mouture(lieu: Lieu, prix_mouture_kg) -> None:
+    """
+    Vérifie que le prix mouture ne dépasse pas le plafond configuré sur le lieu.
+    Lève ErreurStock si le plafond est dépassé.
+    """
+    if prix_mouture_kg and lieu.prix_mouture_max and prix_mouture_kg > lieu.prix_mouture_max:
+        raise ErreurStock(
+            f"Prix mouture {prix_mouture_kg} FCFA/kg dépasse le plafond autorisé "
+            f"({lieu.prix_mouture_max} FCFA/kg). Contactez l'administrateur."
+        )
+
+
+def preparer_mouture_vente(lieu: Lieu, ser_data: dict) -> Decimal:
+    """
+    Normalise la quantité de grain apportée par le client en kg.
+    Valide le produit apporté contre l'entreprise du lieu.
+    Lève ErreurStock si la conversion est impossible ou le produit introuvable.
+    """
+    qty_apportee = ser_data.get("quantite_apportee_mouture") or Decimal("0")
+    if qty_apportee <= 0:
+        return Decimal("0")
+    unite_apportee = ser_data.get("unite_apportee_mouture", "kg")
+    produit_ref = None
+    produit_id_apportee = ser_data.get("produit_id_apportee")
+    if produit_id_apportee:
+        try:
+            produit_ref = Produit.objects.get(pk=produit_id_apportee, entreprise=lieu.entreprise)
+        except Produit.DoesNotExist:
+            raise ErreurStock(f"Produit apportée {produit_id_apportee} introuvable.")
+    return normaliser_quantite_en_kg(qty_apportee, unite_apportee, produit_ref)
+
+
+def charger_client_vente(lieu: Lieu, client_id):
+    """
+    Charge un ClientFinance scopé à l'entreprise du lieu.
+    Retourne None si client_id est absent.
+    Lève ErreurStock si le client est introuvable ou non autorisé.
+    """
+    if not client_id:
+        return None
+    from finance.models import ClientFinance
+    try:
+        return ClientFinance.objects.get(pk=client_id, entreprise_id=lieu.entreprise_id)
+    except ClientFinance.DoesNotExist:
+        raise ErreurStock("Client introuvable ou non autorisé.")
+
+
 # ── Numéro de ticket ────────────────────────────────────────────────────────
 
 def generer_numero_ticket(lieu: Lieu) -> str:

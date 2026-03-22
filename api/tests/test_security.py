@@ -100,7 +100,8 @@ class SecurityTests(APITestCase):
             ]
         }
         r = self.client.post(
-            url, payload, format="json", **self._auth_headers(self.boutique1)
+            url, payload, format="json", **self._auth_headers(self.boutique1),
+            HTTP_IDEMPOTENCY_KEY="security-stock-negatif-001",
         )
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("Stock insuffisant", r.json().get("detail", ""))

@@ -76,7 +76,9 @@ class IntegrationStockFlowTests(APITestCase):
 
         # 2) Conversion 1 sac -> 50 kg (MPSL)
         url_convert = reverse("mpsl-stock-convertir", args=[produit_id])
-        r = self.client.post(url_convert, {"nombre_sacs": 1}, format="json", **self._auth_headers(self.user_mpsl))
+        r = self.client.post(url_convert, {"nombre_sacs": 1}, format="json",
+                             **self._auth_headers(self.user_mpsl),
+                             HTTP_IDEMPOTENCY_KEY="integration-mpsl-convert-001")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
 
         # 3) Transfert vers boutique : 5 sacs + 50 kg
@@ -105,7 +107,8 @@ class IntegrationStockFlowTests(APITestCase):
             "client_id": self.client_obj.pk,
             "montant_cash": "0",
         }
-        r = self.client.post(url_vente, payload_vente, format="json", **self._auth_headers(self.user_boutique))
+        r = self.client.post(url_vente, payload_vente, format="json", **self._auth_headers(self.user_boutique),
+                             HTTP_IDEMPOTENCY_KEY="integration-full-flow-vente-001")
         self.assertEqual(r.status_code, status.HTTP_201_CREATED)
 
         stock_boutique.refresh_from_db()
@@ -121,7 +124,9 @@ class IntegrationStockFlowTests(APITestCase):
 
         url_paiement = reverse("boutique-creances-paiement", args=[creance_id])
         payload_paiement = {"montant": "10000", "date": "2026-03-21"}
-        r = self.client.post(url_paiement, payload_paiement, format="json", **self._auth_headers(self.user_boutique))
+        r = self.client.post(url_paiement, payload_paiement, format="json",
+                             **self._auth_headers(self.user_boutique),
+                             HTTP_IDEMPOTENCY_KEY="integration-paiement-creance-001")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
 
         # 6) Dashboards : vérifier caisse et créances
