@@ -94,6 +94,8 @@ export default function BoutiqueCaissePage() {
   // ── Type de vente ─────────────────────────────────────────────────────────
   const [typeVente, setTypeVente] = useState<TypeVente>("cash");
   const [montantCash, setMontantCash] = useState(""); // acompte si partiel
+  const [quantiteTotaleMouture, setQuantiteTotaleMouture] = useState("");
+  const [uniteMouture, setUniteMouture] = useState("sac");
   const [clientId, setClientId] = useState<number | null>(null);
   const [clientSearch, setClientSearch] = useState("");
   const [clients, setClients] = useState<ClientFinance[]>([]);
@@ -319,14 +321,24 @@ export default function BoutiqueCaissePage() {
     0
   );
 
-  // Calcul mouture en temps réel selon unité du produit
-  const coutMouture = panier.reduce((acc, l) => {
-    const unite = (l.unite_vente || l.produit_unite || "").toLowerCase();
-    if (unite.includes("kg") && prixMoutureKg) return acc + l.quantite * +prixMoutureKg;
-    if (unite.includes("tonne") && prixMoutureTonne) return acc + l.quantite * +prixMoutureTonne;
-    if (unite.includes("sac") && prixMoutureSac) return acc + l.quantite * +prixMoutureSac;
-    return acc;
-  }, 0);
+  // Calcul mouture — si quantité totale saisie manuellement, elle prime sur le panier
+  const coutMouture = (() => {
+    if (quantiteTotaleMouture && parseFloat(quantiteTotaleMouture) > 0) {
+      const q = parseFloat(quantiteTotaleMouture);
+      const u = uniteMouture.toLowerCase();
+      if (u === "kg" && prixMoutureKg) return q * +prixMoutureKg;
+      if (u === "tonne" && prixMoutureTonne) return q * +prixMoutureTonne;
+      if (u === "sac" && prixMoutureSac) return q * +prixMoutureSac;
+      return 0;
+    }
+    return panier.reduce((acc, l) => {
+      const unite = (l.unite_vente || l.produit_unite || "").toLowerCase();
+      if (unite.includes("kg") && prixMoutureKg) return acc + l.quantite * +prixMoutureKg;
+      if (unite.includes("tonne") && prixMoutureTonne) return acc + l.quantite * +prixMoutureTonne;
+      if (unite.includes("sac") && prixMoutureSac) return acc + l.quantite * +prixMoutureSac;
+      return acc;
+    }, 0);
+  })();
 
   const totalGeneral = totalPanier + (mouture ? coutMouture : 0);
 
@@ -408,6 +420,10 @@ export default function BoutiqueCaissePage() {
         prix_mouture_tonne: mouture && prixMoutureTonne ? prixMoutureTonne : null,
         prix_mouture_sac: mouture && prixMoutureSac ? prixMoutureSac : null,
       };
+      if (mouture && quantiteTotaleMouture && parseFloat(quantiteTotaleMouture) > 0) {
+        body.quantite_apportee_mouture = parseFloat(quantiteTotaleMouture);
+        body.unite_quantite_apportee = uniteMouture;
+      }
       if (typeVente === "credit" || typeVente === "partiel") {
         body.client_id = clientId;
       }
@@ -439,7 +455,7 @@ export default function BoutiqueCaissePage() {
       isPayingRef.current = false;
       setPaiementEnCours(false);
     }
-  }, [panier, mouture, prixMoutureKg, prixMoutureTonne, prixMoutureSac, typeVente, clientId, montantCash, chargerDonnees]);
+  }, [panier, mouture, prixMoutureKg, prixMoutureTonne, prixMoutureSac, quantiteTotaleMouture, uniteMouture, typeVente, clientId, montantCash, chargerDonnees]);
 
   const fermerTicket = useCallback(() => setTicketImprimer(null), []);
 
@@ -451,6 +467,8 @@ export default function BoutiqueCaissePage() {
     setPrixMoutureKg("");
     setPrixMoutureTonne("");
     setPrixMoutureSac("");
+    setQuantiteTotaleMouture("");
+    setUniteMouture("sac");
     searchInputRef.current?.focus();
   }, []);
 
@@ -827,7 +845,7 @@ export default function BoutiqueCaissePage() {
                 {panier.map((l) => {
                   const produitRef = produits.find((p) => p.id === l.produit_id);
                   const isSac = (produitRef?.unite || l.produit_unite || "").toLowerCase().includes("sac");
-                  const canKg = isSac && (produitRef?.poids_par_sac ?? 0) > 0;
+                  const canKg = isSac && ((produitRef?.quantite_kg ?? 0) > 0 || (produitRef?.poids_par_sac ?? 0) > 0);
                   return (
                     <li
                       key={l.produit_id}
@@ -941,6 +959,37 @@ export default function BoutiqueCaissePage() {
                     onChange={(e) => setPrixMoutureSac(e.target.value)}
                     className="h-8 text-xs"
                   />
+                  {/* Quantité totale à moudre — peut dépasser ce qui est acheté */}
+                  <div className="border-t border-orange-200 dark:border-orange-800 pt-2 mt-1 space-y-1">
+                    <p className="text-xs text-muted-foreground font-medium">
+                      Quantité totale à moudre <span className="font-normal">(si différente du panier)</span>
+                    </p>
+                    <div className="flex gap-1">
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder="Quantité"
+                        value={quantiteTotaleMouture}
+                        onChange={(e) => setQuantiteTotaleMouture(e.target.value)}
+                        className="h-8 text-xs flex-1"
+                      />
+                      <select
+                        value={uniteMouture}
+                        onChange={(e) => setUniteMouture(e.target.value)}
+                        className="h-8 rounded border border-input px-1.5 text-xs"
+                      >
+                        <option value="sac">sac</option>
+                        <option value="kg">kg</option>
+                        <option value="tonne">tonne</option>
+                      </select>
+                    </div>
+                    {quantiteTotaleMouture && parseFloat(quantiteTotaleMouture) > 0 && (
+                      <p className="text-xs text-orange-600">
+                        ↳ calcul basé sur {quantiteTotaleMouture} {uniteMouture}(s)
+                      </p>
+                    )}
+                  </div>
                   {coutMouture > 0 && (
                     <>
                       <p className="text-xs text-orange-700 dark:text-orange-300 font-semibold">
