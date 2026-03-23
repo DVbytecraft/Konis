@@ -158,12 +158,18 @@ class PaiementPayable(models.Model):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class ClientFinance(models.Model):
-    """Client pouvant avoir des dettes envers l'entreprise (créances)."""
+    """Client ou prospect enregistré par une boutique."""
+
+    STATUT_PROSPECT = "prospect"
+    STATUT_CLIENT   = "client"
+    STATUT_CHOICES  = [(STATUT_PROSPECT, "Prospect"), (STATUT_CLIENT, "Client")]
 
     entreprise = models.ForeignKey(Entreprise, on_delete=models.PROTECT, related_name="clients_finance")
     nom        = models.CharField(max_length=255)
     contact    = models.CharField(max_length=255, blank=True)
+    interet    = models.TextField(blank=True)   # Ce qu'il cherche / motif de visite
     notes      = models.TextField(blank=True)
+    statut     = models.CharField(max_length=20, choices=STATUT_CHOICES, default=STATUT_CLIENT)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

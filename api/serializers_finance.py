@@ -108,14 +108,14 @@ class PaiementPayableCreateSerializer(serializers.Serializer):
 class ClientFinanceSerializer(serializers.ModelSerializer):
     class Meta:
         model = ClientFinance
-        fields = ("id", "nom", "contact", "notes", "created_at", "updated_at")
+        fields = ("id", "nom", "contact", "interet", "notes", "statut", "created_at", "updated_at")
         read_only_fields = ("id", "created_at", "updated_at")
 
 
 class ClientFinanceCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = ClientFinance
-        fields = ("nom", "contact", "notes")
+        fields = ("nom", "contact", "interet", "notes", "statut")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

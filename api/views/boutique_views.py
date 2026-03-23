@@ -227,6 +227,11 @@ class VenteBoutiqueViewSet(ModelViewSet):
         if not created:
             return Response(TicketSerializer(ticket).data, status=status.HTTP_200_OK)
 
+        # Auto-upgrade prospect → client dès le premier achat
+        if client and client.statut == client.STATUT_PROSPECT:
+            client.statut = client.STATUT_CLIENT
+            client.save(update_fields=["statut", "updated_at"])
+
         mouture_extra = {}
         if mouture:
             mouture_extra = {
@@ -1076,12 +1081,19 @@ class ClientsBoutiqueView(APIView):
         if existing:
             return Response(ClientFinanceSerializer(existing).data, status=200)
 
+        statut = str(request.data.get("statut", ClientFinance.STATUT_PROSPECT)).strip()
+        if statut not in (ClientFinance.STATUT_PROSPECT, ClientFinance.STATUT_CLIENT):
+            statut = ClientFinance.STATUT_PROSPECT
+
         client = ClientFinance.objects.create(
             entreprise_id=ent_id,
             nom=nom,
             contact=str(request.data.get("contact", "")).strip(),
+            interet=str(request.data.get("interet", "")).strip(),
+            notes=str(request.data.get("notes", "")).strip(),
+            statut=statut,
         )
-        audit_log(request.user, "client_finance_create", {"client_id": client.pk, "nom": client.nom})
+        audit_log(request.user, "client_finance_create", {"client_id": client.pk, "nom": client.nom, "statut": statut})
         return Response(ClientFinanceSerializer(client).data, status=201)
 
 

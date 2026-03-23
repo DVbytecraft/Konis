@@ -15,7 +15,7 @@ from rest_framework.viewsets import ModelViewSet
 
 from audit.services import audit_log
 from api.pagination import KonisPagination
-from api.permissions import IsAdminRole
+from api.permissions import IsAdminRole, IsComptableRole
 from api.serializers import (
     AchatUsineSerializer,
     CategorieDepenseSerializer,
@@ -603,3 +603,53 @@ class DepenseViewSet(ModelViewSet):
             },
             request=self.request,
         )
+
+
+# ─── Clients / Prospects (vue admin globale) ─────────────────────────────────
+
+class ClientsAdminView(APIView):
+    """
+    GET /api/admin/clients/ — liste tous les clients/prospects de l'entreprise.
+    Filtres : statut, search, date_from (YYYY-MM-DD), date_to (YYYY-MM-DD)
+    """
+    permission_classes = [IsAuthenticated, IsAdminRole | IsComptableRole]
+
+    def get(self, request):
+        from django.db.models import Count, Max, Sum, Q
+        from finance.models import ClientFinance
+        from api.serializers_finance import ClientFinanceSerializer
+        from api.utils import filter_by_date
+
+        ent_id = request.user.entreprise_id
+        if not ent_id:
+            return Response([])
+
+        qs = ClientFinance.objects.filter(entreprise_id=ent_id)
+
+        statut = request.query_params.get("statut", "").strip()
+        if statut in (ClientFinance.STATUT_PROSPECT, ClientFinance.STATUT_CLIENT):
+            qs = qs.filter(statut=statut)
+
+        search = request.query_params.get("search", "").strip()
+        if search:
+            qs = qs.filter(Q(nom__icontains=search) | Q(contact__icontains=search) | Q(interet__icontains=search))
+
+        try:
+            qs = filter_by_date(qs, request, date_field="created_at")
+        except Exception:
+            return Response({"detail": "Format de date invalide (YYYY-MM-DD)."}, status=400)
+
+        qs = qs.annotate(
+            nb_achats=Count("tickets", distinct=True),
+            dernier_achat=Max("tickets__date"),
+            total_achats=Sum("tickets__montant_total"),
+        ).order_by("-created_at")
+
+        data = []
+        for c in qs:
+            row = ClientFinanceSerializer(c).data
+            row["nb_achats"] = getattr(c, "nb_achats", 0) or 0
+            row["dernier_achat"] = str(getattr(c, "dernier_achat", None) or "") or None
+            row["total_achats"] = str(getattr(c, "total_achats", None) or "0")
+            data.append(row)
+        return Response(data)

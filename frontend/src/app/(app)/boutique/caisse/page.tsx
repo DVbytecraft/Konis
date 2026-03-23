@@ -877,7 +877,7 @@ export default function BoutiqueCaissePage() {
                           {l.unite_vente}
                         </span>
                       </p>
-                      <div className="flex gap-2 mt-0.5">
+                      <div className="flex flex-wrap gap-2 mt-0.5">
                         <input
                           type="number"
                           min={0.01}

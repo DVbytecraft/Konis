@@ -21,6 +21,7 @@ from api.views.admin_views import (
     TicketAdminViewSet,
     CategorieDepenseViewSet,
     DepenseViewSet,
+    ClientsAdminView,
 )
 from api.views.comptable_views import (
     StockComptableViewSet,
@@ -156,6 +157,7 @@ urlpatterns = [
     path("boutique/clients/", ClientsBoutiqueView.as_view(), name="boutique-clients"),
     path("boutique/stock/<int:produit_id>/convertir/", ConvertirSacEnKgView.as_view(), name="boutique-stock-convertir"),
     path("boutique/", include(router_boutique.urls)),
+    path("admin/clients/", ClientsAdminView.as_view(), name="admin-clients"),
     path("admin/", include(router_admin.urls)),
     path("comptable/", include(router_comptable.urls)),
     path("mpsl/", include(router_mpsl.urls)),

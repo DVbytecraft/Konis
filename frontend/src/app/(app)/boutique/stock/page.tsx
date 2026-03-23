@@ -124,7 +124,7 @@ export default function BoutiqueStockPage() {
 
   return (
     <div className="p-4 space-y-4 max-w-4xl mx-auto">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <h1 className="text-2xl font-bold flex items-center gap-2">
           <Package className="h-6 w-6" /> Stock boutique
         </h1>
