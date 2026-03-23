@@ -6,7 +6,7 @@ import { buildIdempotencyKey } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { AlertCircle, CheckCircle2, RefreshCw, Package, ArrowRightLeft } from "lucide-react";
+import { AlertCircle, CheckCircle2, RefreshCw, Package, ArrowRightLeft, Printer } from "lucide-react";
 
 interface StockItem {
   produit_id: number;
@@ -107,16 +107,30 @@ export default function MpslStockPage() {
 
   const peutConvertir = (item: StockItem) => parseFloat(item.quantite) > 0;
 
+  const imprimer = () => window.print();
+
   return (
     <div className="p-4 space-y-4 max-w-4xl mx-auto">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold flex items-center gap-2">
-          <Package className="h-6 w-6" /> Stock MPSL
+        <h1 className="text-2xl font-bold flex items-center gap-2 print:text-xl">
+          <Package className="h-6 w-6 print:hidden" /> Stock MPSL
         </h1>
-        <Button variant="outline" size="sm" onClick={load} disabled={loading}>
-          <RefreshCw className={`h-4 w-4 mr-1 ${loading ? "animate-spin" : ""}`} />
-          Actualiser
-        </Button>
+        <div className="flex gap-2 print:hidden">
+          {stocks.length > 0 && (
+            <Button variant="outline" size="sm" onClick={imprimer}>
+              <Printer className="h-4 w-4 mr-1" /> Imprimer
+            </Button>
+          )}
+          <Button variant="outline" size="sm" onClick={load} disabled={loading}>
+            <RefreshCw className={`h-4 w-4 mr-1 ${loading ? "animate-spin" : ""}`} />
+            Actualiser
+          </Button>
+        </div>
+      </div>
+
+      {/* Entête impression uniquement */}
+      <div className="hidden print:block text-center mb-4">
+        <p className="text-xs text-gray-500">Imprimé le {new Date().toLocaleString("fr-FR")}</p>
       </div>
 
       {error && (
@@ -148,7 +162,7 @@ export default function MpslStockPage() {
                     <th className="text-left px-4 py-2 font-medium">Code</th>
                     <th className="text-right px-4 py-2 font-medium">Quantité</th>
                     <th className="text-right px-4 py-2 font-medium">Poids/sac</th>
-                    <th className="px-4 py-2"></th>
+                    <th className="px-4 py-2 print:hidden"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -160,7 +174,7 @@ export default function MpslStockPage() {
                       <td className="px-4 py-3 text-right text-muted-foreground tabular-nums">
                         {item.poids_par_sac ? `${item.poids_par_sac} kg/sac` : "—"}
                       </td>
-                      <td className="px-4 py-3 text-right">
+                      <td className="px-4 py-3 text-right print:hidden">
                         {peutConvertir(item) && (
                           <Button
                             variant="outline"
@@ -183,7 +197,7 @@ export default function MpslStockPage() {
       </Card>
 
       {convertTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 print:hidden">
           <div className="bg-white dark:bg-card rounded-lg shadow-xl w-full max-w-sm mx-4 p-6 space-y-4">
             <h2 className="text-lg font-semibold">Convertir sacs → kg</h2>
             <p className="text-sm text-muted-foreground">
