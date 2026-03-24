@@ -23,6 +23,11 @@ from api.views.admin_views import (
     DepenseViewSet,
     ClientsAdminView,
 )
+from api.views.admin_corrections import (
+    AdminCorrectionCaisseView,
+    AdminCorrectionStockView,
+    AdminSupprimerTicketView,
+)
 from api.views.comptable_views import (
     StockComptableViewSet,
     TransfertComptableViewSet,
@@ -159,6 +164,9 @@ urlpatterns = [
     path("boutique/stock/<int:produit_id>/convertir/", ConvertirSacEnKgView.as_view(), name="boutique-stock-convertir"),
     path("boutique/", include(router_boutique.urls)),
     path("admin/clients/", ClientsAdminView.as_view(), name="admin-clients"),
+    path("admin/corrections/caisse/", AdminCorrectionCaisseView.as_view(), name="admin-correction-caisse"),
+    path("admin/corrections/stock/", AdminCorrectionStockView.as_view(), name="admin-correction-stock"),
+    path("admin/corrections/ticket/<int:ticket_id>/", AdminSupprimerTicketView.as_view(), name="admin-supprimer-ticket"),
     path("admin/", include(router_admin.urls)),
     path("comptable/", include(router_comptable.urls)),
     path("mpsl/achats/batch/", AchatMPSLBatchView.as_view(), name="mpsl-achats-batch"),
