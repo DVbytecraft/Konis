@@ -230,8 +230,9 @@ class IdempotencyKey(models.Model):
             UniqueConstraint(fields=["key", "endpoint"], name="unique_idem_key_endpoint"),
         ]
         indexes             = [
-            models.Index(fields=["key", "endpoint"], name="idem_key_endpoint_idx"),
-            models.Index(fields=["created_at"],      name="idem_created_at_idx"),
+            # (key, endpoint) est déjà indexé par le UniqueConstraint ci-dessus.
+            # Seul l'index sur created_at est ajouté ici (utile pour le nettoyage périodique).
+            models.Index(fields=["created_at"], name="idem_created_at_idx"),
         ]
 
     def is_stale(self) -> bool:

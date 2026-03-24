@@ -1018,7 +1018,14 @@ class ClientsBoutiqueView(APIView):
             notes=str(request.data.get("notes", "")).strip(),
             statut=statut,
         )
-        audit_log(request.user, "client_finance_create", {"client_id": client.pk, "nom": client.nom, "statut": statut})
+        audit_log(
+            user=request.user,
+            action="client_finance_create",
+            object_type="ClientFinance",
+            object_id=client.pk,
+            extra={"nom": client.nom, "statut": statut},
+            request=request,
+        )
         return Response(ClientFinanceSerializer(client).data, status=201)
 
 

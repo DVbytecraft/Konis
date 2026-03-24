@@ -768,11 +768,6 @@ class MoutureSeuleUsineView(APIView):
         ser = MoutureSeuleSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         idempotency_key = request.headers.get("Idempotency-Key", "").strip() or None
-        if idempotency_key and len(idempotency_key) > 128:
-            return Response(
-                {"detail": "Header Idempotency-Key trop long (max 128)."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
         produit_nom = ser.validated_data.get("produit_nom", "")
         produit_ref = None
         produit_id = ser.validated_data.get("produit_id")
