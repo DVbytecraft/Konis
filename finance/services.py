@@ -191,7 +191,18 @@ def solder_journal_payable(*, journal: JournalPayable, created_by: CustomUser) -
     """
     Solde manuellement un journal payable (même si montant_paye < montant_initial).
     Usage : abandon de dette, remise commerciale.
+    
+    SÉCURITÉ : Cette opération nécessite un niveau de permission elevated.
     """
+    # Vérification de sécurité : seul admin/DAF peut solder manuellement
+    from core.models import CustomUser as CU
+    ROLES_AUTORISES = {CU.ROLE_ADMIN, CU.ROLE_DAF, CU.ROLE_COMPTABLE}
+    if created_by.role not in ROLES_AUTORISES:
+        raise ErreurFinance(
+            f"Seul un admin, DAF ou comptable peut solder manuellement un journal payable. "
+            f"Rôle actuel : {created_by.role}"
+        )
+    
     journal = JournalPayable.objects.select_for_update().get(pk=journal.pk)
     _verifier_journal_ouvert(journal)
     _solder_journal(journal)
@@ -206,6 +217,7 @@ def solder_journal_payable(*, journal: JournalPayable, created_by: CustomUser) -
             "montant_initial": str(journal.montant_initial),
             "montant_paye": str(journal.montant_paye),
             "ecart": str(journal.montant_initial - journal.montant_paye),
+            "est_remise": journal.montant_paye < journal.montant_initial,
         },
     )
     return journal
@@ -349,7 +361,19 @@ def enregistrer_paiement_creance(
 
 @transaction.atomic
 def solder_journal_creance(*, journal: JournalCreance, created_by: CustomUser) -> JournalCreance:
-    """Solde manuellement un journal de créance (remise, abandon de créance)."""
+    """Solde manuellement un journal de créance (remise, abandon de créance).
+    
+    SÉCURITÉ : Cette opération nécessite un niveau de permission elevated.
+    """
+    # Vérification de sécurité : seul admin/DAF peut solder manuellement
+    from core.models import CustomUser as CU
+    ROLES_AUTORISES = {CU.ROLE_ADMIN, CU.ROLE_DAF, CU.ROLE_COMPTABLE}
+    if created_by.role not in ROLES_AUTORISES:
+        raise ErreurFinance(
+            f"Seul un admin, DAF ou comptable peut solder manuellement un journal de créance. "
+            f"Rôle actuel : {created_by.role}"
+        )
+    
     journal = JournalCreance.objects.select_for_update().get(pk=journal.pk)
     _verifier_journal_ouvert(journal)
     _solder_journal(journal)
@@ -363,6 +387,7 @@ def solder_journal_creance(*, journal: JournalCreance, created_by: CustomUser) -
             "client": journal.client.nom,
             "montant_initial": str(journal.montant_initial),
             "montant_paye": str(journal.montant_paye),
+            "est_remise": journal.montant_paye < journal.montant_initial,
         },
     )
     return journal
@@ -576,8 +601,32 @@ def enregistrer_depense_projet(
     description: str,
     date,
     created_by: CustomUser,
+    autoriser_depassement: bool = False,
 ) -> DepenseProjet:
-    """Enregistre une dépense sur un projet (pas de plafond bloquant — alerte si dépassement)."""
+    """Enregistre une dépense sur un projet.
+    
+    Par défaut : bloque si dépasse le budget disponible.
+    autoriser_depassement=True : permet le dépassement (nécessite rôle admin/DAF).
+    """
+    # Vérification de sécurité : si dépassement demandé, vérifier les permissions
+    if autoriser_depassement:
+        from core.models import CustomUser as CU
+        ROLES_AUTORISES = {CU.ROLE_ADMIN, CU.ROLE_DAF, CU.ROLE_COMPTABLE}
+        if created_by.role not in ROLES_AUTORISES:
+            raise ErreurFinance(
+                "Seul admin, DAF ou comptable peut autoriser un dépassement de budget projet."
+            )
+    
+    # Calcul du budget restant
+    restant = get_budget_restant_projet(projet)
+    
+    # Bloquer le dépassement sauf si explicitement autorisé
+    if not autoriser_depassement and montant > restant:
+        raise ErreurFinance(
+            f"Dépassement de budget! Montant {montant} > budget restant {restant}. "
+            f"Contactez admin pour autoriser le dépassement."
+        )
+    
     depense = DepenseProjet.objects.create(
         projet=projet,
         montant=montant,
@@ -585,8 +634,8 @@ def enregistrer_depense_projet(
         date=date,
         created_by=created_by,
     )
-    # Calculer le budget restant après cette dépense (informatif, non bloquant)
-    restant = get_budget_restant_projet(projet)
+    # Calculer le nouveau budget restant après cette dépense
+    nouveau_restant = get_budget_restant_projet(projet)
     audit_log(
         user=created_by,
         action="depense_projet_enregistrée",
@@ -596,8 +645,10 @@ def enregistrer_depense_projet(
             "projet_id": projet.pk,
             "projet_nom": projet.nom,
             "montant": str(montant),
-            "budget_restant": str(restant),
-            "depassement": restant < Decimal("0"),
+            "budget_restant_avant": str(restant),
+            "budget_restant_apres": str(nouveau_restant),
+            "depassement": nouveau_restant < Decimal("0"),
+            "autorisation_depassement": autoriser_depassement,
         },
     )
     return depense

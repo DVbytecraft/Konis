@@ -62,8 +62,12 @@ class TransfertCreateSerializer(serializers.Serializer):
                 raise serializers.ValidationError("quantite doit être un nombre valide.")
             if quantite <= 0:
                 raise serializers.ValidationError("Quantité doit être > 0.")
-            if "unit_price" in item and Decimal(str(item["unit_price"])) < 0:
-                raise serializers.ValidationError("unit_price doit être >= 0.")
+            
+            # SÉCURITÉ : unit_price ne peut pas être négatif
+            if "unit_price" in item:
+                pu = Decimal(str(item["unit_price"]))
+                if pu < 0:
+                    raise serializers.ValidationError("unit_price doit être >= 0.")
         return value
 
 

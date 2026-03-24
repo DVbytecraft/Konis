@@ -127,7 +127,7 @@ class TestPayloadConflit(APITestCase):
         cls.lieu = _lieu(cls.ent, code="CF")
         cls.daf  = _admin_fin(cls.ent, username="fin_conf")
         cls.cre  = Creancier.objects.create(
-            entreprise=cls.ent, nom="Fournisseur Conf", type_creancier="fournisseur"
+            entreprise=cls.ent, nom="Fournisseur Conf", type_creancier="fournisseur", statut="actif"
         )
 
     def _post_journal(self, montant, key):
@@ -166,7 +166,7 @@ class TestCleAbsente(APITestCase):
         cls.ent = _ent("EntStrict")
         cls.daf = _admin_fin(cls.ent, username="daf_strict")
         cls.cre = Creancier.objects.create(
-            entreprise=cls.ent, nom="Fournisseur S", type_creancier="fournisseur"
+            entreprise=cls.ent, nom="Fournisseur S", type_creancier="fournisseur", statut="actif"
         )
 
     def test_sans_cle_journal_payable_retourne_400(self):
@@ -259,7 +259,7 @@ class TestJournalImmuableTrigger(TestCase):
         cls.ent = _ent("EntTrig")
         cls.daf = _admin_fin(cls.ent, username="daf_trig")
         cls.cre = Creancier.objects.create(
-            entreprise=cls.ent, nom="Fournisseur T", type_creancier="fournisseur"
+            entreprise=cls.ent, nom="Fournisseur T", type_creancier="fournisseur", statut="actif"
         )
         cls.journal = JournalPayable.objects.create(
             creancier=cls.cre,
@@ -319,7 +319,7 @@ class TestPaiementIdempotent(APITestCase):
         cls.ent  = _ent("EntPaie")
         cls.daf  = _admin_fin(cls.ent, username="daf_paie")
         cls.cre  = Creancier.objects.create(
-            entreprise=cls.ent, nom="Fournisseur P", type_creancier="fournisseur"
+            entreprise=cls.ent, nom="Fournisseur P", type_creancier="fournisseur", statut="actif"
         )
         cls.journal = JournalPayable.objects.create(
             creancier=cls.cre,

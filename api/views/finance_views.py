@@ -4,6 +4,7 @@ API Finance KONIS — Payables, Créances, Emprunts, Caisse Suprême, Projets.
 Accès : IsDafRole (supreme_admin + admin + daf).
 Toute la logique métier est déléguée à finance/services.py.
 """
+from decimal import Decimal
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination
@@ -144,6 +145,80 @@ class CreancierViewSet(DafReadOnlyMixin, ListModelMixin, RetrieveModelMixin, Cre
         obj.save()
         return Response(CreancierSerializer(obj).data)
 
+    @action(detail=True, methods=["post"])
+    def activate(self, request, pk=None):
+        """
+        POST /api/finance/creanciers/{id}/activate/
+        Active un fournisseur en attente (statut pending -> actif).
+        Réservé aux admins/DAF/comptable uniquement.
+        """
+        from core.models import CustomUser as CU
+        ROLES_AUTORISES = {CU.ROLE_ADMIN, CU.ROLE_DAF, CU.ROLE_COMPTABLE}
+        if request.user.role not in ROLES_AUTORISES:
+            return Response(
+                {"detail": "Seul admin, DAF ou comptable peut activer un fournisseur."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        creancier = self.get_object()
+        if creancier.statut == "actif":
+            return Response(
+                {"detail": f"Le fournisseur '{creancier.nom}' est déjà actif."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        creancier.statut = "actif"
+        creancier.save(update_fields=["statut", "updated_at"])
+        
+        from audit.services import audit_log
+        audit_log(
+            user=request.user,
+            action="creancier_activé",
+            object_type="Creancier",
+            object_id=creancier.pk,
+            extra={"creancier": creancier.nom},
+        )
+        
+        return Response(CreancierSerializer(creancier).data)
+
+    @action(detail=True, methods=["post"])
+    def desactivate(self, request, pk=None):
+        """
+        POST /api/finance/creanciers/{id}/desactivate/
+        Désactive un fournisseur (statut actif -> inactif).
+        Un fournisseur inactif ne peut plus être utilisé.
+        Réservé aux admins/DAF/comptable uniquement.
+        """
+        from core.models import CustomUser as CU
+        ROLES_AUTORISES = {CU.ROLE_ADMIN, CU.ROLE_DAF, CU.ROLE_COMPTABLE}
+        if request.user.role not in ROLES_AUTORISES:
+            return Response(
+                {"detail": "Seul admin, DAF ou comptable peut désactiver un fournisseur."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        creancier = self.get_object()
+        if creancier.statut == "inactif":
+            return Response(
+                {"detail": f"Le fournisseur '{creancier.nom}' est déjà inactif."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        ancien_statut = creancier.statut
+        creancier.statut = "inactif"
+        creancier.save(update_fields=["statut", "updated_at"])
+        
+        from audit.services import audit_log
+        audit_log(
+            user=request.user,
+            action="creancier_désactivé",
+            object_type="Creancier",
+            object_id=creancier.pk,
+            extra={"creancier": creancier.nom, "statut_avant": ancien_statut},
+        )
+        
+        return Response(CreancierSerializer(creancier).data)
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # JOURNAUX PAYABLES
@@ -194,6 +269,17 @@ class JournalPayableViewSet(DafReadOnlyMixin, ListModelMixin, RetrieveModelMixin
         ser.is_valid(raise_exception=True)
         d = ser.validated_data
 
+        # SÉCURITÉ : Validation à deux niveaux pour montants élevés
+        MONTANT_ELEVE = Decimal("1000000")  # 1 million
+        if d["montant_initial"] >= MONTANT_ELEVE:
+            if not request.data.get("code_validation"):
+                return Response(
+                    {"detail": "Montant élevé. Un code de validation est requis.", "code_validation_required": True},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            # Ici on vérifierait le code (à implémenter selon votre système)
+            # Pour l'instant, on accepte si le code est présent
+
         try:
             creancier = Creancier.objects.get(
                 pk=d["creancier_id"],
@@ -201,6 +287,13 @@ class JournalPayableViewSet(DafReadOnlyMixin, ListModelMixin, RetrieveModelMixin
             )
         except Creancier.DoesNotExist:
             return Response({"detail": "Créancier introuvable."}, status=status.HTTP_404_NOT_FOUND)
+        
+        # SÉCURITÉ : Le créancier doit être actif pour être utilisé
+        if creancier.statut != "actif":
+            return Response(
+                {"detail": f"Créancier '{creancier.nom}' en attente de validation. Contacter admin pour activation."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         try:
             journal = creer_journal_payable(
@@ -851,11 +944,25 @@ class CollecteViewSet(DafReadOnlyMixin, ListModelMixin, RetrieveModelMixin, Crea
     def partial_update(self, request, *args, **kwargs):
         collecte = self.get_object()
 
-        # Le collecteur ne peut corriger que SES propres collectes
+        # SÉCURITÉ : Interdiction stricte de modification des montants par le collecteur
+        # Seul admin/DAF peuvent corriger avec audit log
         from core.models import CustomUser as CU
-        if request.user.role == CU.ROLE_COLLECTEUR and collecte.collecteur_id != request.user.pk:
-            return Response({"detail": "Vous ne pouvez modifier que vos propres collectes."}, status=status.HTTP_403_FORBIDDEN)
+        if request.user.role == CU.ROLE_COLLECTEUR:
+            # Le collecteur peut modifier uniquement les notes (pour corriger une faute de frappe)
+            if any(k in request.data for k in ['montant_trouve', 'montant_pris']):
+                return Response(
+                    {"detail": "Collecteur : vous ne pouvez modifier que les notes. contactez admin pour corriger les montants."},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            # Modification notes uniquement
+            ser = CollecteArgentUpdateSerializer(data=request.data, partial=True)
+            ser.is_valid(raise_exception=True)
+            if 'notes' in ser.validated_data:
+                collecte.notes = ser.validated_data['notes']
+                collecte.save(update_fields=['notes', 'updated_at'])
+            return Response(CollecteArgentSerializer(collecte).data)
 
+        # Pour admin/DAF : la correction nécessite une validation
         ser = CollecteArgentUpdateSerializer(data=request.data, partial=True)
         ser.is_valid(raise_exception=True)
 

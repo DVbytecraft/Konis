@@ -74,7 +74,7 @@ def _setup():
         role=CustomUser.ROLE_DAF, entreprise=ent, lieu=lieu,
     )
     creancier = Creancier.objects.create(
-        entreprise=ent, nom="Fournisseur A", type_creancier="fournisseur"
+        entreprise=ent, nom="Fournisseur A", type_creancier="fournisseur", statut="actif"
     )
     client = ClientFinance.objects.create(entreprise=ent, nom="Client B")
     return ent, lieu, user, creancier, client

@@ -56,9 +56,16 @@ class Creancier(models.Model):
         ("autre",       "Autre"),
     ]
 
+    STATUT_CHOICES = [
+        ("actif",   "Actif"),
+        ("inactif", "Inactif"),
+        ("pending", "En attente de validation"),
+    ]
+
     entreprise     = models.ForeignKey(Entreprise, on_delete=models.PROTECT, related_name="creanciers")
     nom            = models.CharField(max_length=255)
     type_creancier = models.CharField(max_length=20, choices=TYPE_CHOICES, default="fournisseur")
+    statut         = models.CharField(max_length=20, choices=STATUT_CHOICES, default="pending", help_text="Statut du créancier. 'pending' = en attente de validation par admin.")
     contact        = models.CharField(max_length=255, blank=True)
     notes          = models.TextField(blank=True)
     created_at     = models.DateTimeField(auto_now_add=True)
@@ -106,6 +113,7 @@ class JournalPayable(models.Model):
         constraints         = [
             CheckConstraint(condition=Q(montant_initial__gte=Decimal("0.01")), name="jpayable_montant_initial_min"),
             CheckConstraint(condition=Q(montant_paye__gte=0), name="jpayable_montant_paye_non_negatif"),
+            CheckConstraint(condition=Q(montant_paye__lte=models.F("montant_initial")), name="jpayable_montant_paye_max"),
         ]
         indexes             = [
             models.Index(fields=["creancier", "statut"],       name="jpayable_creancier_statut_idx"),

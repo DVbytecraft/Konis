@@ -312,13 +312,14 @@ class TestAlertesProjetsEtCreances(TestCase):
             date_debut="2026-01-01",
             created_by=self.admin,
         )
-        # Dépense supérieure au budget
+        # Dépense supérieure au budget - autoriser le dépassement pour tester la détection
         enregistrer_depense_projet(
             projet=projet,
             montant=Decimal("1500"),
             description="Dépassement test",
             date="2026-03-01",
             created_by=self.admin,
+            autoriser_depassement=True,
         )
 
         from finance.services import get_budget_restant_projet
