@@ -96,6 +96,45 @@ def _verifier_stock_disponible(stock: Stock, quantite: Decimal, unite: str) -> N
     return
 
 
+def _valider_unite_transfert(produit, unite: str, lieu) -> None:
+    """
+    Valide que l'unité de transfert est compatible avec l'unité native du produit.
+
+    Règle métier :
+      - Produit enregistré en 'sac' → transfert en sacs uniquement.
+        Exception : si le produit a du stock kg converti (quantite_kg > 0), les
+        transferts en kg sont autorisés dans la limite de ce stock converti.
+      - Produit enregistré en 'kg'  → transfert en kg ou tonnes uniquement.
+
+    Lève ErreurStock si l'unité demandée est incompatible.
+    """
+    unite_demandee = _normaliser_unite_stock(unite)
+    produit_unite_native = _normaliser_unite_stock(getattr(produit, "unite", "kg") or "kg")
+
+    if unite_demandee == produit_unite_native:
+        return  # Unité identique — toujours autorisé
+    if produit_unite_native == "kg" and unite_demandee == "tonne":
+        return  # Tonne → kg : conversion automatique autorisée
+
+    if produit_unite_native == "sac" and unite_demandee == "kg":
+        # Autorisé uniquement si stock kg converti existe
+        try:
+            stock = Stock.objects.get(produit=produit, lieu=lieu)
+            if stock.quantite_kg > 0:
+                return
+        except Stock.DoesNotExist:
+            pass
+        raise ErreurStock(
+            f"'{produit.nom}' est enregistré en sacs. "
+            "Convertissez des sacs en kg (via l'interface de conversion) avant de transférer en kg."
+        )
+
+    raise ErreurStock(
+        f"'{produit.nom}' est enregistré en {produit_unite_native}. "
+        f"Unité de transfert '{unite}' incompatible."
+    )
+
+
 def _prelever_stock_unite(
     stock: Stock,
     quantite: Decimal,
@@ -339,11 +378,17 @@ def enregistrer_achat_mpsl(
 
         # ---- Mise Ã  jour stock MPSL (impact stock) ----
         u_stock = _normaliser_unite_stock(unite)
-        stock, _ = Stock.objects.select_for_update().get_or_create(
+        # Étape 1 : créer si absent sans verrou — gère le cas concurrent via contrainte unique.
+        # Étape 2 : verrouiller pour la mise à jour atomique.
+        # NE PAS utiliser select_for_update().get_or_create() : si la ligne n'existe pas,
+        # deux transactions concurrentes passent toutes deux le SELECT FOR UPDATE vide,
+        # puis toutes deux tentent un INSERT → IntegrityError ou doublon selon l'isolation.
+        stock, _ = Stock.objects.get_or_create(
             produit=existing,
             lieu=lieu,
             defaults={"quantite": Decimal("0")},
         )
+        stock = Stock.objects.select_for_update().get(pk=stock.pk)
         if u_stock == "sac":
             stock.quantite += Decimal(str(quantite))
             stock.save(update_fields=["quantite", "updated_at"])
@@ -354,9 +399,140 @@ def enregistrer_achat_mpsl(
             stock.quantite_kg += _kg_depuis_unite(Decimal(str(quantite)), u_stock)
             stock.save(update_fields=["quantite_kg", "updated_at"])
         else:
-            raise ErreurStock(f"UnitÃ© non supportÃ©e : '{unite}'.")
+            raise ErreurStock(f"Unité non supportée : '{unite}'.")
 
     return achat
+
+
+@transaction.atomic
+def enregistrer_achats_mpsl_batch(
+    lieu: Lieu,
+    produits: list[dict],
+    *,
+    type_paiement: str = "cash",
+    fournisseur=None,
+    acompte: Decimal = Decimal("0"),
+    created_by=None,
+) -> list[AchatMPSL]:
+    """
+    Crée plusieurs AchatMPSL pour un même bon de commande.
+
+    Un seul JournalPayable est créé pour la totalité si type_paiement ∈ {credit, partiel}.
+    Chaque produit peut avoir ses propres quantite/unite/prix_unitaire/notes.
+
+    produits : liste de dicts avec clés :
+        produit_nom, quantite, unite, prix_unitaire, notes, poids_par_sac (optionnel)
+
+    Lève ErreurStock si le lieu n'est pas MPSL ou si fournisseur manquant pour crédit.
+    """
+    if lieu.type_lieu != Lieu.TYPE_MPSL:
+        raise ErreurStock(f"Le lieu '{lieu}' n'est pas un dépôt MPSL.")
+    if not produits:
+        raise ErreurStock("Au moins un produit est requis.")
+    if type_paiement not in ("cash", "credit", "partiel"):
+        raise ErreurStock(f"type_paiement invalide : '{type_paiement}'.")
+    if type_paiement in ("credit", "partiel") and fournisseur is None:
+        raise ErreurStock("Un fournisseur est requis pour un achat à crédit ou partiel.")
+
+    # Calculer le total général pour le JournalPayable unique
+    prix_total_global = Decimal("0")
+    for p in produits:
+        q = Decimal(str(p["quantite"]))
+        pu = Decimal(str(p.get("prix_unitaire") or "0"))
+        prix_total_global += q * pu
+
+    # Créer le JournalPayable unique (si crédit ou partiel)
+    journal_shared = None
+    if type_paiement in ("credit", "partiel") and fournisseur is not None and created_by is not None:
+        from finance.models import JournalPayable
+        if type_paiement == "credit":
+            montant_dette = prix_total_global
+        else:
+            montant_dette = prix_total_global - acompte
+        if montant_dette > Decimal("0"):
+            noms = ", ".join(p["produit_nom"].strip() for p in produits[:3])
+            if len(produits) > 3:
+                noms += f" (+{len(produits) - 3})"
+            journal_shared = JournalPayable.objects.create(
+                creancier=fournisseur,
+                reference=f"ACHAT-MPSL-BATCH-{lieu.pk}",
+                description=f"Achat MPSL groupé : {noms}",
+                montant_initial=montant_dette,
+                montant_paye=acompte if type_paiement == "partiel" else Decimal("0"),
+                created_by=created_by,
+            )
+
+    achats = []
+    for i, p in enumerate(produits):
+        nom = (p["produit_nom"] or "").strip()
+        if not nom:
+            raise ErreurStock(f"Ligne {i + 1} : nom du produit obligatoire.")
+        quantite = Decimal(str(p["quantite"]))
+        unite = p.get("unite") or "sacs"
+        prix_unitaire = Decimal(str(p.get("prix_unitaire") or "0"))
+        notes = p.get("notes") or ""
+        poids_par_sac = p.get("poids_par_sac")
+
+        if quantite <= 0:
+            raise ErreurStock(f"Ligne {i + 1} ({nom}) : quantité doit être > 0.")
+        if _normaliser_unite_stock(unite) == "sac" and poids_par_sac is None:
+            raise ErreurStock(f"Ligne {i + 1} ({nom}) : poids_par_sac requis pour l'unité sacs.")
+
+        prix_total_ligne = quantite * prix_unitaire
+        existing = Produit.objects.filter(
+            nom__iexact=nom,
+            entreprise_id=lieu.entreprise_id,
+        ).first()
+        if not existing:
+            unite_norm = _normaliser_unite_stock(unite)
+            unite_produit = "sac" if unite_norm == "sac" else "kg"
+            create_kwargs = dict(nom=nom, entreprise_id=lieu.entreprise_id, unite=unite_produit)
+            if poids_par_sac is not None:
+                create_kwargs["poids_par_sac"] = poids_par_sac
+            existing = Produit.objects.create(**create_kwargs)
+        elif poids_par_sac is not None and existing.poids_par_sac != poids_par_sac:
+            existing.poids_par_sac = poids_par_sac
+            existing.save(update_fields=["poids_par_sac"])
+
+        achat = AchatMPSL.objects.create(
+            lieu=lieu,
+            fournisseur=fournisseur,
+            produit_nom=nom,
+            quantite=quantite,
+            unite=unite,
+            prix_unitaire=prix_unitaire,
+            prix_total=prix_total_ligne,
+            type_paiement=type_paiement,
+            montant_paye_initial=acompte if (i == 0 and type_paiement == "partiel") else Decimal("0"),
+            notes=notes,
+            created_by=created_by,
+        )
+        if journal_shared is not None and i == 0:
+            achat.journal_payable = journal_shared
+            achat.save(update_fields=["journal_payable"])
+
+        # Mise à jour stock — même pattern safe que enregistrer_achat_mpsl :
+        # get_or_create sans verrou, puis select_for_update sur la ligne existante.
+        u_stock = _normaliser_unite_stock(unite)
+        stock, _ = Stock.objects.get_or_create(
+            produit=existing,
+            lieu=lieu,
+            defaults={"quantite": Decimal("0")},
+        )
+        stock = Stock.objects.select_for_update().get(pk=stock.pk)
+        if u_stock == "sac":
+            stock.quantite += quantite
+            stock.save(update_fields=["quantite", "updated_at"])
+        elif u_stock in ("kg", "tonne"):
+            qty_kg = _kg_depuis_unite(quantite, u_stock) if u_stock == "tonne" else quantite
+            stock.quantite_kg += qty_kg
+            stock.save(update_fields=["quantite_kg", "updated_at"])
+        else:
+            raise ErreurStock(f"Unité non supportée : '{unite}'.")
+
+        achats.append(achat)
+
+    return achats
 
 
 # ─── Noyau commun des transferts ──────────────────────────────────────────────
@@ -504,6 +680,8 @@ def transfert_depuis_mpsl(
             unite = line[2] if len(line) > 2 else getattr(produit, "unite", "kg")
             if quantite <= 0:
                 raise ErreurStock(f"Quantité invalide pour {produit} : {quantite}.")
+            # ── Validation unité native du produit ────────────────────────────
+            _valider_unite_transfert(produit, unite, from_mpsl)
             try:
                 stock_src = Stock.objects.select_for_update().get(produit=produit, lieu=from_mpsl)
             except Stock.DoesNotExist:

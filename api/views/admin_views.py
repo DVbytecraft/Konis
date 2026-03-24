@@ -16,6 +16,7 @@ from rest_framework.viewsets import ModelViewSet
 from audit.services import audit_log
 from api.pagination import KonisPagination
 from api.permissions import IsAdminRole, IsComptableRole
+from api.throttling import FinanceCreateRateThrottle
 from api.serializers import (
     AchatUsineSerializer,
     CategorieDepenseSerializer,
@@ -567,6 +568,7 @@ class DepenseViewSet(ModelViewSet):
     queryset = Depense.objects.all().select_related("lieu", "categorie")
     serializer_class = DepenseSerializer
     permission_classes = [IsAdminRole]
+    throttle_classes = [FinanceCreateRateThrottle]
 
     def get_queryset(self):
         qs = super().get_queryset()

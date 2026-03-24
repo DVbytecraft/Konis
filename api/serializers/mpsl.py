@@ -35,9 +35,18 @@ class AchatMPSLSerializer(serializers.ModelSerializer):
         read_only_fields = ("prix_total", "created_by", "date", "journal_payable_id", "type_paiement_label")
 
 
+def _validate_entier(value, nom_champ):
+    """Lève ValidationError si value a une partie décimale non nulle."""
+    if value is not None and value != value.to_integral_value():
+        raise serializers.ValidationError(
+            f"{nom_champ} doit être un nombre entier (reçu : {value})."
+        )
+    return value
+
+
 class AchatMPSLCreateSerializer(serializers.Serializer):
     produit_nom   = serializers.CharField(max_length=255)
-    quantite      = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal("0.01"))
+    quantite      = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal("1"))
     unite         = serializers.ChoiceField(choices=AchatMPSL.UNITE_CHOICES, default=AchatMPSL.UNITE_SACS)
     prix_unitaire = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal("0"), default=Decimal("0"))
     notes         = serializers.CharField(max_length=1000, required=False, allow_blank=True, default="")
@@ -59,6 +68,15 @@ class AchatMPSLCreateSerializer(serializers.Serializer):
         help_text="Acompte versé si type_paiement='partiel'.",
     )
 
+    def validate_quantite(self, value):
+        return _validate_entier(value, "La quantité")
+
+    def validate_prix_unitaire(self, value):
+        return _validate_entier(value, "Le prix unitaire")
+
+    def validate_montant_paye_initial(self, value):
+        return _validate_entier(value, "L'acompte")
+
     def validate(self, data):
         if data.get("type_paiement") in ("credit", "partiel") and not data.get("fournisseur_id"):
             raise serializers.ValidationError(
@@ -66,6 +84,66 @@ class AchatMPSLCreateSerializer(serializers.Serializer):
             )
         if (data.get("unite") or "").lower() in ("sac", "sacs") and not data.get("poids_par_sac"):
             raise serializers.ValidationError({"poids_par_sac": "Poids par sac requis si l'unité est en sacs."})
+        return data
+
+
+# ── Sérialiseur pour une ligne de produit dans un achat groupé ────────────────
+
+class _LigneProduitBatchSerializer(serializers.Serializer):
+    produit_nom   = serializers.CharField(max_length=255)
+    quantite      = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal("1"))
+    unite         = serializers.ChoiceField(choices=AchatMPSL.UNITE_CHOICES, default=AchatMPSL.UNITE_SACS)
+    poids_par_sac = serializers.DecimalField(
+        max_digits=10, decimal_places=3, min_value=Decimal("0.001"),
+        required=False, allow_null=True, default=None,
+    )
+    prix_unitaire = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal("0"), default=Decimal("0"))
+    notes         = serializers.CharField(max_length=1000, required=False, allow_blank=True, default="")
+
+    def validate_quantite(self, value):
+        return _validate_entier(value, "La quantité")
+
+    def validate_prix_unitaire(self, value):
+        return _validate_entier(value, "Le prix unitaire")
+
+    def validate(self, data):
+        if (data.get("unite") or "").lower() in ("sac", "sacs") and not data.get("poids_par_sac"):
+            raise serializers.ValidationError({"poids_par_sac": "Poids par sac requis si l'unité est en sacs."})
+        return data
+
+
+class AchatMPSLBatchSerializer(serializers.Serializer):
+    """
+    Crée plusieurs AchatMPSL en une seule transaction atomique.
+    Un seul JournalPayable est créé pour la totalité si type_paiement ≠ cash.
+    """
+    type_paiement  = serializers.ChoiceField(
+        choices=AchatMPSL.TYPE_PAIEMENT_CHOICES, default=AchatMPSL.TYPE_CASH,
+    )
+    fournisseur_id = serializers.IntegerField(required=False, allow_null=True, default=None)
+    # Nom du nouveau fournisseur si fournisseur_id est absent et type_paiement ≠ cash
+    fournisseur_nom = serializers.CharField(max_length=255, required=False, allow_blank=True, default="")
+    acompte        = serializers.DecimalField(
+        max_digits=14, decimal_places=2, min_value=Decimal("0"),
+        required=False, default=Decimal("0"),
+        help_text="Acompte global versé (uniquement si type_paiement='partiel').",
+    )
+    produits = serializers.ListField(
+        child=_LigneProduitBatchSerializer(),
+        min_length=1,
+        max_length=50,
+    )
+
+    def validate_acompte(self, value):
+        return _validate_entier(value, "L'acompte")
+
+    def validate(self, data):
+        tp = data.get("type_paiement", "cash")
+        if tp in ("credit", "partiel"):
+            if not data.get("fournisseur_id") and not (data.get("fournisseur_nom") or "").strip():
+                raise serializers.ValidationError(
+                    {"fournisseur_id": "Fournisseur requis (id existant ou nom pour création) pour achat à crédit/partiel."}
+                )
         return data
 
 

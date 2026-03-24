@@ -66,7 +66,11 @@ class HealthView(APIView):
 
         # ── Mode détail : réservé aux superadmins ────────────────────────────
         if request.query_params.get("detail") == "1":
-            if not (request.user and request.user.is_authenticated and request.user.is_superuser):
+            if not (
+                request.user
+                and request.user.is_authenticated
+                and request.user.role == CustomUser.ROLE_SUPREME_ADMIN
+            ):
                 return Response(
                     {"detail": "Authentification superadmin requise pour le mode détail."},
                     status=403,

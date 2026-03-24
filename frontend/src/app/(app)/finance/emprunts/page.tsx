@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
-import { fmt } from "@/lib/utils";
+import { buildIdempotencyKey, fmt } from "@/lib/utils";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -125,6 +125,7 @@ export default function EmpruntsPage() {
       if (form.notes) payload.notes = form.notes;
       const created = await apiFetch<Emprunt>("/finance/emprunts/", {
         method: "POST",
+        headers: { "Idempotency-Key": buildIdempotencyKey("emprunt-create") },
         body: JSON.stringify(payload),
       });
       setEmprunts((prev) => [created, ...prev]);

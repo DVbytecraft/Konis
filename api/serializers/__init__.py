@@ -24,7 +24,7 @@ from .inventaire import (
     TransfertCreateSerializer,
     TransfertSerializer,
 )
-from .mpsl import AchatMPSLCreateSerializer, AchatMPSLSerializer, TransfertMPSLCreateSerializer
+from .mpsl import AchatMPSLBatchSerializer, AchatMPSLCreateSerializer, AchatMPSLSerializer, TransfertMPSLCreateSerializer
 from .produits import CategorieSerializer, ProduitMinimalSerializer, ProduitSerializer
 from .usine import (
     AchatUsineCreateSerializer,
@@ -92,6 +92,7 @@ __all__ = [
     "TransfertInterUsineCreateSerializer",
     "TransfertInterUsineSerializer",
     # mpsl
+    "AchatMPSLBatchSerializer",
     "AchatMPSLCreateSerializer",
     "AchatMPSLSerializer",
     "TransfertMPSLCreateSerializer",

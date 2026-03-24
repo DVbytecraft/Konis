@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
-import { fmt } from "@/lib/utils";
+import { buildIdempotencyKey, fmt } from "@/lib/utils";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -98,6 +98,7 @@ export default function TresoreriePage() {
       if (form.reference) payload.reference = form.reference;
       const created = await apiFetch<Transaction>("/finance/caisse/", {
         method: "POST",
+        headers: { "Idempotency-Key": buildIdempotencyKey("caisse-tx") },
         body: JSON.stringify(payload),
       });
       setTransactions((prev) => [created, ...prev]);

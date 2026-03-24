@@ -25,10 +25,10 @@ class Stock(models.Model):
     Affichage boutique : "{quantite} sacs + {quantite_kg} kg"
     """
     produit = models.ForeignKey(
-        Produit, on_delete=models.CASCADE, related_name="stocks"
+        Produit, on_delete=models.PROTECT, related_name="stocks"
     )
     lieu = models.ForeignKey(
-        Lieu, on_delete=models.CASCADE, related_name="stocks"
+        Lieu, on_delete=models.PROTECT, related_name="stocks"
     )
     quantite = models.DecimalField(
         max_digits=12, decimal_places=2, default=0

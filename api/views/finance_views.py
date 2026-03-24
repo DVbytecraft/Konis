@@ -282,10 +282,15 @@ class ClientFinanceViewSet(DafReadOnlyMixin, ListModelMixin, RetrieveModelMixin,
             return Response({"detail": "Entreprise requise."}, status=status.HTTP_403_FORBIDDEN)
         ser = ClientFinanceCreateSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
-        obj = ClientFinance.objects.create(
-            entreprise=_get_entreprise(request),
-            **ser.validated_data,
-        )
+        d = ser.validated_data
+        # C2 : valider que le lieu appartient à la même entreprise que l'utilisateur
+        lieu = d.get("lieu")
+        if lieu is not None and lieu.entreprise_id != request.user.entreprise_id:
+            return Response(
+                {"detail": "Lieu invalide ou non autorisé pour cette entreprise."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        obj = ClientFinance.objects.create(entreprise=_get_entreprise(request), **d)
         return Response(ClientFinanceSerializer(obj).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["patch"])
@@ -293,7 +298,15 @@ class ClientFinanceViewSet(DafReadOnlyMixin, ListModelMixin, RetrieveModelMixin,
         obj = self.get_object()
         ser = ClientFinanceCreateSerializer(obj, data=request.data, partial=True)
         ser.is_valid(raise_exception=True)
-        for attr, val in ser.validated_data.items():
+        d = ser.validated_data
+        # C2 : valider le lieu si fourni dans le patch
+        lieu = d.get("lieu")
+        if lieu is not None and lieu.entreprise_id != request.user.entreprise_id:
+            return Response(
+                {"detail": "Lieu invalide ou non autorisé pour cette entreprise."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        for attr, val in d.items():
             setattr(obj, attr, val)
         obj.save()
         return Response(ClientFinanceSerializer(obj).data)

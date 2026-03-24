@@ -13,6 +13,7 @@ from rest_framework.viewsets import ModelViewSet
 
 from api.permissions import IsMPSLRole
 from api.serializers import (
+    AchatMPSLBatchSerializer,
     AchatMPSLCreateSerializer,
     AchatMPSLSerializer,
     StockSerializer,
@@ -24,7 +25,7 @@ from api.utils import filter_by_date, get_lieu_mpsl
 from audit.services import audit_log
 from core.models import CustomUser, Lieu
 from inventaire.models import AchatMPSL, Stock, Transfert
-from inventaire.services import ErreurStock, enregistrer_achat_mpsl, transfert_depuis_mpsl
+from inventaire.services import ErreurStock, enregistrer_achat_mpsl, enregistrer_achats_mpsl_batch, transfert_depuis_mpsl
 from produits.models import Produit
 
 
@@ -138,6 +139,122 @@ class AchatMPSLViewSet(ModelViewSet):
         )
         resp_data = AchatMPSLSerializer(achat).data
         guard.success(resp_data)
+        return Response(resp_data, status=status.HTTP_201_CREATED)
+
+
+# --- Achat groupé (multi-produits, un seul JournalPayable) --------------------
+
+class AchatMPSLBatchView(APIView):
+    """
+    POST /api/mpsl/achats/batch/
+    Crée plusieurs AchatMPSL en une seule transaction atomique.
+    Un seul JournalPayable pour l'ensemble du bon de commande.
+
+    Body :
+      {
+        "type_paiement": "cash"|"credit"|"partiel",
+        "fournisseur_id": <int|null>,       # Créancier existant
+        "fournisseur_nom": "<str>",         # OU créer un nouveau fournisseur
+        "acompte": <int>,                   # si partiel
+        "produits": [
+          { "produit_nom": "...", "quantite": <int>, "unite": "sacs"|"kg"|"tonnes",
+            "poids_par_sac": <float|null>, "prix_unitaire": <int>, "notes": "..." },
+          ...
+        ]
+      }
+    """
+    permission_classes = [IsAuthenticated, IsMPSLRole]
+    throttle_classes = [UsineCreateRateThrottle]
+
+    def post(self, request):
+        from api.idempotency import IdempotencyGuard
+        guard = IdempotencyGuard(request, "achat_mpsl_batch")
+        early = guard.check(success_status=status.HTTP_201_CREATED, required=False)
+        if early is not None:
+            return early
+
+        lieu = get_lieu_mpsl(request)
+        if not lieu:
+            return Response(
+                {"detail": "Dépôt MPSL introuvable pour ce compte."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        ser = AchatMPSLBatchSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        d = ser.validated_data
+
+        # ── Résoudre le fournisseur ────────────────────────────────────────────
+        fournisseur = None
+        tp = d["type_paiement"]
+        fournisseur_id = d.get("fournisseur_id")
+        fournisseur_nom = (d.get("fournisseur_nom") or "").strip()
+
+        if tp in ("credit", "partiel"):
+            if fournisseur_id:
+                from finance.models import Creancier
+                try:
+                    fournisseur = Creancier.objects.get(
+                        pk=fournisseur_id,
+                        entreprise_id=lieu.entreprise_id,
+                    )
+                except Creancier.DoesNotExist:
+                    return Response(
+                        {"detail": "Fournisseur introuvable ou non autorisé."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+            elif fournisseur_nom:
+                # Créer le fournisseur à la volée
+                from finance.models import Creancier
+                fournisseur, created = Creancier.objects.get_or_create(
+                    nom__iexact=fournisseur_nom,
+                    entreprise_id=lieu.entreprise_id,
+                    defaults={"nom": fournisseur_nom, "entreprise_id": lieu.entreprise_id},
+                )
+                if created:
+                    audit_log(
+                        user=request.user,
+                        action="fournisseur_cree_inline",
+                        object_type="Creancier",
+                        object_id=fournisseur.pk,
+                        extra={"nom": fournisseur.nom, "source": "achat_batch"},
+                        request=request,
+                    )
+            else:
+                return Response(
+                    {"detail": "Fournisseur requis pour achat à crédit ou partiel."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        try:
+            achats = enregistrer_achats_mpsl_batch(
+                lieu=lieu,
+                produits=d["produits"],
+                type_paiement=tp,
+                fournisseur=fournisseur,
+                acompte=d.get("acompte", Decimal("0")),
+                created_by=request.user,
+            )
+        except ErreurStock as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        audit_log(
+            user=request.user,
+            action="achat_mpsl_batch_cree",
+            object_type="AchatMPSL",
+            object_id=achats[0].pk if achats else None,
+            extra={
+                "lieu": lieu.nom,
+                "nb_produits": len(achats),
+                "type_paiement": tp,
+                "fournisseur": fournisseur.nom if fournisseur else None,
+                "total": str(sum(a.prix_total for a in achats)),
+            },
+            request=request,
+        )
+
+        resp_data = AchatMPSLSerializer(achats, many=True).data
+        guard.success({"achats": list(resp_data)})
         return Response(resp_data, status=status.HTTP_201_CREATED)
 
 

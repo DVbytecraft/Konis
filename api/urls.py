@@ -70,6 +70,7 @@ from api.views.finance_views import (
     ProjetViewSet,
 )
 from api.views.mpsl_views import (
+    AchatMPSLBatchView,
     AchatMPSLViewSet,
     CatalogueProduitsMPSLView,
     ConvertirSacEnKgMpslView,
@@ -166,6 +167,7 @@ urlpatterns = [
     path("mpsl/catalogue/", CatalogueProduitsMPSLView.as_view(), name="mpsl-catalogue"),
     path("mpsl/dashboard/", MpslDashboardView.as_view(), name="mpsl-dashboard"),
     path("mpsl/fournisseurs/", FournisseursMpslView.as_view(), name="mpsl-fournisseurs"),
+    path("mpsl/achats/batch/", AchatMPSLBatchView.as_view(), name="mpsl-achats-batch"),
     path("usine/", include(router_usine.urls)),
     path("usine/rapports/benefices/", RapportBeneficesUsineView.as_view(), name="usine-rapport-benefices"),
     path("factory/finished-products/catalog/", FactoryFinishedProductsCatalogView.as_view(), name="factory-finished-products-catalog"),

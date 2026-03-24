@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
+import { buildIdempotencyKey } from "@/lib/utils";
 import { useAuth } from "@/contexts/auth-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -102,6 +103,7 @@ export default function FactoryProductionNewPage() {
     try {
       await apiFetch("/usine/lots/", {
         method: "POST",
+        headers: { "Idempotency-Key": buildIdempotencyKey("lot-production") },
         body: JSON.stringify({
           lieu_usine: Number(lieuId),
           nom_lot: nomLot.trim(),

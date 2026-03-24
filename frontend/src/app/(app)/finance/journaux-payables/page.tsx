@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
-import { fmt } from "@/lib/utils";
+import { buildIdempotencyKey, fmt } from "@/lib/utils";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -159,6 +159,7 @@ export default function JournauxPayablesPage() {
       if (form.notes) payload.notes = form.notes;
       const created = await apiFetch<JournalPayable>("/finance/journaux-payables/", {
         method: "POST",
+        headers: { "Idempotency-Key": buildIdempotencyKey("jp-create") },
         body: JSON.stringify(payload),
       });
       setJournaux((prev) => [created, ...prev]);
@@ -190,7 +191,7 @@ export default function JournauxPayablesPage() {
       if (paiementForm.notes) payload.notes = paiementForm.notes;
       const updated = await apiFetch<JournalPayable>(
         `/finance/journaux-payables/${paiementJournal.id}/paiement/`,
-        { method: "POST", body: JSON.stringify(payload) }
+        { method: "POST", headers: { "Idempotency-Key": buildIdempotencyKey("jp-paiement") }, body: JSON.stringify(payload) }
       );
       setJournaux((prev) => prev.map((j) => (j.id === updated.id ? updated : j)));
       setPaiementJournal(null);

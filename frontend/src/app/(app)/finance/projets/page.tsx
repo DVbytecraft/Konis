@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
-import { fmt } from "@/lib/utils";
+import { buildIdempotencyKey, fmt } from "@/lib/utils";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -134,6 +134,7 @@ export default function ProjetsPage() {
       if (form.date_fin) payload.date_fin = form.date_fin;
       const created = await apiFetch<Projet>("/finance/projets/", {
         method: "POST",
+        headers: { "Idempotency-Key": buildIdempotencyKey("projet-create") },
         body: JSON.stringify(payload),
       });
       setProjets((prev) => [created, ...prev]);
