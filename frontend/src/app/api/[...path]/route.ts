@@ -79,20 +79,24 @@ async function proxy(
   const basePath = pathStr ? `${pathStr}/` : "";
   const backendUrl = `${BACKEND_URL}/api/${basePath}${query ? `?${query}` : ""}`;
 
+  // Whitelist explicite : seuls ces headers sont transmis au backend.
+  // Aucun header client non listé ne passe (empêche l'injection de headers forgés).
   const headers: Record<string, string> = { Authorization: `Bearer ${access}` };
-  if (request.headers.get("content-type")) {
-    headers["Content-Type"] = request.headers.get("content-type")!;
-  }
+  const ct = request.headers.get("content-type");
+  if (ct) headers["Content-Type"] = ct;
   const idempotencyKey = request.headers.get("idempotency-key");
-  if (idempotencyKey) {
-    headers["Idempotency-Key"] = idempotencyKey;
-  }
+  if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
 
   let body: string | undefined;
   try {
     body = await request.text();
   } catch {
     // no body
+  }
+
+  // Limite de taille : rejeter les payloads > 5 Mo avant de les envoyer au backend
+  if (body && body.length > 5 * 1024 * 1024) {
+    return jsonResponse({ detail: "Requête trop volumineuse (max 5 Mo)." }, 413);
   }
 
   const controller = new AbortController();

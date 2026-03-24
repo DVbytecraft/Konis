@@ -17,6 +17,7 @@ Règles d'intégrité :
 
 from decimal import Decimal
 
+from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import CheckConstraint, Q
@@ -111,6 +112,19 @@ class JournalPayable(models.Model):
             models.Index(fields=["statut", "date_echeance"],   name="jpayable_statut_echeance_idx"),
         ]
 
+    def save(self, *args, **kwargs):
+        if self.pk:
+            already_locked = (
+                JournalPayable.objects.filter(pk=self.pk)
+                .values_list("locked_at", flat=True)
+                .first()
+            )
+            if already_locked is not None:
+                raise ValidationError(
+                    f"JournalPayable #{self.pk} est soldé et immuable."
+                )
+        super().save(*args, **kwargs)
+
     @property
     def montant_restant(self) -> Decimal:
         return self.montant_initial - self.montant_paye
@@ -165,6 +179,7 @@ class ClientFinance(models.Model):
     STATUT_CHOICES  = [(STATUT_PROSPECT, "Prospect"), (STATUT_CLIENT, "Client")]
 
     entreprise = models.ForeignKey(Entreprise, on_delete=models.PROTECT, related_name="clients_finance")
+    lieu       = models.ForeignKey("core.Lieu", on_delete=models.SET_NULL, null=True, blank=True, related_name="clients_finance")
     nom        = models.CharField(max_length=255)
     contact    = models.CharField(max_length=255, blank=True)
     interet    = models.TextField(blank=True)   # Ce qu'il cherche / motif de visite
@@ -251,6 +266,19 @@ class JournalCreance(models.Model):
             models.Index(fields=["statut", "date_echeance"],  name="jcreance_statut_echeance_idx"),
             models.Index(fields=["lieu", "statut"],           name="jcreance_lieu_statut_idx"),
         ]
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            already_locked = (
+                JournalCreance.objects.filter(pk=self.pk)
+                .values_list("locked_at", flat=True)
+                .first()
+            )
+            if already_locked is not None:
+                raise ValidationError(
+                    f"JournalCreance #{self.pk} est soldé et immuable."
+                )
+        super().save(*args, **kwargs)
 
     @property
     def montant_restant(self) -> Decimal:

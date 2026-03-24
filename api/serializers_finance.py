@@ -106,10 +106,15 @@ class PaiementPayableCreateSerializer(serializers.Serializer):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class ClientFinanceSerializer(serializers.ModelSerializer):
+    lieu_nom = serializers.SerializerMethodField()
+
+    def get_lieu_nom(self, obj):
+        return obj.lieu.nom if obj.lieu_id else None
+
     class Meta:
         model = ClientFinance
-        fields = ("id", "nom", "contact", "interet", "notes", "statut", "created_at", "updated_at")
-        read_only_fields = ("id", "created_at", "updated_at")
+        fields = ("id", "nom", "contact", "interet", "notes", "statut", "lieu_nom", "created_at", "updated_at")
+        read_only_fields = ("id", "lieu_nom", "created_at", "updated_at")
 
 
 class ClientFinanceCreateSerializer(serializers.ModelSerializer):

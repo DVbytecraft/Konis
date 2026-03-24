@@ -626,22 +626,24 @@ def convertir_sac_en_kg(
         locked.quantite_kg += kg
         locked.save(update_fields=["quantite", "quantite_kg", "updated_at"])
 
-    extra = {
-        "lieu":          stock.lieu.nom,
-        "produit":       stock.produit.nom,
-        "sacs_convertis": nombre_sacs,
-        "kg_generes":    str(kg),
-        "poids_par_sac": str(pps),
-    }
-    if idempotency_key:
-        extra["idempotency_key"] = idempotency_key
+        # audit dans la transaction : rollback si l'audit échoue (cohérence garantie)
+        extra = {
+            "lieu":           locked.lieu.nom,
+            "produit":        locked.produit.nom,
+            "sacs_convertis": nombre_sacs,
+            "kg_generes":     str(kg),
+            "poids_par_sac":  str(pps),
+        }
+        if idempotency_key:
+            extra["idempotency_key"] = idempotency_key
 
-    audit_log(
-        user=updated_by,
-        action="conversion_sac_en_kg",
-        object_type="Stock",
-        object_id=stock.pk,
-        extra=extra,
-        request=log_request,
-    )
+        audit_log(
+            user=updated_by,
+            action="conversion_sac_en_kg",
+            object_type="Stock",
+            object_id=stock.pk,
+            extra=extra,
+            request=log_request,
+        )
+
     return kg

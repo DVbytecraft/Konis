@@ -115,6 +115,15 @@ class TestIdempotencyVenteBoutique(APITestCase):
         self.assertEqual(r2.status_code, status.HTTP_201_CREATED)
         self.assertNotEqual(r1.json()["id"], r2.json()["id"])
 
+    def test_idempotency_key_trop_longue_retourne_400(self):
+        """Idempotency-Key >128 chars → 400 AVANT toute opération, stock inchangé."""
+        stock_avant = Stock.objects.get(produit=self.produit, lieu=self.lieu).quantite
+        r = self._post_vente(key="x" * 129)
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("trop longue", r.json()["detail"])
+        stock_apres = Stock.objects.get(produit=self.produit, lieu=self.lieu).quantite
+        self.assertEqual(stock_avant, stock_apres)
+
 
 # ── B. Idempotency dépenses admin ────────────────────────────────────────────
 
@@ -167,6 +176,14 @@ class TestIdempotencyDepense(APITestCase):
         self.assertEqual(r1.status_code, status.HTTP_201_CREATED)
         self.assertEqual(r2.status_code, status.HTTP_201_CREATED)
         self.assertNotEqual(r1.json()["id"], r2.json()["id"])
+
+    def test_idempotency_key_trop_longue_retourne_400(self):
+        """Idempotency-Key >128 chars → 400 AVANT création, aucune dépense créée."""
+        count_avant = Depense.objects.filter(lieu=self.lieu).count()
+        r = self._post_depense(key="y" * 129)
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("trop longue", r.json()["detail"])
+        self.assertEqual(Depense.objects.filter(lieu=self.lieu).count(), count_avant)
 
 
 # ── C. Isolation multi-tenant ────────────────────────────────────────────────

@@ -13,8 +13,10 @@ RequestIDMiddleware :
   - Exposé en tant que X-Request-ID dans la réponse pour corrélation des logs
   - Lit X-Request-ID de la requête entrante si présent (load balancer / nginx)
 """
+import json
 import uuid
 
+from django.http import JsonResponse
 from django.utils.deprecation import MiddlewareMixin
 
 # Routes API : on force no-store sauf le health check public.
@@ -99,3 +101,26 @@ class SecurityHeadersMiddleware(MiddlewareMixin):
                 response["Expires"] = "0"
 
         return response
+
+
+class IdempotencyKeyMiddleware(MiddlewareMixin):
+    """
+    Valide la longueur de l'Idempotency-Key sur toutes les routes API.
+
+    - Si le header est présent et dépasse 128 caractères → HTTP 400.
+    - Centralise ce contrôle : les vues n'ont plus besoin de le répliquer.
+    - Agit uniquement sur les requêtes mutantes (POST/PUT/PATCH/DELETE).
+    """
+
+    _MAX_KEY_LEN = 128
+    _METHODS     = frozenset(["POST", "PUT", "PATCH", "DELETE"])
+
+    def process_request(self, request):
+        if request.method not in self._METHODS:
+            return None
+        raw = request.META.get("HTTP_IDEMPOTENCY_KEY", "")
+        if raw and len(raw) > self._MAX_KEY_LEN:
+            return JsonResponse(
+                {"detail": f"Idempotency-Key trop longue (max {self._MAX_KEY_LEN} caractères)."},
+                status=400,
+            )

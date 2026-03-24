@@ -28,6 +28,7 @@ const navByRole: Record<string, { href: string; label: string; icon: React.Compo
     { href: "/comptable", label: "Tableau de bord", icon: LayoutDashboard },
     { href: "/comptable/depenses", label: "Dépenses", icon: ClipboardList },
     { href: "/factures", label: "Factures", icon: Receipt },
+    { href: "/admin/clients", label: "Clients & Visiteurs", icon: Users },
     { href: "/finance", label: "Finance", icon: TrendingUp },
     { href: "/finance/creanciers", label: "Créanciers", icon: Landmark },
     { href: "/finance/journaux-payables", label: "À payer", icon: TrendingDown },

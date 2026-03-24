@@ -15,6 +15,7 @@ interface Client {
   interet: string;
   notes: string;
   statut: "prospect" | "client";
+  lieu_nom: string | null;
   created_at: string;
   nb_achats: number;
   dernier_achat: string | null;
@@ -32,6 +33,7 @@ export default function AdminClientsPage() {
   const [erreur, setErreur] = useState("");
   const [search, setSearch] = useState("");
   const [filtreStatut, setFiltreStatut] = useState<"tous" | "prospect" | "client">("tous");
+  const [filtreLieu, setFiltreLieu] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
@@ -55,8 +57,10 @@ export default function AdminClientsPage() {
 
   useEffect(() => { charger(); }, [charger]);
 
-  const nbProspects = clients.filter(c => c.statut === "prospect").length;
-  const nbClients   = clients.filter(c => c.statut === "client").length;
+  const lieux = Array.from(new Set(clients.map(c => c.lieu_nom).filter(Boolean))) as string[];
+  const clientsFiltres = filtreLieu ? clients.filter(c => c.lieu_nom === filtreLieu) : clients;
+  const nbProspects = clientsFiltres.filter(c => c.statut === "prospect").length;
+  const nbClients   = clientsFiltres.filter(c => c.statut === "client").length;
 
   return (
     <div className="space-y-4">
@@ -64,8 +68,9 @@ export default function AdminClientsPage() {
       <div className="hidden print:block mb-4">
         <h1 className="text-xl font-bold">Clients &amp; Visiteurs</h1>
         <p className="text-xs text-gray-400">
-          {clients.length} entrée{clients.length !== 1 ? "s" : ""}
+          {clientsFiltres.length} entrée{clientsFiltres.length !== 1 ? "s" : ""}
           {filtreStatut !== "tous" ? ` · ${filtreStatut === "prospect" ? "Prospects" : "Clients"}` : ""}
+          {filtreLieu ? ` · ${filtreLieu}` : ""}
           {dateFrom || dateTo ? ` · Du ${dateFrom || "…"} au ${dateTo || "…"}` : ""}
           {" "}· Imprimé le {new Date().toLocaleString("fr-FR")}
         </p>
@@ -109,6 +114,16 @@ export default function AdminClientsPage() {
             {s === "tous" ? "Tous" : s === "client" ? "Clients" : "Prospects"}
           </button>
         ))}
+        {lieux.length > 0 && (
+          <select
+            value={filtreLieu}
+            onChange={e => setFiltreLieu(e.target.value)}
+            className="text-xs h-7 px-2 rounded border border-border bg-background text-foreground"
+          >
+            <option value="">Toutes les boutiques</option>
+            {lieux.map(l => <option key={l} value={l}>{l}</option>)}
+          </select>
+        )}
         <div className="flex items-center gap-2 ml-auto">
           <label className="text-xs text-muted-foreground">Du</label>
           <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="h-7 text-xs w-36" />
@@ -134,7 +149,7 @@ export default function AdminClientsPage() {
       {erreur && <p className="text-sm text-destructive bg-destructive/10 px-3 py-2 rounded">{erreur}</p>}
 
       {/* Tableau impression */}
-      {clients.length > 0 && (
+      {clientsFiltres.length > 0 && (
         <div className="hidden print:block">
           <table className="w-full text-xs border-collapse">
             <thead>
@@ -142,6 +157,7 @@ export default function AdminClientsPage() {
                 <th className="text-left py-1 pr-3">Nom</th>
                 <th className="text-left py-1 pr-3">Contact</th>
                 <th className="text-left py-1 pr-3">Statut</th>
+                <th className="text-left py-1 pr-3">Boutique</th>
                 <th className="text-left py-1 pr-3">Intérêt</th>
                 <th className="text-right py-1 pr-3">Achats</th>
                 <th className="text-right py-1 pr-3">Total</th>
@@ -149,11 +165,12 @@ export default function AdminClientsPage() {
               </tr>
             </thead>
             <tbody>
-              {clients.map(c => (
+              {clientsFiltres.map(c => (
                 <tr key={c.id} className="border-b border-gray-300">
                   <td className="py-1 pr-3 font-medium">{c.nom}</td>
                   <td className="py-1 pr-3 text-gray-600">{c.contact || "—"}</td>
                   <td className="py-1 pr-3">{c.statut === "prospect" ? "Prospect" : "Client"}</td>
+                  <td className="py-1 pr-3 text-gray-600">{c.lieu_nom || "—"}</td>
                   <td className="py-1 pr-3 text-gray-600">{c.interet || "—"}</td>
                   <td className="py-1 pr-3 text-right">{c.nb_achats}</td>
                   <td className="py-1 pr-3 text-right">{fmt(parseFloat(c.total_achats || "0"))} F</td>
@@ -168,7 +185,7 @@ export default function AdminClientsPage() {
       {/* Liste cartes */}
       {loading ? (
         <p className="text-sm text-muted-foreground print:hidden">Chargement…</p>
-      ) : clients.length === 0 ? (
+      ) : clientsFiltres.length === 0 ? (
         <div className="text-center py-12 text-muted-foreground print:hidden">
           <Users className="h-8 w-8 mx-auto mb-2 opacity-30" />
           <p className="text-sm">Aucun résultat.</p>
@@ -176,7 +193,7 @@ export default function AdminClientsPage() {
       ) : (
         <>
           <div className="print:hidden space-y-2">
-            {clients.map(c => {
+            {clientsFiltres.map(c => {
               const isProspect = c.statut === "prospect";
               const totalAchats = parseFloat(c.total_achats || "0");
               const actif = !isProspect && c.dernier_achat
@@ -205,7 +222,10 @@ export default function AdminClientsPage() {
                         {c.notes && (
                           <p className="text-xs text-muted-foreground mt-0.5 truncate">{c.notes}</p>
                         )}
-                        <p className="text-xs text-muted-foreground mt-1">Enregistré le {fmt_date(c.created_at)}</p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {c.lieu_nom && <span className="font-medium text-foreground">{c.lieu_nom} · </span>}
+                          Enregistré le {fmt_date(c.created_at)}
+                        </p>
                       </div>
                       {!isProspect && (
                         <div className="text-right shrink-0 space-y-0.5">
@@ -246,13 +266,13 @@ export default function AdminClientsPage() {
               <div>
                 <p className="text-xs text-muted-foreground">Actifs (90j)</p>
                 <p className="font-semibold text-green-600">
-                  {clients.filter(c => c.statut === "client" && c.dernier_achat && Date.now() - new Date(c.dernier_achat).getTime() < 90 * 24 * 60 * 60 * 1000).length}
+                  {clientsFiltres.filter(c => c.statut === "client" && c.dernier_achat && Date.now() - new Date(c.dernier_achat).getTime() < 90 * 24 * 60 * 60 * 1000).length}
                 </p>
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Total achats</p>
                 <p className="font-semibold">
-                  {fmt(clients.reduce((a, c) => a + parseFloat(c.total_achats || "0"), 0))} F
+                  {fmt(clientsFiltres.reduce((a, c) => a + parseFloat(c.total_achats || "0"), 0))} F
                 </p>
               </div>
             </CardContent>

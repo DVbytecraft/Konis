@@ -576,7 +576,7 @@ class DepenseViewSet(ModelViewSet):
         return _filter_by_lieu(qs, self.request)
 
     def create(self, request, *args, **kwargs):
-        key = (request.headers.get("Idempotency-Key") or "").strip()[:128] or None
+        key = (request.headers.get("Idempotency-Key") or "").strip() or None
         if key:
             existing = Depense.objects.filter(
                 entreprise=request.user.entreprise,
@@ -588,7 +588,7 @@ class DepenseViewSet(ModelViewSet):
         return super().create(request, *args, **kwargs)
 
     def perform_create(self, serializer):
-        key = (self.request.headers.get("Idempotency-Key") or "").strip()[:128] or None
+        key = (self.request.headers.get("Idempotency-Key") or "").strip() or None
         entreprise = self.request.user.entreprise
         depense = serializer.save(idempotency_key=key, entreprise=entreprise)
         audit_log(
@@ -624,18 +624,25 @@ class ClientsAdminView(APIView):
         if not ent_id:
             return Response([])
 
-        qs = ClientFinance.objects.filter(entreprise_id=ent_id)
+        qs = ClientFinance.objects.select_related("lieu").filter(entreprise_id=ent_id)
 
         statut = request.query_params.get("statut", "").strip()
         if statut in (ClientFinance.STATUT_PROSPECT, ClientFinance.STATUT_CLIENT):
             qs = qs.filter(statut=statut)
+
+        lieu_id = request.query_params.get("lieu", "").strip()
+        if lieu_id:
+            try:
+                qs = qs.filter(lieu_id=int(lieu_id))
+            except ValueError:
+                return Response({"detail": "Paramètre lieu invalide."}, status=400)
 
         search = request.query_params.get("search", "").strip()
         if search:
             qs = qs.filter(Q(nom__icontains=search) | Q(contact__icontains=search) | Q(interet__icontains=search))
 
         try:
-            qs = filter_by_date(qs, request, date_field="created_at")
+            qs = filter_by_date(qs, request, field="created_at")
         except Exception:
             return Response({"detail": "Format de date invalide (YYYY-MM-DD)."}, status=400)
 

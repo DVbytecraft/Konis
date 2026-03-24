@@ -28,7 +28,7 @@ from rest_framework.viewsets import GenericViewSet, ModelViewSet, ReadOnlyModelV
 
 from audit.services import audit_log
 from api.pagination import KonisPagination
-from api.permissions import IsAdminRole, IsBoutiqueRole
+from api.permissions import IsAdminRole, IsBoutiqueRole, IsComptableRole
 from api.throttling import MoutureCreateRateThrottle, VenteCreateRateThrottle
 from api.utils import get_lieu_boutique
 from api.serializers import (
@@ -191,7 +191,7 @@ class VenteBoutiqueViewSet(ModelViewSet):
         mouture = ser.validated_data.get("mouture", False)
         prix_mouture_kg = ser.validated_data.get("prix_mouture_kg")
 
-        idempotency_key = (request.headers.get("Idempotency-Key") or "").strip()[:128] or None
+        idempotency_key = (request.headers.get("Idempotency-Key") or "").strip() or None
         if not idempotency_key:
             from django.conf import settings
             if settings.IDEMPOTENCY_STRICT_MODE:
@@ -227,10 +227,13 @@ class VenteBoutiqueViewSet(ModelViewSet):
         if not created:
             return Response(TicketSerializer(ticket).data, status=status.HTTP_200_OK)
 
-        # Auto-upgrade prospect → client dès le premier achat
+        # Auto-upgrade prospect → client dès le premier achat (atomique : WHERE statut=prospect)
         if client and client.statut == client.STATUT_PROSPECT:
-            client.statut = client.STATUT_CLIENT
-            client.save(update_fields=["statut", "updated_at"])
+            from django.utils import timezone as _tz
+            from finance.models import ClientFinance as _CF
+            _CF.objects.filter(
+                pk=client.pk, statut=_CF.STATUT_PROSPECT
+            ).update(statut=_CF.STATUT_CLIENT, updated_at=_tz.now())
 
         mouture_extra = {}
         if mouture:
@@ -329,12 +332,7 @@ class MoutureSeuleView(APIView):
 
         ser = MoutureSeuleSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
-        idempotency_key = request.headers.get("Idempotency-Key", "").strip() or None
-        if idempotency_key and len(idempotency_key) > 128:
-            return Response(
-                {"detail": "Header Idempotency-Key trop long (max 128)."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        idempotency_key = (request.headers.get("Idempotency-Key") or "").strip() or None
         if not idempotency_key:
             from django.conf import settings
             if settings.IDEMPOTENCY_STRICT_MODE:
@@ -433,6 +431,7 @@ class TicketReprintView(APIView):
     Accès : boutique (son propre lieu) + admin.
     """
     permission_classes = [IsAuthenticated, IsBoutiqueRole | IsAdminRole]
+    throttle_classes   = [VenteCreateRateThrottle]
 
     def post(self, request, ticket_id):
         lieu = get_lieu_boutique(request)
@@ -885,115 +884,49 @@ class ConvertirSacEnKgView(APIView):
 
     def post(self, request, produit_id):
         from inventaire.services import convertir_sac_en_kg
-        from audit.models import AuditLog
-        from django.conf import settings
-        from api.utils import (
-            apply_idempotency_warning,
-            find_idempotency_record,
-            get_idempotency_info,
-            record_idempotency_replay,
-            record_idempotency_success,
-        )
+        from decimal import InvalidOperation
+        from api.idempotency import IdempotencyGuard
 
-        idempotency_key, missing, payload_hash, _ = get_idempotency_info(
-            request, operation="conversion_sac_en_kg"
-        )
-        if missing and settings.IDEMPOTENCY_STRICT_MODE:
-            resp = Response(
-                {"detail": "Idempotency-Key requis."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-            return apply_idempotency_warning(resp, True)
+        guard = IdempotencyGuard(request, "conversion_sac_en_kg")
+        early = guard.check()
+        if early is not None:
+            return early
 
         lieu = get_lieu_boutique(request)
         if not lieu:
-            resp = Response({"detail": "Boutique introuvable."}, status=status.HTTP_400_BAD_REQUEST)
-            return apply_idempotency_warning(resp, missing)
+            return Response({"detail": "Boutique introuvable."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             stock = Stock.objects.get(produit_id=produit_id, lieu=lieu)
         except Stock.DoesNotExist:
-            resp = Response({"detail": "Stock introuvable."}, status=status.HTTP_404_NOT_FOUND)
-            return apply_idempotency_warning(resp, missing)
+            return Response({"detail": "Stock introuvable."}, status=status.HTTP_404_NOT_FOUND)
 
         nombre_sacs = request.data.get("nombre_sacs")
         try:
             nombre_sacs = int(nombre_sacs)
         except (TypeError, ValueError):
-            resp = Response({"detail": "nombre_sacs doit être un entier."}, status=status.HTTP_400_BAD_REQUEST)
-            return apply_idempotency_warning(resp, missing)
+            return Response({"detail": "nombre_sacs doit être un entier."}, status=status.HTTP_400_BAD_REQUEST)
 
         poids_par_sac_override = None
         pps_raw = request.data.get("poids_par_sac")
         if pps_raw is not None:
             try:
-                from decimal import InvalidOperation
                 poids_par_sac_override = Decimal(str(pps_raw))
                 if poids_par_sac_override <= 0:
                     raise ValueError
             except (InvalidOperation, ValueError):
-                resp = Response({"detail": "poids_par_sac doit être un nombre positif."}, status=status.HTTP_400_BAD_REQUEST)
-                return apply_idempotency_warning(resp, missing)
+                return Response({"detail": "poids_par_sac doit être un nombre positif."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            if idempotency_key and len(idempotency_key) > 128:
-                resp = Response(
-                    {"detail": "Header Idempotency-Key trop long (max 128)."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-                return apply_idempotency_warning(resp, missing)
-            if idempotency_key:
-                record = find_idempotency_record(
-                    key=idempotency_key,
-                    operation="conversion_sac_en_kg",
-                    endpoint=request.path,
-                )
-                if record and record.extra.get("response"):
-                    record_idempotency_replay(
-                        request, key=idempotency_key, operation="conversion_sac_en_kg"
-                    )
-                    resp = Response(record.extra.get("response"))
-                    return apply_idempotency_warning(resp, missing)
-
-                existing = (
-                    AuditLog.objects
-                    .filter(
-                        action="conversion_sac_en_kg",
-                        object_type="Stock",
-                        object_id=stock.pk,
-                        extra__idempotency_key=idempotency_key,
-                    )
-                    .order_by("-created_at")
-                    .first()
-                )
-                if existing:
-                    audit_log(
-                        user=request.user,
-                        action="conversion_sac_en_kg_rejouee",
-                        object_type="Stock",
-                        object_id=stock.pk,
-                        extra={"idempotency_key": idempotency_key},
-                        request=request,
-                    )
-                    stock.refresh_from_db()
-                    resp = Response({
-                        "kg_generes": str(existing.extra.get("kg_generes") or "0"),
-                        "quantite_sacs": str(stock.quantite),
-                        "quantite_kg": str(stock.quantite_kg),
-                    })
-                    return apply_idempotency_warning(resp, missing)
-
             kg = convertir_sac_en_kg(
                 stock=stock,
                 nombre_sacs=nombre_sacs,
                 updated_by=request.user,
                 poids_par_sac_override=poids_par_sac_override,
-                idempotency_key=idempotency_key,
                 log_request=request,
             )
         except ErreurStock as e:
-            resp = Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
-            return apply_idempotency_warning(resp, missing)
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         stock.refresh_from_db()
         resp_data = {
@@ -1001,18 +934,8 @@ class ConvertirSacEnKgView(APIView):
             "quantite_sacs": str(stock.quantite),
             "quantite_kg": str(stock.quantite_kg),
         }
-        if idempotency_key:
-            record_idempotency_success(
-                request=request,
-                key=idempotency_key,
-                operation="conversion_sac_en_kg",
-                object_type="Stock",
-                object_id=stock.pk,
-                payload_hash=payload_hash,
-                response_data=resp_data,
-            )
-        resp = Response(resp_data)
-        return apply_idempotency_warning(resp, missing)
+        guard.success(resp_data)
+        return Response(resp_data)
 
 
 # ─── Clients (lecture seule pour la caisse) ───────────────────────────────────
@@ -1022,7 +945,7 @@ class ClientsBoutiqueView(APIView):
     GET  /api/boutique/clients/?search=... — recherche clients (scoped entreprise)
     POST /api/boutique/clients/            — créer un nouveau client
     """
-    permission_classes = [IsAuthenticated, IsBoutiqueRole | IsAdminRole]
+    permission_classes = [IsAuthenticated, IsBoutiqueRole | IsAdminRole | IsComptableRole]
 
     def get(self, request):
         from django.db.models import Count, Max, Q, Sum
@@ -1085,8 +1008,10 @@ class ClientsBoutiqueView(APIView):
         if statut not in (ClientFinance.STATUT_PROSPECT, ClientFinance.STATUT_CLIENT):
             statut = ClientFinance.STATUT_PROSPECT
 
+        lieu = get_lieu_boutique(request)
         client = ClientFinance.objects.create(
             entreprise_id=ent_id,
+            lieu=lieu,
             nom=nom,
             contact=str(request.data.get("contact", "")).strip(),
             interet=str(request.data.get("interet", "")).strip(),
@@ -1136,14 +1061,6 @@ class CreanceBoutiqueViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet)
         from finance.models import JournalCreance
         from api.serializers_finance import JournalCreanceSerializer, PaiementCreanceCreateSerializer
         from finance.services import enregistrer_paiement_creance, ErreurFinance
-        from django.conf import settings
-        from api.utils import (
-            apply_idempotency_warning,
-            find_idempotency_record,
-            get_idempotency_info,
-            record_idempotency_replay,
-            record_idempotency_success,
-        )
 
         lieu = get_lieu_boutique(request)
         if not lieu:
@@ -1155,24 +1072,11 @@ class CreanceBoutiqueViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet)
         except JournalCreance.DoesNotExist:
             return Response({"detail": "Créance introuvable."}, status=status.HTTP_404_NOT_FOUND)
 
-        idempotency_key, missing, payload_hash, _ = get_idempotency_info(
-            request, operation="paiement_creance_boutique"
-        )
-        if missing and settings.IDEMPOTENCY_STRICT_MODE:
-            resp = Response({"detail": "Idempotency-Key requis."}, status=status.HTTP_400_BAD_REQUEST)
-            return apply_idempotency_warning(resp, True)
-        if idempotency_key:
-            record = find_idempotency_record(
-                key=idempotency_key,
-                operation="paiement_creance_boutique",
-                endpoint=request.path,
-            )
-            if record and record.extra.get("response"):
-                record_idempotency_replay(
-                    request, key=idempotency_key, operation="paiement_creance_boutique"
-                )
-                resp = Response(record.extra.get("response"))
-                return apply_idempotency_warning(resp, missing)
+        from api.idempotency import IdempotencyGuard
+        guard = IdempotencyGuard(request, "paiement_creance_boutique")
+        early = guard.check()
+        if early is not None:
+            return early
 
         ser = PaiementCreanceCreateSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
@@ -1200,15 +1104,5 @@ class CreanceBoutiqueViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet)
         )
         journal.refresh_from_db()
         resp_data = JournalCreanceSerializer(journal).data
-        if idempotency_key:
-            record_idempotency_success(
-                request=request,
-                key=idempotency_key,
-                operation="paiement_creance_boutique",
-                object_type="JournalCreance",
-                object_id=journal.pk,
-                payload_hash=payload_hash,
-                response_data=resp_data,
-            )
-        resp = Response(resp_data)
-        return apply_idempotency_warning(resp, missing)
+        guard.success(resp_data)
+        return Response(resp_data)

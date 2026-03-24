@@ -73,6 +73,12 @@ class AchatMPSLViewSet(ModelViewSet):
         return qs
 
     def create(self, request, *args, **kwargs):
+        from api.idempotency import IdempotencyGuard
+        guard = IdempotencyGuard(request, "achat_mpsl")
+        early = guard.check(success_status=status.HTTP_201_CREATED, required=False)
+        if early is not None:
+            return early
+
         lieu = get_lieu_mpsl(request)
         if not lieu:
             return Response(
@@ -130,7 +136,9 @@ class AchatMPSLViewSet(ModelViewSet):
             },
             request=request,
         )
-        return Response(AchatMPSLSerializer(achat).data, status=status.HTTP_201_CREATED)
+        resp_data = AchatMPSLSerializer(achat).data
+        guard.success(resp_data)
+        return Response(resp_data, status=status.HTTP_201_CREATED)
 
 
 # --- Transferts depuis MPSL ---------------------------------------------------
@@ -164,6 +172,12 @@ class TransfertMPSLViewSet(ModelViewSet):
         return qs
 
     def create(self, request, *args, **kwargs):
+        from api.idempotency import IdempotencyGuard
+        guard = IdempotencyGuard(request, "transfert_mpsl")
+        early = guard.check(success_status=status.HTTP_201_CREATED, required=False)
+        if early is not None:
+            return early
+
         from_lieu = get_lieu_mpsl(request)
         if not from_lieu:
             return Response(
@@ -221,7 +235,9 @@ class TransfertMPSLViewSet(ModelViewSet):
             },
             request=request,
         )
-        return Response(TransfertSerializer(transfert).data, status=status.HTTP_201_CREATED)
+        resp_data = TransfertSerializer(transfert).data
+        guard.success(resp_data)
+        return Response(resp_data, status=status.HTTP_201_CREATED)
 
 
 # --- Stock MPSL ---------------------------------------------------------------
@@ -272,115 +288,49 @@ class ConvertirSacEnKgMpslView(APIView):
 
     def post(self, request, produit_id):
         from inventaire.services import convertir_sac_en_kg
-        from audit.models import AuditLog
-        from django.conf import settings
-        from api.utils import (
-            apply_idempotency_warning,
-            find_idempotency_record,
-            get_idempotency_info,
-            record_idempotency_replay,
-            record_idempotency_success,
-        )
+        from decimal import InvalidOperation
+        from api.idempotency import IdempotencyGuard
 
-        idempotency_key, missing, payload_hash, _ = get_idempotency_info(
-            request, operation="conversion_sac_en_kg"
-        )
-        if missing and settings.IDEMPOTENCY_STRICT_MODE:
-            resp = Response(
-                {"detail": "Idempotency-Key requis."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-            return apply_idempotency_warning(resp, True)
+        guard = IdempotencyGuard(request, "conversion_sac_en_kg")
+        early = guard.check()
+        if early is not None:
+            return early
 
         lieu = get_lieu_mpsl(request)
         if not lieu:
-            resp = Response({"detail": "Dépôt MPSL introuvable."}, status=status.HTTP_400_BAD_REQUEST)
-            return apply_idempotency_warning(resp, missing)
+            return Response({"detail": "Dépôt MPSL introuvable."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             stock = Stock.objects.get(produit_id=produit_id, lieu=lieu)
         except Stock.DoesNotExist:
-            resp = Response({"detail": "Stock introuvable."}, status=status.HTTP_404_NOT_FOUND)
-            return apply_idempotency_warning(resp, missing)
+            return Response({"detail": "Stock introuvable."}, status=status.HTTP_404_NOT_FOUND)
 
         nombre_sacs = request.data.get("nombre_sacs")
         try:
             nombre_sacs = int(nombre_sacs)
         except (TypeError, ValueError):
-            resp = Response({"detail": "nombre_sacs doit être un entier."}, status=status.HTTP_400_BAD_REQUEST)
-            return apply_idempotency_warning(resp, missing)
+            return Response({"detail": "nombre_sacs doit être un entier."}, status=status.HTTP_400_BAD_REQUEST)
 
         poids_par_sac_override = None
         pps_raw = request.data.get("poids_par_sac")
         if pps_raw is not None:
             try:
-                from decimal import Decimal, InvalidOperation
                 poids_par_sac_override = Decimal(str(pps_raw))
                 if poids_par_sac_override <= 0:
                     raise ValueError
             except (InvalidOperation, ValueError):
-                resp = Response({"detail": "poids_par_sac doit être un nombre positif."}, status=status.HTTP_400_BAD_REQUEST)
-                return apply_idempotency_warning(resp, missing)
+                return Response({"detail": "poids_par_sac doit être un nombre positif."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            if idempotency_key and len(idempotency_key) > 128:
-                resp = Response(
-                    {"detail": "Header Idempotency-Key trop long (max 128)."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-                return apply_idempotency_warning(resp, missing)
-            if idempotency_key:
-                record = find_idempotency_record(
-                    key=idempotency_key,
-                    operation="conversion_sac_en_kg",
-                    endpoint=request.path,
-                )
-                if record and record.extra.get("response"):
-                    record_idempotency_replay(
-                        request, key=idempotency_key, operation="conversion_sac_en_kg"
-                    )
-                    resp = Response(record.extra.get("response"))
-                    return apply_idempotency_warning(resp, missing)
-
-                existing = (
-                    AuditLog.objects
-                    .filter(
-                        action="conversion_sac_en_kg",
-                        object_type="Stock",
-                        object_id=stock.pk,
-                        extra__idempotency_key=idempotency_key,
-                    )
-                    .order_by("-created_at")
-                    .first()
-                )
-                if existing:
-                    audit_log(
-                        user=request.user,
-                        action="conversion_sac_en_kg_rejouee",
-                        object_type="Stock",
-                        object_id=stock.pk,
-                        extra={"idempotency_key": idempotency_key},
-                        request=request,
-                    )
-                    stock.refresh_from_db()
-                    resp = Response({
-                        "kg_generes": str(existing.extra.get("kg_generes") or "0"),
-                        "quantite_sacs": str(stock.quantite),
-                        "quantite_kg": str(stock.quantite_kg),
-                    })
-                    return apply_idempotency_warning(resp, missing)
-
             kg = convertir_sac_en_kg(
                 stock=stock,
                 nombre_sacs=nombre_sacs,
                 updated_by=request.user,
                 poids_par_sac_override=poids_par_sac_override,
-                idempotency_key=idempotency_key,
                 log_request=request,
             )
         except ErreurStock as e:
-            resp = Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
-            return apply_idempotency_warning(resp, missing)
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         stock.refresh_from_db()
         resp_data = {
@@ -388,18 +338,8 @@ class ConvertirSacEnKgMpslView(APIView):
             "quantite_sacs": str(stock.quantite),
             "quantite_kg": str(stock.quantite_kg),
         }
-        if idempotency_key:
-            record_idempotency_success(
-                request=request,
-                key=idempotency_key,
-                operation="conversion_sac_en_kg",
-                object_type="Stock",
-                object_id=stock.pk,
-                payload_hash=payload_hash,
-                response_data=resp_data,
-            )
-        resp = Response(resp_data)
-        return apply_idempotency_warning(resp, missing)
+        guard.success(resp_data)
+        return Response(resp_data)
 
 
 # --- Fournisseurs (lecture seule pour les achats MPSL) ------------------------

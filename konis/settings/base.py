@@ -41,6 +41,7 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "api.middleware.RequestIDMiddleware",          # Request ID en premier → disponible partout
+    "api.middleware.IdempotencyKeyMiddleware",    # Validation longueur Idempotency-Key (global)
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",

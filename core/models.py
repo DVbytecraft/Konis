@@ -1,7 +1,8 @@
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser
 from django.db import models
-from django.db.models import CheckConstraint, Q
+from django.db.models import CheckConstraint, Q, UniqueConstraint
+from django.utils import timezone as _tz
 
 
 class TokenRevocationEpoch(models.Model):
@@ -185,3 +186,60 @@ class CustomUser(AbstractUser):
 
     def __str__(self):
         return f"{self.username} ({self.get_role_display()})"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# IDEMPOTENCY — Table dédiée (remplace le registre AuditLog)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class IdempotencyKey(models.Model):
+    """
+    Registre d'idempotency transactionnel.
+
+    Garantit qu'une opération identifiée par (key, endpoint) n'est exécutée
+    qu'une seule fois, même en cas de double clic, retry réseau ou concurrence.
+
+    Mécanisme :
+      - Un slot 'processing' est créé AVANT l'exécution.
+      - UniqueConstraint (key, endpoint) bloque toute double création.
+      - select_for_update() + IntegrityError catch protègent contre les races.
+      - Après succès, le slot passe à 'success' avec la réponse sérialisée.
+      - Les slots 'processing' > 60 s sont considérés périmés et recréés.
+    """
+    STATUS_PROCESSING = "processing"
+    STATUS_SUCCESS    = "success"
+    STATUS_CHOICES    = [
+        (STATUS_PROCESSING, "En cours"),
+        (STATUS_SUCCESS,    "Succès"),
+    ]
+
+    MAX_PROCESSING_AGE = 60  # secondes — slot périmé si toujours 'processing'
+
+    key          = models.CharField(max_length=128)
+    endpoint     = models.CharField(max_length=255)
+    payload_hash = models.CharField(max_length=64)
+    response     = models.JSONField(null=True, blank=True)
+    status       = models.CharField(max_length=12, choices=STATUS_CHOICES, default=STATUS_PROCESSING)
+    created_at   = models.DateTimeField(auto_now_add=True)
+    updated_at   = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name        = "Clé d'idempotency"
+        verbose_name_plural = "Clés d'idempotency"
+        constraints         = [
+            UniqueConstraint(fields=["key", "endpoint"], name="unique_idem_key_endpoint"),
+        ]
+        indexes             = [
+            models.Index(fields=["key", "endpoint"], name="idem_key_endpoint_idx"),
+            models.Index(fields=["created_at"],      name="idem_created_at_idx"),
+        ]
+
+    def is_stale(self) -> bool:
+        from datetime import timedelta
+        return (
+            self.status == self.STATUS_PROCESSING
+            and (_tz.now() - self.updated_at).total_seconds() > self.MAX_PROCESSING_AGE
+        )
+
+    def __str__(self):
+        return f"[{self.status}] {self.key} @ {self.endpoint}"
