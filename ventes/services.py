@@ -345,25 +345,30 @@ def vente_boutique(
         for _ in range(5):
             numero = generer_numero_ticket(lieu)
             try:
-                ticket = Ticket.objects.create(
-                    lieu=lieu,
-                    numero=numero,
-                    mouture=mouture,
-                    prix_mouture_kg=prix_mouture_kg if mouture else None,
-                    cout_mouture=cout_mouture,
-                    montant_total=montant_total,
-                    quantite_apportee_client=quantite_apportee_client_kg if mouture else Decimal("0"),
-                    idempotency_key=key,
-                    type_vente=type_vente,
-                    montant_cash=m_cash,
-                    montant_credit=m_credit,
-                    client=client,
-                )
+                # Savepoint isolé : un IntegrityError ici ne corrompt pas la
+                # transaction parente (PostgreSQL annule uniquement le savepoint).
+                # Sans ce bloc, IntegrityError aborderait la transaction entière et
+                # toute requête suivante lèverait TransactionManagementError.
+                with transaction.atomic():
+                    ticket = Ticket.objects.create(
+                        lieu=lieu,
+                        numero=numero,
+                        mouture=mouture,
+                        prix_mouture_kg=prix_mouture_kg if mouture else None,
+                        cout_mouture=cout_mouture,
+                        montant_total=montant_total,
+                        quantite_apportee_client=quantite_apportee_client_kg if mouture else Decimal("0"),
+                        idempotency_key=key,
+                        type_vente=type_vente,
+                        montant_cash=m_cash,
+                        montant_credit=m_credit,
+                        client=client,
+                    )
                 break
             except IntegrityError:
-                # Peut être une collision de numéro de ticket OU une collision
-                # d'idempotency_key (deux requêtes concurrentes avec la même clé).
-                # Dans ce second cas, retourner le ticket déjà créé par l'autre requête.
+                # Collision de numéro de ticket OU de clé idempotency.
+                # La transaction parente est intacte (seul le savepoint a été annulé)
+                # → on peut interroger la DB normalement.
                 if key:
                     existing = Ticket.objects.filter(
                         lieu=lieu, idempotency_key=key, mouture=mouture
@@ -450,20 +455,21 @@ def vente_mouture_seule(
         for _ in range(5):
             numero = generer_numero_ticket(lieu)
             try:
-                ticket = Ticket.objects.create(
-                    lieu=lieu,
-                    numero=numero,
-                    idempotency_key=key,
-                    produit_apporte=produit_apporte,
-                    mouture=True,
-                    prix_mouture_kg=prix_par_kg,
-                    quantite_apportee_client=apportee_kg,
-                    cout_mouture=cout,
-                    montant_total=cout,
-                    nombre_sacs=nombre_sacs,
-                    poids_par_sac=poids_par_sac,
-                    type_mouture=type_mouture,
-                )
+                with transaction.atomic():
+                    ticket = Ticket.objects.create(
+                        lieu=lieu,
+                        numero=numero,
+                        idempotency_key=key,
+                        produit_apporte=produit_apporte,
+                        mouture=True,
+                        prix_mouture_kg=prix_par_kg,
+                        quantite_apportee_client=apportee_kg,
+                        cout_mouture=cout,
+                        montant_total=cout,
+                        nombre_sacs=nombre_sacs,
+                        poids_par_sac=poids_par_sac,
+                        type_mouture=type_mouture,
+                    )
                 return ticket, True
             except IntegrityError:
                 if key:
