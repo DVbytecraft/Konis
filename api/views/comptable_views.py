@@ -694,9 +694,9 @@ class BilanView(APIView):
         # Charges opérationnelles : dépenses de fonctionnement (toutes, y compris sans lieu)
         depenses_qs = Depense.objects.filter(entreprise=entreprise)
         if debut:
-            depenses_qs = depenses_qs.filter(date__date__gte=debut)
+            depenses_qs = depenses_qs.filter(date__gte=debut)
         if fin:
-            depenses_qs = depenses_qs.filter(date__date__lte=fin)
+            depenses_qs = depenses_qs.filter(date__lte=fin)
         total_depenses = depenses_qs.aggregate(total=Sum("montant"))["total"] or Decimal("0")
 
         total_charges = total_achats_mpsl + total_depenses
@@ -775,10 +775,10 @@ class RapportMPSLView(APIView):
         # Dettes fournisseurs en cours par dépôt (indépendant du filtre date)
         dettes_stats = (
             JournalPayable.objects.filter(
-                achat_mpsl__lieu__entreprise=entreprise,
+                achats_mpsl__lieu__entreprise=entreprise,
                 statut="en_cours",
             )
-            .values("achat_mpsl__lieu_id")
+            .values("achats_mpsl__lieu_id")
             .annotate(
                 nb=Count("id"),
                 total=Sum(ExpressionWrapper(
@@ -788,7 +788,7 @@ class RapportMPSLView(APIView):
             )
         )
         for stat in dettes_stats:
-            lid = stat["achat_mpsl__lieu_id"]
+            lid = stat["achats_mpsl__lieu_id"]
             if lid in depots:
                 depots[lid]["nb_dettes_en_cours"] = stat["nb"] or 0
                 depots[lid]["total_dettes"] = stat["total"] or Decimal("0")
@@ -836,7 +836,7 @@ class DetailMPSLView(APIView):
 
         # Dettes fournisseurs en cours pour ce dépôt (all-time)
         dettes_qs = JournalPayable.objects.filter(
-            achat_mpsl__lieu=lieu,
+            achats_mpsl__lieu=lieu,
             statut="en_cours",
         ).select_related("creancier").order_by("-date_echeance")
 
