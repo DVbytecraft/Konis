@@ -412,6 +412,9 @@ export default function BoutiqueDashboardPage() {
       {data.derniere_collecte && (() => {
         const dc = data.derniere_collecte!;
         const laisse = parseFloat(dc.montant_laisse);
+        // Construire la date en heure locale pour éviter le décalage UTC (new Date("YYYY-MM-DD") = UTC midnight)
+        const [dy, dm, dd] = dc.date.split("-").map(Number);
+        const dateCollecte = new Date(dy, dm - 1, dd);
         return (
           <Card className={laisse > 0 ? "border-l-4 border-l-amber-400" : "border-l-4 border-l-gray-300"}>
             <CardHeader className="pb-1 pt-4 px-4">
@@ -419,7 +422,7 @@ export default function BoutiqueDashboardPage() {
                 <Truck className="h-3.5 w-3.5 text-amber-500" />
                 Dernier passage collecteur
                 <span className="ml-auto font-normal normal-case text-xs">
-                  {new Date(dc.date).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" })}
+                  {dateCollecte.toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" })}
                 </span>
               </CardTitle>
             </CardHeader>
