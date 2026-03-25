@@ -1172,9 +1172,9 @@ def get_dashboard_boutique(lieu, date_debut=None, date_fin=None) -> dict:
         type_mouture=Ticket.TYPE_MOUTURE_INTERNE
     )
     if date_debut:
-        tickets_qs = tickets_qs.filter(date__gte=date_debut)
+        tickets_qs = tickets_qs.filter(date__date__gte=date_debut)
     if date_fin:
-        tickets_qs = tickets_qs.filter(date__lte=date_fin)
+        tickets_qs = tickets_qs.filter(date__date__lte=date_fin)
 
     tickets = tickets_qs.aggregate(
         total_ventes=Sum("montant_total"),

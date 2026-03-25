@@ -868,8 +868,8 @@ class DashboardBoutiqueView(APIView):
         date_fin = raw_fin
 
         data = get_dashboard_boutique(lieu, date_debut=date_debut, date_fin=date_fin)
-        # Convertir Decimal → str pour JSON (nb_produits_en_stock est un int, derniere_collecte est un dict)
-        return Response({k: str(v) if not isinstance(v, (int, dict, list)) else v for k, v in data.items()})
+        # Convertir Decimal → str pour JSON. None → null (pas str "None"). int/dict/list passent tels quels.
+        return Response({k: (str(v) if v is not None and not isinstance(v, (int, dict, list)) else v) for k, v in data.items()})
 
 
 # ─── Conversion sacs → kg ─────────────────────────────────────────────────────
