@@ -1,14 +1,16 @@
 """
 Vérifications finales — Charge, cohérence inter-flux, cas extrêmes.
 
-Trois catégories :
-  1. TestConcurrenceAvancee  — retraits caisse simultanés, cessions de lot concurrentes
-  2. TestFluxComplets         — cycles métier end-to-end (créance, collecte, usine→boutique→vente)
-  3. TestEdgeCases            — limites métier, contraintes DB, erreurs de surface API
+Quatre catégories :
+  1. TestConcurrenceAvancee        — retraits caisse simultanés, cessions de lot concurrentes
+  2. TestIdempotencyConcurrence    — même clé idempotency en concurrence → savepoint, zéro 500
+  3. TestFluxComplets              — cycles métier end-to-end (créance, collecte, usine→boutique→vente)
+  4. TestEdgeCases                 — limites métier, contraintes DB, erreurs de surface API
 
 Règle : chaque test prouve un comportement par assertion directe sur la DB ou le service.
 Aucun comportement n'est supposé correct — tout est vérifié.
 """
+import json
 import threading
 from datetime import date
 from decimal import Decimal
@@ -217,7 +219,197 @@ class TestConcurrenceAvancee(TransactionTestCase):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 2. FLUX COMPLETS (END-TO-END COHÉRENCE)
+# 2. IDEMPOTENCY EN CONCURRENCE — validation du fix savepoint
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestIdempotencyConcurrence(TransactionTestCase):
+    """
+    Valide le comportement du savepoint PostgreSQL lors d'une collision
+    d'idempotency_key concurrente.
+
+    Avant le fix : IntegrityError → transaction abortée → TransactionManagementError
+    sur toute requête suivante → 500 côté client.
+
+    Après le fix : IntegrityError annule uniquement le savepoint imbriqué.
+    La transaction parente reste valide. Le ticket existant est retrouvé et
+    retourné (created=False). Aucune exception, aucun 500.
+
+    Deux niveaux de preuve :
+      A. Service layer  — threads réels appelant vente_boutique() directement.
+      B. HTTP layer     — threads réels envoyant des POST avec le même header
+                          Idempotency-Key → vérification des status codes et de
+                          l'unicité du ticket en DB.
+    """
+
+    def setUp(self):
+        self.ent = Entreprise.objects.create(nom="EntIdemConcA")
+        self.boutique = Lieu.objects.create(
+            entreprise=self.ent, nom="Boutique IdemConc", code="BIC",
+            type_lieu=Lieu.TYPE_MAGASIN,
+        )
+        self.admin = CustomUser.objects.create_user(
+            username="admin_idemconc", password="pass",
+            role=CustomUser.ROLE_ADMIN, entreprise=self.ent,
+        )
+        self.boutique_user = CustomUser.objects.create_user(
+            username="bout_idemconc", password="pass",
+            role=CustomUser.ROLE_BOUTIQUE, entreprise=self.ent, lieu=self.boutique,
+        )
+        self.cat = Categorie.objects.create(nom="Cat IdemConc", entreprise=self.ent)
+        self.produit = Produit.objects.create(
+            nom="Farine IC", code="FIC01", entreprise=self.ent,
+            categorie=self.cat, category=Produit.CATEGORY_FINISHED, poids_par_sac=50,
+        )
+        Stock.objects.create(
+            lieu=self.boutique, produit=self.produit, quantite=Decimal("20"),
+        )
+
+    # ── A. Service layer ──────────────────────────────────────────────────────
+
+    def test_service_deux_ventes_meme_cle_idempotency(self):
+        """
+        Deux threads appellent vente_boutique() avec la même idempotency_key.
+
+        Attendu :
+          - Aucune exception dans aucun thread (pas de TransactionManagementError).
+          - Les deux threads obtiennent un Ticket (pas None).
+          - Les deux threads obtiennent le MÊME ticket (même pk).
+          - Exactement un seul ticket existe en DB avec cette clé.
+          - Le stock est prélevé une seule fois (20 - 2 = 18 sacs).
+        """
+        KEY = "service-idem-concurrent-001"
+        results = [None, None]
+
+        def _vente(idx):
+            close_old_connections()
+            try:
+                ticket, created = vente_boutique(
+                    self.boutique,
+                    [(self.produit, Decimal("2"), Decimal("500"), "sac")],
+                    idempotency_key=KEY,
+                    created_by=self.admin,
+                )
+                results[idx] = {"pk": ticket.pk, "created": created}
+            except Exception as e:
+                results[idx] = e
+            finally:
+                close_old_connections()
+
+        t1 = threading.Thread(target=_vente, args=(0,))
+        t2 = threading.Thread(target=_vente, args=(1,))
+        t1.start(); t2.start()
+        t1.join(); t2.join()
+
+        # Aucune exception — zéro 500
+        self.assertNotIsInstance(results[0], Exception,
+            f"Thread 0 a levé une exception : {results[0]}")
+        self.assertNotIsInstance(results[1], Exception,
+            f"Thread 1 a levé une exception : {results[1]}")
+
+        pk0, created0 = results[0]["pk"], results[0]["created"]
+        pk1, created1 = results[1]["pk"], results[1]["created"]
+
+        # Même ticket retourné dans les deux threads
+        self.assertEqual(pk0, pk1,
+            f"Les deux threads doivent obtenir le même ticket : {pk0} ≠ {pk1}")
+
+        # Un seul created=True (le thread qui a créé), un seul created=False (le replay)
+        self.assertTrue(
+            (created0 is True and created1 is False) or
+            (created0 is False and created1 is True),
+            f"Un created=True et un created=False attendus, got {created0}, {created1}",
+        )
+
+        # Un seul ticket en DB
+        count = Ticket.objects.filter(
+            lieu=self.boutique, idempotency_key=KEY
+        ).count()
+        self.assertEqual(count, 1, f"Un seul ticket attendu en DB, trouvé {count}")
+
+        # Stock prélevé une seule fois
+        stock = Stock.objects.get(lieu=self.boutique, produit=self.produit)
+        self.assertEqual(stock.quantite, Decimal("18"),
+            f"Stock attendu 18 sacs, trouvé {stock.quantite}")
+
+    # ── B. HTTP layer ─────────────────────────────────────────────────────────
+
+    def test_http_deux_posts_meme_cle_idempotency_aucun_500(self):
+        """
+        Deux threads envoient simultanément un POST /api/boutique/ventes/
+        avec le même header Idempotency-Key.
+
+        Attendu :
+          - Aucun status 500 dans aucune réponse.
+          - Les deux réponses sont 200 ou 201.
+          - Un seul ticket en DB avec cette clé.
+        """
+        from rest_framework_simplejwt.tokens import RefreshToken
+        from django.test import Client
+
+        KEY = "http-idem-concurrent-001"
+        # JWT généré dans le thread principal (évite FK violation en sous-thread)
+        token = str(RefreshToken.for_user(self.boutique_user).access_token)
+
+        payload = {
+            "lignes": [{
+                "produit": self.produit.pk,
+                "quantite": "2",
+                "prix_unitaire": "500",
+                "unite": "sac",
+            }],
+        }
+
+        results = [None, None]
+
+        def _post(idx):
+            close_old_connections()
+            try:
+                c = Client()
+                r = c.post(
+                    "/api/boutique/ventes/",
+                    data=json.dumps(payload),
+                    content_type="application/json",
+                    HTTP_AUTHORIZATION=f"Bearer {token}",
+                    HTTP_IDEMPOTENCY_KEY=KEY,
+                )
+                results[idx] = r.status_code
+            except Exception as e:
+                results[idx] = e
+            finally:
+                close_old_connections()
+
+        t1 = threading.Thread(target=_post, args=(0,))
+        t2 = threading.Thread(target=_post, args=(1,))
+        t1.start(); t2.start()
+        t1.join(); t2.join()
+
+        # Aucune exception côté test
+        self.assertNotIsInstance(results[0], Exception,
+            f"Thread 0 a levé : {results[0]}")
+        self.assertNotIsInstance(results[1], Exception,
+            f"Thread 1 a levé : {results[1]}")
+
+        # Aucun 500
+        self.assertNotEqual(results[0], 500,
+            f"Thread 0 a reçu un 500 — TransactionManagementError non corrigé")
+        self.assertNotEqual(results[1], 500,
+            f"Thread 1 a reçu un 500 — TransactionManagementError non corrigé")
+
+        # Les deux doivent être 200 ou 201
+        self.assertIn(results[0], [200, 201],
+            f"Thread 0 status inattendu : {results[0]}")
+        self.assertIn(results[1], [200, 201],
+            f"Thread 1 status inattendu : {results[1]}")
+
+        # Un seul ticket en DB
+        count = Ticket.objects.filter(
+            lieu=self.boutique, idempotency_key=KEY
+        ).count()
+        self.assertEqual(count, 1, f"Un seul ticket attendu en DB, trouvé {count}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 3. FLUX COMPLETS (END-TO-END COHÉRENCE)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestFluxComplets(TestCase):
