@@ -832,7 +832,12 @@ def get_caisse_physique_boutique(lieu) -> Decimal:
         JournalCreance.objects.filter(lieu=lieu, correction_caisse__gt=0)
         .aggregate(t=Sum("correction_caisse"))["t"] or Decimal("0")
     )
-    return cash + pcc - pris - corrections
+    from finance.models import CorrectionCaisseAdmin
+    corrections_admin = (
+        CorrectionCaisseAdmin.objects.filter(lieu=lieu)
+        .aggregate(t=Sum("montant"))["t"] or Decimal("0")
+    )
+    return cash + pcc - pris - corrections + corrections_admin
 
 
 @transaction.atomic

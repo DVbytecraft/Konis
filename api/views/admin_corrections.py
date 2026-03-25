@@ -4,9 +4,7 @@ Réservé exclusivement aux admins/supreme_admin.
 """
 from decimal import Decimal
 from django.db import transaction
-from django.utils import timezone
 from rest_framework import status
-from rest_framework.decorators import permission_classes
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -18,82 +16,71 @@ from api.serializers.admin_corrections import (
 )
 from audit.services import audit_log
 from core.models import Lieu
+from finance.models import CorrectionCaisseAdmin
+from finance.services import get_caisse_physique_boutique
 from inventaire.models import Stock
 from ventes.models import Ticket
 
 
-@permission_classes([IsAdminRole])
 class AdminCorrectionCaisseView(APIView):
     """
     POST /api/admin/corrections/caisse/
-    Corrige le montant de la caisse d'une boutique.
+    Corrige le solde de la caisse physique d'une boutique.
+    Crée une CorrectionCaisseAdmin intégrée dans get_caisse_physique_boutique().
 
     Body: {"lieu_id": int, "montant": decimal, "operation": "ajouter|retrancher", "motif": str}
     """
+    permission_classes = [IsAdminRole]
 
     def post(self, request):
-        # Valider les données avec le serializer
         serializer = AdminCorrectionCaisseSerializer(
             data=request.data,
-            context={"request": request}
+            context={"request": request},
         )
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        # Récupérer les données validées
-        lieu_id = serializer.validated_data["lieu_id"]
-        montant = serializer.validated_data["montant"]
+        lieu_id  = serializer.validated_data["lieu_id"]
+        montant  = serializer.validated_data["montant"]
         operation = serializer.validated_data["operation"]
-        motif = serializer.validated_data["motif"]
+        motif    = serializer.validated_data["motif"]
 
-        # Récupérer le lieu
-        lieu = Lieu.objects.get(pk=lieu_id, type_lieu=Lieu.TYPE_MAGASIN)
+        try:
+            lieu = Lieu.objects.get(pk=lieu_id, type_lieu=Lieu.TYPE_MAGASIN)
+        except Lieu.DoesNotExist:
+            return Response({"detail": "Boutique introuvable."}, status=status.HTTP_404_NOT_FOUND)
 
-        # Créer un mouvement de caisse fictif pour corriger
-        from finance.models import CaisseSupremeTransaction
-        from finance.services import get_solde_caisse
+        # Vérifier que le lieu appartient à l'entreprise de l'admin
+        if request.user.entreprise_id and lieu.entreprise_id != request.user.entreprise_id:
+            return Response({"detail": "Boutique non autorisée."}, status=status.HTTP_403_FORBIDDEN)
 
-        entreprise = lieu.entreprise
-        old_solde = get_solde_caisse(entreprise)
+        old_caisse = get_caisse_physique_boutique(lieu)
 
-        if operation == "retrancher":
-            # Pour retrancher, on enregistre un "retrait" fictif de la caisse centrale
-            tx = CaisseSupremeTransaction.objects.create(
-                entreprise=entreprise,
-                type_transaction="retrait",
-                montant=montant,
-                description=f"CORRECTION CAISSE: {motif} (retrait pour équilibrer boutique {lieu.nom})",
-                date=timezone.now().date(),
-                created_by=request.user,
-            )
-            action = "caisse_correction_retrait"
-            new_solde = old_solde - montant
-        else:
-            # Pour ajouter, on enregistre un "dépôt" fictif
-            tx = CaisseSupremeTransaction.objects.create(
-                entreprise=entreprise,
-                type_transaction="depot",
-                montant=montant,
-                description=f"CORRECTION CAISSE: {motif} (ajout pour équilibrer boutique {lieu.nom})",
-                date=timezone.now().date(),
-                created_by=request.user,
-            )
-            action = "caisse_correction_depot"
-            new_solde = old_solde + montant
+        # montant signé : positif = ajout, négatif = retrait
+        montant_signe = montant if operation == "ajouter" else -montant
+
+        correction = CorrectionCaisseAdmin.objects.create(
+            lieu=lieu,
+            montant=montant_signe,
+            motif=motif,
+            created_by=request.user,
+        )
+
+        new_caisse = get_caisse_physique_boutique(lieu)
 
         audit_log(
             user=request.user,
-            action=action,
-            object_type="CaisseSupremeTransaction",
-            object_id=tx.pk,
+            action=f"caisse_correction_{operation}",
+            object_type="CorrectionCaisseAdmin",
+            object_id=correction.pk,
             extra={
                 "lieu_id": lieu.pk,
                 "lieu_nom": lieu.nom,
                 "montant": str(montant),
                 "operation": operation,
                 "motif": motif,
-                "solde_avant": str(old_solde),
-                "solde_apres": str(new_solde),
+                "caisse_avant": str(old_caisse),
+                "caisse_apres": str(new_caisse),
             },
             request=request,
         )
@@ -105,12 +92,11 @@ class AdminCorrectionCaisseView(APIView):
             "operation": operation,
             "montant": str(montant),
             "motif": motif,
-            "solde_avant": str(old_solde),
-            "solde_apres": str(new_solde),
+            "caisse_avant": str(old_caisse),
+            "caisse_apres": str(new_caisse),
         })
 
 
-@permission_classes([IsAdminRole])
 class AdminCorrectionStockView(APIView):
     """
     POST /api/admin/corrections/stock/
@@ -118,54 +104,60 @@ class AdminCorrectionStockView(APIView):
 
     Body: {"lieu_id": int, "produit_id": int, "quantite": decimal, "operation": "ajouter|retrancher|supprimer", "motif": str}
     """
+    permission_classes = [IsAdminRole]
 
     def post(self, request):
-        # Valider les données avec le serializer
         serializer = AdminCorrectionStockSerializer(
             data=request.data,
-            context={"request": request}
+            context={"request": request},
         )
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        # Récupérer les données validées
-        lieu_id = serializer.validated_data["lieu_id"]
+        lieu_id   = serializer.validated_data["lieu_id"]
         produit_id = serializer.validated_data["produit_id"]
-        quantite = serializer.validated_data.get("quantite", Decimal("0"))
+        quantite  = serializer.validated_data.get("quantite", Decimal("0"))
         operation = serializer.validated_data["operation"]
-        motif = serializer.validated_data["motif"]
+        motif     = serializer.validated_data["motif"]
 
-        # Récupérer lieu et produit (serializer a déjà vérifié)
-        lieu = Lieu.objects.get(pk=lieu_id)
+        try:
+            lieu = Lieu.objects.get(pk=lieu_id)
+        except Lieu.DoesNotExist:
+            return Response({"detail": "Lieu introuvable."}, status=status.HTTP_404_NOT_FOUND)
+
+        if request.user.entreprise_id and lieu.entreprise_id != request.user.entreprise_id:
+            return Response({"detail": "Lieu non autorisé."}, status=status.HTTP_403_FORBIDDEN)
+
         from produits.models import Produit
-        produit = Produit.objects.get(pk=produit_id)
+        try:
+            produit = Produit.objects.get(pk=produit_id)
+        except Produit.DoesNotExist:
+            return Response({"detail": "Produit introuvable."}, status=status.HTTP_404_NOT_FOUND)
 
         old_qty = Decimal("0")
         new_qty = Decimal("0")
 
         with transaction.atomic():
-            stock, created = Stock.objects.get_or_create(
+            stock, _ = Stock.objects.select_for_update().get_or_create(
                 lieu=lieu,
                 produit=produit,
-                defaults={"quantite": Decimal("0"), "quantite_kg": Decimal("0")}
+                defaults={"quantite": Decimal("0"), "quantite_kg": Decimal("0")},
             )
             old_qty = stock.quantite
 
             if operation == "ajouter":
                 stock.quantite += quantite
-                new_qty = stock.quantite
             elif operation == "retrancher":
-                if quantite and quantite > stock.quantite:
+                if quantite > stock.quantite:
                     return Response(
-                        {"detail": f"Impossible de retrancher {quantite}: stock actuel = {stock.quantite}"},
-                        status=status.HTTP_400_BAD_REQUEST
+                        {"detail": f"Impossible de retrancher {quantite} : stock actuel = {stock.quantite}"},
+                        status=status.HTTP_400_BAD_REQUEST,
                     )
-                stock.quantite -= quantite if quantite else Decimal("0")
-                new_qty = stock.quantite
+                stock.quantite -= quantite
             elif operation == "supprimer":
-                new_qty = Decimal("0")
                 stock.quantite = Decimal("0")
 
+            new_qty = stock.quantite
             stock.save()
 
         audit_log(
@@ -200,19 +192,20 @@ class AdminCorrectionStockView(APIView):
         })
 
 
-@permission_classes([IsAdminRole])
 class AdminSupprimerTicketView(APIView):
     """
     POST /api/admin/corrections/ticket/{ticket_id}/
-    Supprime un ticket en cas d'erreur de paiement.
-    Retourne le montant au stock et ajuste la caisse.
+    Supprime définitivement un ticket erroné.
+    - Restitue le stock de chaque ligne vendue.
+    - Supprime TicketReprint, LigneVente, puis Ticket.
+    - La caisse physique se corrige automatiquement (montant_cash du ticket n'est plus compté).
     """
+    permission_classes = [IsAdminRole]
 
     def post(self, request, ticket_id):
-        # Valider le motif avec le serializer
         serializer = AdminSupprimerTicketSerializer(
             data=request.data,
-            context={"request": request}
+            context={"request": request},
         )
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -220,77 +213,80 @@ class AdminSupprimerTicketView(APIView):
         motif = serializer.validated_data["motif"]
 
         try:
-            ticket = Ticket.objects.select_related("lieu").prefetch_related("lignes__produit").get(pk=ticket_id)
+            ticket = (
+                Ticket.objects.select_related("lieu")
+                .prefetch_related("lignes__produit", "reprints")
+                .get(pk=ticket_id)
+            )
         except Ticket.DoesNotExist:
             return Response({"detail": "Ticket introuvable."}, status=status.HTTP_404_NOT_FOUND)
 
-        # Vérifier l'entreprise
         if request.user.entreprise_id and ticket.lieu.entreprise_id != request.user.entreprise_id:
             return Response({"detail": "Ticket non autorisé."}, status=status.HTTP_403_FORBIDDEN)
 
+        # Si le ticket a une part crédit → une JournalCreance existe peut-être
+        if ticket.montant_credit and ticket.montant_credit > 0:
+            return Response(
+                {
+                    "detail": (
+                        f"Ce ticket contient une part à crédit de {ticket.montant_credit} FCFA. "
+                        "Soldez ou supprimez d'abord la créance associée dans le journal des créances."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Snapshot avant suppression pour l'audit
+        snapshot = {
+            "ticket_numero": ticket.numero,
+            "lieu_id": ticket.lieu.pk,
+            "lieu_nom": ticket.lieu.nom,
+            "montant_total": str(ticket.montant_total),
+            "montant_cash": str(ticket.montant_cash),
+            "motif": motif,
+            "lignes": [
+                {
+                    "produit_id": l.produit.pk if l.produit else None,
+                    "produit_nom": l.produit.nom if l.produit else None,
+                    "quantite": str(l.quantite),
+                }
+                for l in ticket.lignes.all()
+            ],
+        }
+
         with transaction.atomic():
-            # 1. Retourner les produits au stock
+            # 1. Restituer le stock pour chaque ligne
             for ligne in ticket.lignes.all():
                 if ligne.produit:
                     stock, _ = Stock.objects.get_or_create(
                         lieu=ticket.lieu,
                         produit=ligne.produit,
-                        defaults={"quantite": Decimal("0"), "quantite_kg": Decimal("0")}
+                        defaults={"quantite": Decimal("0"), "quantite_kg": Decimal("0")},
                     )
                     stock = Stock.objects.select_for_update().get(pk=stock.pk)
                     stock.quantite += ligne.quantite
                     stock.save(update_fields=["quantite", "updated_at"])
 
-            # 2. Créer une correction de caisse (retirer le cash perçu)
-            from finance.models import CaisseSupremeTransaction
-            from finance.services import get_solde_caisse
+            # 2. Supprimer les logs de réimpression (PROTECT)
+            ticket.reprints.all().delete()
 
-            entreprise = ticket.lieu.entreprise
-            old_solde = get_solde_caisse(entreprise)
+            # 3. Supprimer les lignes de vente (PROTECT)
+            ticket.lignes.all().delete()
 
-            if ticket.montant_cash > 0:
-                CaisseSupremeTransaction.objects.create(
-                    entreprise=entreprise,
-                    type_transaction="retrait",
-                    montant=ticket.montant_cash,
-                    description=f"ANNULATION TICKET #{ticket.numero}: {motif}",
-                    date=ticket.date,
-                    created_by=request.user,
-                )
-
-            # 3. Enregistrer l'annulation (pas de modification du ticket lui-même)
-            # Le ticket reste inchangé - c'est juste l'audit qui enregistre l'annulation
-
-            new_solde = get_solde_caisse(entreprise)
+            # 4. Supprimer le ticket lui-même
+            # La caisse physique se recalcule automatiquement : montant_cash n'est plus en base.
+            ticket.delete()
 
         audit_log(
             user=request.user,
-            action="ticket_annule",
+            action="ticket_supprime",
             object_type="Ticket",
-            object_id=ticket.pk,
-            extra={
-                "ticket_numero": ticket.numero,
-                "lieu_id": ticket.lieu.pk,
-                "lieu_nom": ticket.lieu.nom,
-                "montant_total": str(ticket.montant_total),
-                "montant_cash": str(ticket.montant_cash),
-                "montant_credit": str(ticket.montant_credit),
-                "motif": motif,
-                "solde_avant": str(old_solde),
-                "solde_apres": str(new_solde),
-            },
+            object_id=ticket_id,
+            extra=snapshot,
             request=request,
         )
 
         return Response({
             "success": True,
-            "ticket_id": ticket.pk,
-            "ticket_numero": ticket.numero,
-            "lieu_nom": ticket.lieu.nom,
-            "montant_total": str(ticket.montant_total),
-            "montant_cash": str(ticket.montant_cash),
-            "montant_credit": str(ticket.montant_credit),
-            "motif": motif,
-            "solde_caisse_avant": str(old_solde),
-            "solde_caisse_apres": str(new_solde),
+            **snapshot,
         })

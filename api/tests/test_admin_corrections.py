@@ -8,7 +8,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from audit.models import AuditLog
 from core.models import CustomUser, Entreprise, Lieu
-from finance.models import CaisseSupremeTransaction
+from finance.models import CorrectionCaisseAdmin
 from inventaire.models import Stock
 from produits.models import Produit, Categorie
 from ventes.models import Ticket, LigneVente
@@ -244,7 +244,7 @@ class AdminCorrectionsPermissionTests(APITestCase):
     # ────────────────────────────────────────────────────────────────────────
 
     def test_caisse_ajouter_creates_depot(self):
-        """'ajouter' crée un dépôt dans la caisse supreme."""
+        """'ajouter' crée une CorrectionCaisseAdmin positive."""
         payload = {
             "lieu_id": self.boutique.id,
             "montant": "25000",
@@ -259,16 +259,14 @@ class AdminCorrectionsPermissionTests(APITestCase):
         )
         self.assertEqual(r.status_code, status.HTTP_200_OK)
 
-        # Vérifier que la transaction a été créée
-        tx = CaisseSupremeTransaction.objects.filter(
-            type_transaction="depot",
-            montant=Decimal("25000")
+        correction = CorrectionCaisseAdmin.objects.filter(
+            lieu=self.boutique,
+            montant=Decimal("25000"),
         ).first()
-        self.assertIsNotNone(tx)
-        self.assertIn("CORRECTION CAISSE", tx.description)
+        self.assertIsNotNone(correction)
 
     def test_caisse_retrancher_creates_retrait(self):
-        """'retrancher' crée un retrait dans la caisse supreme."""
+        """'retrancher' crée une CorrectionCaisseAdmin négative."""
         payload = {
             "lieu_id": self.boutique.id,
             "montant": "15000",
@@ -283,12 +281,11 @@ class AdminCorrectionsPermissionTests(APITestCase):
         )
         self.assertEqual(r.status_code, status.HTTP_200_OK)
 
-        # Vérifier que la transaction a été créée
-        tx = CaisseSupremeTransaction.objects.filter(
-            type_transaction="retrait",
-            montant=Decimal("15000")
+        correction = CorrectionCaisseAdmin.objects.filter(
+            lieu=self.boutique,
+            montant=Decimal("-15000"),
         ).first()
-        self.assertIsNotNone(tx)
+        self.assertIsNotNone(correction)
 
     # ────────────────────────────────────────────────────────────────────────
     # TESTS BUSINESS LOGIC - STOCK
@@ -392,10 +389,10 @@ class AdminCorrectionsPermissionTests(APITestCase):
         # Vérifier l'audit log
         audit = AuditLog.objects.filter(
             user=self.admin,
-            action="caisse_correction_depot"
+            action="caisse_correction_ajouter"
         ).first()
         self.assertIsNotNone(audit)
-        self.assertEqual(audit.object_type, "CaisseSupremeTransaction")
+        self.assertEqual(audit.object_type, "CorrectionCaisseAdmin")
         self.assertIn("motif", audit.extra)
         self.assertEqual(audit.extra["motif"], "Test audit")
 
@@ -487,10 +484,11 @@ class AdminCorrectionTicketTests(APITestCase):
         return f"Bearer {str(RefreshToken.for_user(user).access_token)}"
 
     def test_admin_can_delete_ticket(self):
-        """Admin peut supprimer un ticket."""
+        """Admin peut supprimer un ticket — le ticket est réellement supprimé."""
+        ticket_id = self.ticket.id
         payload = {"motif": "Erreur de paiement"}
         r = self.client.post(
-            f"/api/admin/corrections/ticket/{self.ticket.id}/",
+            f"/api/admin/corrections/ticket/{ticket_id}/",
             payload,
             format="json",
             HTTP_AUTHORIZATION=self._auth_token(self.admin)
@@ -498,9 +496,8 @@ class AdminCorrectionTicketTests(APITestCase):
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertTrue(r.json()["success"])
 
-        # Vérifier que le ticket existe toujours (pas suppression, juste retour du stock)
-        self.ticket.refresh_from_db()
-        self.assertIsNotNone(self.ticket)
+        # Le ticket a été supprimé définitivement
+        self.assertFalse(Ticket.objects.filter(pk=ticket_id).exists())
 
     def test_non_admin_cannot_delete_ticket(self):
         """Comptable ne peut pas supprimer un ticket."""
@@ -539,7 +536,7 @@ class AdminCorrectionTicketTests(APITestCase):
         # Vérifier l'audit log
         audit = AuditLog.objects.filter(
             user=self.admin,
-            action="ticket_annule"
+            action="ticket_supprime"
         ).first()
         self.assertIsNotNone(audit)
         self.assertEqual(audit.object_type, "Ticket")

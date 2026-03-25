@@ -687,3 +687,44 @@ class CollecteArgent(models.Model):
 
     def __str__(self):
         return f"Collecte {self.lieu} le {self.date_collecte} — pris {self.montant_pris} FCFA"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CORRECTION CAISSE ADMIN — Ajustement manuel du solde physique d'une boutique
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CorrectionCaisseAdmin(models.Model):
+    """
+    Correction manuelle du solde de caisse physique d'une boutique.
+    montant > 0 : ajout de cash dans la caisse boutique.
+    montant < 0 : retrait de cash de la caisse boutique.
+    Intégré dans get_caisse_physique_boutique().
+    """
+    lieu = models.ForeignKey(
+        "core.Lieu",
+        on_delete=models.PROTECT,
+        related_name="corrections_caisse_admin",
+        limit_choices_to={"type_lieu": "magasin"},
+    )
+    montant = models.DecimalField(
+        max_digits=14, decimal_places=2,
+        help_text="Positif = ajout, négatif = retrait.",
+    )
+    motif = models.TextField()
+    created_by = models.ForeignKey(
+        CustomUser,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Correction caisse admin"
+        verbose_name_plural = "Corrections caisse admin"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        signe = "+" if self.montant >= 0 else ""
+        return f"Correction {self.lieu} {signe}{self.montant} FCFA — {self.motif[:50]}"

@@ -19,6 +19,7 @@ from finance.models import (
     ClientFinance,
     CollecteArgent,
     CaisseSupremeTransaction,
+    CorrectionCaisseAdmin,
 )
 from finance.services import get_caisse_physique_boutique, enregistrer_collecte
 from inventaire.models import Stock
@@ -401,14 +402,14 @@ class TestAuditLogResilience(APITestCase):
 
     def test_pattern_b_audit_hors_transaction_objet_persiste(self):
         """
-        Dans admin_corrections.py, CaisseSupremeTransaction est créée sans
+        Dans admin_corrections.py, CorrectionCaisseAdmin est créée sans
         transaction.atomic() explicite puis audit_log() est appelé après.
         Si audit_log() lève, l'objet métier est DÉJÀ commis en DB → 500 mais pas de perte.
 
         raise_request_exception=False est requis car le test client Django re-raise
         les exceptions non catchées par défaut.
         """
-        count_avant = CaisseSupremeTransaction.objects.filter(entreprise=self.ent).count()
+        count_avant = CorrectionCaisseAdmin.objects.filter(lieu=self.boutique).count()
 
         # Désactiver la re-raise pour capter le code HTTP sans crash test
         self.client.raise_request_exception = False
@@ -431,11 +432,11 @@ class TestAuditLogResilience(APITestCase):
         # La vue retourne 500 car audit_log() a planté
         self.assertEqual(r.status_code, 500)
 
-        # Mais la CaisseSupremeTransaction est déjà en DB
+        # Mais la CorrectionCaisseAdmin est déjà en DB
         self.assertEqual(
-            CaisseSupremeTransaction.objects.filter(entreprise=self.ent).count(),
+            CorrectionCaisseAdmin.objects.filter(lieu=self.boutique).count(),
             count_avant + 1,
-            "Pattern B : CaisseSupremeTransaction committée avant audit_log() — persiste malgré le crash audit"
+            "Pattern B : CorrectionCaisseAdmin committée avant audit_log() — persiste malgré le crash audit"
         )
 
     def test_pattern_b_audit_ok_retourne_200(self):
