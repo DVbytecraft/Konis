@@ -23,6 +23,7 @@ const navByRole: Record<string, { href: string; label: string; icon: React.Compo
     { href: "/comptable", label: "Vue comptable", icon: Calculator },
     { href: "/comptable/depenses", label: "Dépenses", icon: ClipboardList },
     { href: "/admin/categories-depense", label: "Catégories dépenses", icon: Tag },
+    { href: "/admin/corrections", label: "Corrections", icon: AlertCircle },
   ],
   comptable: [
     { href: "/comptable", label: "Tableau de bord", icon: LayoutDashboard },
@@ -88,6 +89,7 @@ const navByRole: Record<string, { href: string; label: string; icon: React.Compo
     { href: "/comptable", label: "Vue comptable", icon: Calculator },
     { href: "/comptable/depenses", label: "Dépenses", icon: ClipboardList },
     { href: "/admin/categories-depense", label: "Catégories dépenses", icon: Tag },
+    { href: "/admin/corrections", label: "Corrections", icon: AlertCircle },
     { href: "/finance", label: "Finance", icon: TrendingUp },
     { href: "/finance/creanciers", label: "Créanciers", icon: Landmark },
     { href: "/finance/journaux-payables", label: "À payer", icon: TrendingDown },
