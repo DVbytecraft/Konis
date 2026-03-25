@@ -22,6 +22,50 @@ from inventaire.models import Stock
 from ventes.models import Ticket
 
 
+class AdminCorrectionHistoriqueView(APIView):
+    """
+    GET /api/admin/corrections/historique/?lieu_id=X
+    Retourne la caisse physique actuelle + l'historique des corrections admin.
+    """
+    permission_classes = [IsAdminRole]
+
+    def get(self, request):
+        lieu_id = request.query_params.get("lieu_id")
+        if not lieu_id:
+            return Response({"detail": "Paramètre lieu_id requis."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            lieu = Lieu.objects.get(pk=lieu_id, type_lieu=Lieu.TYPE_MAGASIN)
+        except Lieu.DoesNotExist:
+            return Response({"detail": "Boutique introuvable."}, status=status.HTTP_404_NOT_FOUND)
+
+        if request.user.entreprise_id and lieu.entreprise_id != request.user.entreprise_id:
+            return Response({"detail": "Boutique non autorisée."}, status=status.HTTP_403_FORBIDDEN)
+
+        caisse_physique = get_caisse_physique_boutique(lieu)
+
+        corrections = (
+            CorrectionCaisseAdmin.objects
+            .filter(lieu=lieu)
+            .select_related("created_by")
+            .order_by("-created_at")[:50]
+        )
+
+        return Response({
+            "caisse_physique": str(caisse_physique),
+            "corrections": [
+                {
+                    "id": c.pk,
+                    "montant": str(c.montant),
+                    "motif": c.motif,
+                    "created_by": c.created_by.username if c.created_by else "—",
+                    "created_at": c.created_at.strftime("%d/%m/%Y %H:%M"),
+                }
+                for c in corrections
+            ],
+        })
+
+
 class AdminCorrectionCaisseView(APIView):
     """
     POST /api/admin/corrections/caisse/

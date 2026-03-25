@@ -24,6 +24,7 @@ from api.views.admin_views import (
     ClientsAdminView,
 )
 from api.views.admin_corrections import (
+    AdminCorrectionHistoriqueView,
     AdminCorrectionCaisseView,
     AdminCorrectionStockView,
     AdminSupprimerTicketView,
@@ -164,6 +165,7 @@ urlpatterns = [
     path("boutique/stock/<int:produit_id>/convertir/", ConvertirSacEnKgView.as_view(), name="boutique-stock-convertir"),
     path("boutique/", include(router_boutique.urls)),
     path("admin/clients/", ClientsAdminView.as_view(), name="admin-clients"),
+    path("admin/corrections/historique/", AdminCorrectionHistoriqueView.as_view(), name="admin-correction-historique"),
     path("admin/corrections/caisse/", AdminCorrectionCaisseView.as_view(), name="admin-correction-caisse"),
     path("admin/corrections/stock/", AdminCorrectionStockView.as_view(), name="admin-correction-stock"),
     path("admin/corrections/ticket/<int:ticket_id>/", AdminSupprimerTicketView.as_view(), name="admin-supprimer-ticket"),
