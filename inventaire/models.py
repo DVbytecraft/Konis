@@ -215,13 +215,14 @@ class AchatMPSL(models.Model):
         max_digits=14, decimal_places=2, default=Decimal("0"),
         help_text="Acompte versé si type_paiement=partiel.",
     )
-    journal_payable = models.OneToOneField(
+    journal_payable = models.ForeignKey(
         "finance.JournalPayable",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name="achat_mpsl",
-        help_text="Journal de dette fournisseur auto-créé si crédit ou partiel.",
+        related_name="achats_mpsl",
+        help_text="Journal de dette fournisseur auto-créé si crédit ou partiel. "
+                  "Plusieurs achats d'un même bon de commande partagent le même journal.",
     )
     notes = models.TextField(blank=True, default="")
     created_by = models.ForeignKey(

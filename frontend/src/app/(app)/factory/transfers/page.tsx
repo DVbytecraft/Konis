@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
+import { buildIdempotencyKey, cn } from "@/lib/utils";
 
 interface TransferRow {
   id: number;
@@ -94,6 +94,7 @@ export default function FactoryTransfersPage() {
     try {
       await apiFetch("/usine/cessions/", {
         method: "POST",
+        headers: { "Idempotency-Key": buildIdempotencyKey("cession-boutique") },
         body: JSON.stringify({
           lot: Number(form.lot),
           boutique: Number(form.boutique),
@@ -118,6 +119,7 @@ export default function FactoryTransfersPage() {
     try {
       await apiFetch("/usine/transferts-inter-usines/", {
         method: "POST",
+        headers: { "Idempotency-Key": buildIdempotencyKey("transfert-inter-usine") },
         body: JSON.stringify({
           lot: Number(formU.lot),
           usine_destination: Number(formU.usine_destination),

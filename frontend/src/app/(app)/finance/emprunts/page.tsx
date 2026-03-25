@@ -156,7 +156,7 @@ export default function EmpruntsPage() {
       if (rembForm.notes) payload.notes = rembForm.notes;
       const updated = await apiFetch<Emprunt>(
         `/finance/emprunts/${rembJournal.id}/remboursement/`,
-        { method: "POST", body: JSON.stringify(payload) }
+        { method: "POST", headers: { "Idempotency-Key": buildIdempotencyKey("emprunt-remboursement") }, body: JSON.stringify(payload) }
       );
       setEmprunts((prev) => prev.map((e) => (e.id === updated.id ? updated : e)));
       setRembJournal(null);

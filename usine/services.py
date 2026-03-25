@@ -46,14 +46,18 @@ def creer_lot_production(
             unite_poids=unite_poids,
             created_by=created_by,
         )
-        # Crediter le stock produit fini a l'usine
-        stock_fini, _ = Stock.objects.select_for_update().get_or_create(
+        # Crediter le stock produit fini a l'usine.
+        # get_or_create d'abord (sans lock), puis SELECT FOR UPDATE sur pk existant.
+        # select_for_update().get_or_create() est unsafe : le INSERT interne
+        # ignore le lock et provoque des deadlocks sous charge.
+        stock_fini, _ = Stock.objects.get_or_create(
             produit=produit_fini,
             lieu=lieu_usine,
             defaults={"quantite": Decimal("0")},
         )
+        stock_fini = Stock.objects.select_for_update().get(pk=stock_fini.pk)
         stock_fini.quantite += quantite_sacs
-        stock_fini.save(update_fields=["quantite"])
+        stock_fini.save(update_fields=["quantite", "updated_at"])
 
     return lot
 

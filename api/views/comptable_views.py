@@ -32,7 +32,8 @@ from audit.services import audit_log
 from depenses.models import CategorieDepense, Depense
 from inventaire.models import AchatMPSL, AchatUsine, Stock, Transfert
 from usine.models import TransfertCession, TransfertInterUsine
-from finance.models import JournalCreance, JournalPayable, PaiementCreance
+from finance.models import JournalCreance, JournalPayable
+from finance.services import get_caisse_physique_boutique
 from ventes.models import LigneVente, Ticket
 
 # Expressions réutilisées pour calculer les montants en SQL (évite les boucles Python)
@@ -233,15 +234,19 @@ class RapportBoutiquesView(APIView):
         fin = request.query_params.get("fin")
 
         # Initialiser toutes les boutiques de l'entreprise
+        lieux = {
+            l.id: l
+            for l in Lieu.objects.filter(type_lieu=Lieu.TYPE_MAGASIN, entreprise=entreprise).order_by("nom")[:200]
+        }
         boutiques = {
-            l.id: {
-                "lieu_id": l.id, "lieu_nom": l.nom,
+            lid: {
+                "lieu_id": lid, "lieu_nom": l.nom,
                 "nb_tickets": 0, "total_ventes": Decimal("0"),
                 "total_mouture": Decimal("0"), "total_creances": Decimal("0"),
                 "cessions_recues_sacs": Decimal("0"), "cessions_recues_montant": Decimal("0"),
                 "caisse_reelle": Decimal("0"), "nb_produits_en_stock": 0,
             }
-            for l in Lieu.objects.filter(type_lieu=Lieu.TYPE_MAGASIN, entreprise=entreprise).order_by("nom")[:200]
+            for lid, l in lieux.items()
         }
 
         # Agrégation SQL sur Ticket.montant_total (inclut mouture + produits)
@@ -314,32 +319,10 @@ class RapportBoutiquesView(APIView):
                 boutiques[bid]["cessions_recues_sacs"] = stat["total_sacs"] or Decimal("0")
                 boutiques[bid]["cessions_recues_montant"] = stat["total_montant"] or Decimal("0")
 
-        # Caisse réelle par boutique (all-time : total cash encaissé = montant_cash tickets + paiements créances)
-        cash_stats = (
-            Ticket.objects.filter(
-                lieu__type_lieu=Lieu.TYPE_MAGASIN,
-                lieu__entreprise=entreprise,
-            ).exclude(type_mouture=Ticket.TYPE_MOUTURE_INTERNE)
-            .values("lieu_id")
-            .annotate(total_cash=Sum("montant_cash"))
-        )
-        for stat in cash_stats:
-            bid = stat["lieu_id"]
-            if bid in boutiques:
-                boutiques[bid]["caisse_reelle"] = stat["total_cash"] or Decimal("0")
-
-        paiement_stats = (
-            PaiementCreance.objects.filter(
-                journal__lieu__type_lieu=Lieu.TYPE_MAGASIN,
-                journal__lieu__entreprise=entreprise,
-            )
-            .values("journal__lieu_id")
-            .annotate(total=Sum("montant"))
-        )
-        for stat in paiement_stats:
-            bid = stat["journal__lieu_id"]
-            if bid in boutiques:
-                boutiques[bid]["caisse_reelle"] += stat["total"] or Decimal("0")
+        # Caisse réelle par boutique (all-time) — formule unifiée avec la vue boutique :
+        # cash tickets + paiements créances - collectes prélevées - corrections caisse
+        for bid, lieu in lieux.items():
+            boutiques[bid]["caisse_reelle"] = get_caisse_physique_boutique(lieu)
 
         # Nombre de produits en stock (articles avec stock > 0)
         stock_counts = (

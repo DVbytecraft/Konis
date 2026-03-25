@@ -194,15 +194,15 @@ def solder_journal_payable(*, journal: JournalPayable, created_by: CustomUser) -
     
     SÉCURITÉ : Cette opération nécessite un niveau de permission elevated.
     """
-    # Vérification de sécurité : seul admin/DAF peut solder manuellement
+    # Vérification de sécurité : seul admin/supreme_admin/DAF/comptable peut solder manuellement
     from core.models import CustomUser as CU
-    ROLES_AUTORISES = {CU.ROLE_ADMIN, CU.ROLE_DAF, CU.ROLE_COMPTABLE}
+    ROLES_AUTORISES = {CU.ROLE_SUPREME_ADMIN, CU.ROLE_ADMIN, CU.ROLE_DAF, CU.ROLE_COMPTABLE}
     if created_by.role not in ROLES_AUTORISES:
         raise ErreurFinance(
             f"Seul un admin, DAF ou comptable peut solder manuellement un journal payable. "
             f"Rôle actuel : {created_by.role}"
         )
-    
+
     journal = JournalPayable.objects.select_for_update().get(pk=journal.pk)
     _verifier_journal_ouvert(journal)
     _solder_journal(journal)
@@ -365,15 +365,15 @@ def solder_journal_creance(*, journal: JournalCreance, created_by: CustomUser) -
     
     SÉCURITÉ : Cette opération nécessite un niveau de permission elevated.
     """
-    # Vérification de sécurité : seul admin/DAF peut solder manuellement
+    # Vérification de sécurité : seul admin/supreme_admin/DAF/comptable peut solder manuellement
     from core.models import CustomUser as CU
-    ROLES_AUTORISES = {CU.ROLE_ADMIN, CU.ROLE_DAF, CU.ROLE_COMPTABLE}
+    ROLES_AUTORISES = {CU.ROLE_SUPREME_ADMIN, CU.ROLE_ADMIN, CU.ROLE_DAF, CU.ROLE_COMPTABLE}
     if created_by.role not in ROLES_AUTORISES:
         raise ErreurFinance(
             f"Seul un admin, DAF ou comptable peut solder manuellement un journal de créance. "
             f"Rôle actuel : {created_by.role}"
         )
-    
+
     journal = JournalCreance.objects.select_for_update().get(pk=journal.pk)
     _verifier_journal_ouvert(journal)
     _solder_journal(journal)
@@ -611,7 +611,7 @@ def enregistrer_depense_projet(
     # Vérification de sécurité : si dépassement demandé, vérifier les permissions
     if autoriser_depassement:
         from core.models import CustomUser as CU
-        ROLES_AUTORISES = {CU.ROLE_ADMIN, CU.ROLE_DAF, CU.ROLE_COMPTABLE}
+        ROLES_AUTORISES = {CU.ROLE_SUPREME_ADMIN, CU.ROLE_ADMIN, CU.ROLE_DAF, CU.ROLE_COMPTABLE}
         if created_by.role not in ROLES_AUTORISES:
             raise ErreurFinance(
                 "Seul admin, DAF ou comptable peut autoriser un dépassement de budget projet."

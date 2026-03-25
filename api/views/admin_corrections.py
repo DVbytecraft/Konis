@@ -230,26 +230,16 @@ class AdminSupprimerTicketView(APIView):
 
         with transaction.atomic():
             # 1. Retourner les produits au stock
-            from inventaire.models import MouvementStock
             for ligne in ticket.lignes.all():
                 if ligne.produit:
-                    try:
-                        stock, _ = Stock.objects.get_or_create(
-                            lieu=ticket.lieu,
-                            produit=ligne.produit,
-                            defaults={"quantite": Decimal("0"), "quantite_kg": Decimal("0")}
-                        )
-                        stock.quantite += ligne.quantite
-                        stock.save()
-                        MouvementStock.objects.create(
-                            stock=stock,
-                            type_mouvement="entree",
-                            quantite=ligne.quantite,
-                            notes=f"Annulation ticket #{ticket.numero}",
-                            created_by=request.user,
-                        )
-                    except Exception:
-                        pass  # On continue même si erreur stock
+                    stock, _ = Stock.objects.get_or_create(
+                        lieu=ticket.lieu,
+                        produit=ligne.produit,
+                        defaults={"quantite": Decimal("0"), "quantite_kg": Decimal("0")}
+                    )
+                    stock = Stock.objects.select_for_update().get(pk=stock.pk)
+                    stock.quantite += ligne.quantite
+                    stock.save(update_fields=["quantite", "updated_at"])
 
             # 2. Créer une correction de caisse (retirer le cash perçu)
             from finance.models import CaisseSupremeTransaction

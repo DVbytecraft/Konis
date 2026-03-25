@@ -52,6 +52,9 @@ def _get_lieu_for_creation(user: CustomUser, data) -> Lieu | None:
 
 
 def _next_facture_number(lieu: Lieu) -> str:
+    # Lock la ligne Lieu pour sérialiser la numérotation séquentielle.
+    # Doit être appelé à l'intérieur d'un transaction.atomic().
+    Lieu.objects.select_for_update().get(pk=lieu.pk)
     prefix = (lieu.code or lieu.nom or f"L{lieu.pk}")[:12].upper().replace(" ", "")
     date_part = timezone.now().strftime("%Y%m%d")
     last = (

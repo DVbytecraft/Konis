@@ -133,11 +133,17 @@ class AdminCorrectionStockSerializer(serializers.Serializer):
         return value
 
     def validate_produit_id(self, value):
-        """Vérifier que le produit existe."""
+        """Vérifier que le produit existe et appartient à la même entreprise."""
         try:
-            Produit.objects.get(pk=value)
+            produit = Produit.objects.get(pk=value)
         except Produit.DoesNotExist:
             raise serializers.ValidationError("Produit introuvable.")
+
+        # Cross-tenant check
+        request = self.context.get("request")
+        if request and request.user and request.user.entreprise_id:
+            if produit.entreprise_id != request.user.entreprise_id:
+                raise serializers.ValidationError("Produit non autorisé pour votre entreprise.")
 
         return value
 

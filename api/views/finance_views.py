@@ -153,7 +153,7 @@ class CreancierViewSet(DafReadOnlyMixin, ListModelMixin, RetrieveModelMixin, Cre
         Réservé aux admins/DAF/comptable uniquement.
         """
         from core.models import CustomUser as CU
-        ROLES_AUTORISES = {CU.ROLE_ADMIN, CU.ROLE_DAF, CU.ROLE_COMPTABLE}
+        ROLES_AUTORISES = {CU.ROLE_SUPREME_ADMIN, CU.ROLE_ADMIN, CU.ROLE_DAF, CU.ROLE_COMPTABLE}
         if request.user.role not in ROLES_AUTORISES:
             return Response(
                 {"detail": "Seul admin, DAF ou comptable peut activer un fournisseur."},
@@ -190,7 +190,7 @@ class CreancierViewSet(DafReadOnlyMixin, ListModelMixin, RetrieveModelMixin, Cre
         Réservé aux admins/DAF/comptable uniquement.
         """
         from core.models import CustomUser as CU
-        ROLES_AUTORISES = {CU.ROLE_ADMIN, CU.ROLE_DAF, CU.ROLE_COMPTABLE}
+        ROLES_AUTORISES = {CU.ROLE_SUPREME_ADMIN, CU.ROLE_ADMIN, CU.ROLE_DAF, CU.ROLE_COMPTABLE}
         if request.user.role not in ROLES_AUTORISES:
             return Response(
                 {"detail": "Seul admin, DAF ou comptable peut désactiver un fournisseur."},
@@ -474,10 +474,12 @@ class JournalCreanceViewSet(DafReadOnlyMixin, ListModelMixin, RetrieveModelMixin
 
         if retrancher_caisse:
             from core.models import CustomUser as CU
-            ROLES_AUTORISES = {CU.ROLE_ADMIN, CU.ROLE_DAF, CU.ROLE_COMPTABLE}
+            # DAF et COMPTABLE sont bloqués par DafReadOnlyMixin sur l'action "create"
+            # avant d'atteindre ce point → seuls SUPREME_ADMIN et ADMIN sont effectivement autorisés.
+            ROLES_AUTORISES = {CU.ROLE_SUPREME_ADMIN, CU.ROLE_ADMIN}
             if request.user.role not in ROLES_AUTORISES:
                 return Response(
-                    {"detail": "Seul un admin, DAF ou comptable peut retrancher la caisse."},
+                    {"detail": "Seul un super-admin ou admin peut retrancher la caisse."},
                     status=status.HTTP_403_FORBIDDEN,
                 )
 

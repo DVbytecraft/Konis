@@ -190,6 +190,7 @@ export default function ProjetsPage() {
         : `/finance/projets/${projet.id}/depot/`;
       const updated = await apiFetch<Projet>(endpoint, {
         method: "POST",
+        headers: { "Idempotency-Key": buildIdempotencyKey(`projet-${type}`) },
         body: JSON.stringify({
           montant: actionForm.montant,
           description: actionForm.description,

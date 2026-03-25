@@ -68,9 +68,11 @@ def get_lieu_usine(request) -> Lieu | None:
 def get_lieu_mpsl(request) -> Lieu | None:
     """
     Résout le dépôt MPSL pour la requête courante.
-    - Rôle admin    : utilise ?lieu= (query param) ou body["lieu"], sinon premier dépôt MPSL de l'entreprise.
-    - Rôle mpsl     : utilise request.user.lieu s'il est de type mpsl, sinon premier dépôt MPSL de l'entreprise.
-    L'utilisateur MPSL n'est PAS obligatoirement lié à un lieu — il opère sur tout dépôt MPSL de son entreprise.
+    - Rôle admin    : utilise ?lieu= (query param) ou body["lieu"].
+                      Sans paramètre explicite : retourne le dépôt uniquement s'il est seul ; None si plusieurs.
+    - Rôle mpsl     : utilise request.user.lieu s'il est de type mpsl.
+                      Sans lieu assigné : même règle (seul → retourne ; plusieurs → None).
+    Retourner None force les appelants à exiger un paramètre ?lieu= explicite dès qu'il existe une ambiguïté.
     """
     ent = getattr(request.user, "entreprise_id", None)
     if request.user.role in (CustomUser.ROLE_ADMIN, CustomUser.ROLE_SUPREME_ADMIN):
@@ -80,11 +82,17 @@ def get_lieu_mpsl(request) -> Lieu | None:
             if ent:
                 qs = qs.filter(entreprise_id=ent)
             return qs.first()
-        return Lieu.objects.filter(type_lieu=Lieu.TYPE_MPSL, entreprise_id=ent).first() if ent else None
+        if not ent:
+            return None
+        qs = Lieu.objects.filter(type_lieu=Lieu.TYPE_MPSL, entreprise_id=ent)
+        return qs.get() if qs.count() == 1 else None
     if request.user.role == CustomUser.ROLE_MPSL:
         if request.user.lieu_id and request.user.lieu and request.user.lieu.type_lieu == Lieu.TYPE_MPSL:
             return request.user.lieu
-        return Lieu.objects.filter(type_lieu=Lieu.TYPE_MPSL, entreprise_id=ent).first() if ent else None
+        if not ent:
+            return None
+        qs = Lieu.objects.filter(type_lieu=Lieu.TYPE_MPSL, entreprise_id=ent)
+        return qs.get() if qs.count() == 1 else None
     return None
 
 

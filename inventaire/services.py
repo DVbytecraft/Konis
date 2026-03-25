@@ -358,18 +358,16 @@ def enregistrer_achat_mpsl(
         )
 
         # ── Auto-créer JournalPayable si crédit ou partiel + fournisseur connu ──
+        # Journal = montant_initial TOTAL de l'achat ; montant_paye = acompte éventuel.
+        # montant_restant = montant_initial - montant_paye = dette réelle restante.
         if type_paiement in ("credit", "partiel") and fournisseur is not None and created_by is not None:
             from finance.models import JournalPayable
-            if type_paiement == "credit":
-                montant_dette = prix_total
-            else:
-                montant_dette = prix_total - montant_paye_initial
-            if montant_dette > Decimal("0"):
+            if prix_total > Decimal("0"):
                 journal = JournalPayable.objects.create(
                     creancier=fournisseur,
                     reference=f"ACHAT-MPSL-{achat.pk}",
                     description=f"Achat MPSL : {nom} x {quantite} {unite}",
-                    montant_initial=montant_dette,
+                    montant_initial=prix_total,
                     montant_paye=montant_paye_initial if type_paiement == "partiel" else Decimal("0"),
                     created_by=created_by,
                 )
@@ -442,14 +440,12 @@ def enregistrer_achats_mpsl_batch(
         prix_total_global += q * pu
 
     # Créer le JournalPayable unique (si crédit ou partiel)
+    # montant_initial = TOTAL de la commande ; montant_paye = acompte versé.
+    # montant_restant = montant_initial - montant_paye = dette fournisseur réelle.
     journal_shared = None
     if type_paiement in ("credit", "partiel") and fournisseur is not None and created_by is not None:
         from finance.models import JournalPayable
-        if type_paiement == "credit":
-            montant_dette = prix_total_global
-        else:
-            montant_dette = prix_total_global - acompte
-        if montant_dette > Decimal("0"):
+        if prix_total_global > Decimal("0"):
             noms = ", ".join(p["produit_nom"].strip() for p in produits[:3])
             if len(produits) > 3:
                 noms += f" (+{len(produits) - 3})"
@@ -457,7 +453,7 @@ def enregistrer_achats_mpsl_batch(
                 creancier=fournisseur,
                 reference=f"ACHAT-MPSL-BATCH-{lieu.pk}",
                 description=f"Achat MPSL groupé : {noms}",
-                montant_initial=montant_dette,
+                montant_initial=prix_total_global,
                 montant_paye=acompte if type_paiement == "partiel" else Decimal("0"),
                 created_by=created_by,
             )
@@ -503,13 +499,13 @@ def enregistrer_achats_mpsl_batch(
             prix_unitaire=prix_unitaire,
             prix_total=prix_total_ligne,
             type_paiement=type_paiement,
-            montant_paye_initial=acompte if (i == 0 and type_paiement == "partiel") else Decimal("0"),
+            # L'acompte global est enregistré sur CHAQUE ligne pour traçabilité
+            # (le JournalPayable unique en est la source de vérité).
+            montant_paye_initial=acompte if type_paiement == "partiel" else Decimal("0"),
+            journal_payable=journal_shared,
             notes=notes,
             created_by=created_by,
         )
-        if journal_shared is not None and i == 0:
-            achat.journal_payable = journal_shared
-            achat.save(update_fields=["journal_payable"])
 
         # Mise à jour stock — même pattern safe que enregistrer_achat_mpsl :
         # get_or_create sans verrou, puis select_for_update sur la ligne existante.
@@ -708,12 +704,14 @@ def transfert_depuis_mpsl(
                 log_request=log_request,
             )
 
-            # Créditer la destination selon l'unité
-            stock_dest, _ = Stock.objects.select_for_update().get_or_create(
+            # Créditer la destination selon l'unité.
+            # get_or_create sans lock, puis SELECT FOR UPDATE sur pk — pattern safe.
+            stock_dest, _ = Stock.objects.get_or_create(
                 produit=produit,
                 lieu=to_lieu,
                 defaults={"quantite": Decimal("0")},
             )
+            stock_dest = Stock.objects.select_for_update().get(pk=stock_dest.pk)
             u_norm = _normaliser_unite_stock(unite)
             if u_norm == "sac":
                 stock_dest.quantite += quantite
