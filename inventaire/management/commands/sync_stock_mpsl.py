@@ -298,10 +298,12 @@ class Command(BaseCommand):
         total_transferes = 0
         total_ignores = 0
         total_vides = 0
+        total_dest_manquante = 0
 
         for lieu in lieux_qs:
             boutique = self._resoudre_destination(lieu, destination_pk)
             if boutique is None:
+                total_dest_manquante += 1
                 continue
 
             type_dest = "boutique" if boutique.type_lieu == Lieu.TYPE_MAGASIN else "usine"
@@ -466,7 +468,11 @@ class Command(BaseCommand):
                     msg += f" {total_ignores} erreur(s)."
                 self.stdout.write(self.style.WARNING(msg))
         else:
-            if total_transferes > 0:
+            if total_dest_manquante > 0 and total_transferes == 0 and total_vides == 0:
+                self.stdout.write(self.style.WARNING(
+                    f"Précisez --destination=<pk> parmi la liste ci-dessus, puis relancez."
+                ))
+            elif total_transferes > 0:
                 self.stdout.write(self.style.WARNING(
                     f"DRY-RUN : {total_transferes} produit(s) à transférer, "
                     f"{total_vides} épuisé(s). — Relancer avec --commit pour appliquer."
