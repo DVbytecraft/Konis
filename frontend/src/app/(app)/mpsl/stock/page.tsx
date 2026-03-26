@@ -9,13 +9,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AlertCircle, CheckCircle2, RefreshCw, Package, ArrowRightLeft, Printer } from "lucide-react";
 
 interface StockItem {
-  produit_id: number;
+  produit_id: number | null;
   produit_nom: string;
   produit_code: string;
-  quantite: string;
-  quantite_kg: string;
+  unite: string;      // unité de cette ligne (sac, kg, tonnes…)
+  quantite: string;   // quantité dans cette unité
   poids_par_sac: string | null;
-  unite: string;
 }
 
 export default function MpslStockPage() {
@@ -93,26 +92,18 @@ export default function MpslStockPage() {
   };
 
   const afficherStock = (item: StockItem) => {
-    const hasPds = item.poids_par_sac && parseFloat(item.poids_par_sac) > 0;
-    const sacs = parseFloat(item.quantite);
-    const kg = parseFloat(item.quantite_kg);
-    if (hasPds) {
-      // Produit en sacs (peut avoir du kg converti)
-      if (sacs > 0 && kg > 0) return `${sacs} sacs + ${kg.toFixed(3)} kg`;
-      if (sacs > 0) return `${sacs} sacs`;
-      if (kg > 0) return `${kg.toFixed(3)} kg`;
-      return "0";
-    }
-    // Produit en kg : la quantité est dans quantite_kg
-    if (kg > 0) return `${kg.toFixed(2)} kg`;
-    if (sacs > 0) return `${sacs} ${item.unite}`;
-    return "0";
+    const qty = parseFloat(item.quantite);
+    if (!isFinite(qty) || qty <= 0) return "0";
+    const u = item.unite.toLowerCase();
+    if (u === "kg") return `${qty.toFixed(3)} kg`;
+    if (u === "sac" || u === "sacs") return `${qty % 1 === 0 ? qty : qty.toFixed(3)} sac${qty > 1 ? "s" : ""}`;
+    return `${qty} ${item.unite}`;
   };
 
-  const peutConvertir = (item: StockItem) => {
-    const hasPds = item.poids_par_sac && parseFloat(item.poids_par_sac) > 0;
-    return hasPds && parseFloat(item.quantite) > 0;
-  };
+  const peutConvertir = (item: StockItem) =>
+    item.produit_id !== null &&
+    (item.unite.toLowerCase() === "sac" || item.unite.toLowerCase() === "sacs") &&
+    parseFloat(item.quantite) > 0;
 
   const imprimer = () => window.print();
 
@@ -173,8 +164,8 @@ export default function MpslStockPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {stocks.map((item) => (
-                    <tr key={item.produit_id} className="border-b last:border-0 hover:bg-muted/20">
+                  {stocks.map((item, idx) => (
+                    <tr key={`${item.produit_id ?? item.produit_nom}-${item.unite}-${idx}`} className="border-b last:border-0 hover:bg-muted/20">
                       <td className="px-4 py-3 font-medium">{item.produit_nom}</td>
                       <td className="px-4 py-3 text-muted-foreground">{item.produit_code || "—"}</td>
                       <td className="px-4 py-3 text-right tabular-nums">{afficherStock(item)}</td>
