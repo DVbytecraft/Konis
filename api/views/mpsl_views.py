@@ -360,7 +360,11 @@ class TransfertMPSLViewSet(ModelViewSet):
 # --- Stock MPSL ---------------------------------------------------------------
 
 class StockMPSLView(APIView):
-    """GET /api/mpsl/stock/ : stock actuel du dépôt MPSL."""
+    """GET /api/mpsl/stock/ : stock actuel du dépôt MPSL.
+
+    Calcule depuis la source primaire (lecture seule, aucune écriture) :
+        restant = Σ(AchatMPSL) − Σ(MouvementStock déjà transférés depuis ce MPSL)
+    """
     permission_classes = [IsAuthenticated, IsMPSLRole]
 
     def get(self, request):
@@ -372,25 +376,77 @@ class StockMPSLView(APIView):
                 {"detail": "Dépôt MPSL introuvable pour ce compte."},
                 status=status.HTTP_404_NOT_FOUND,
             )
-        from inventaire.services import get_quantite_equivalente_kg
-        stocks = (
-            Stock.objects.filter(lieu=lieu)
-            .select_related("produit")
-            .order_by("produit__nom")
+
+        from inventaire.models import MouvementStock
+
+        def _d(val):
+            return Decimal(str(val)) if val is not None else Decimal("0")
+
+        # Tous les noms de produits ayant des achats enregistrés pour ce dépôt
+        noms = (
+            AchatMPSL.objects.filter(lieu=lieu)
+            .values_list("produit_nom", flat=True)
+            .distinct()
+            .order_by("produit_nom")
         )
-        return Response([
-            {
-                "produit_id": s.produit_id,
-                "produit_nom": s.produit.nom,
-                "produit_code": s.produit.code or "",
-                "quantite": str(s.quantite),
-                "quantite_kg": str(s.quantite_kg),
-                "poids_par_sac": str(s.produit.poids_par_sac) if s.produit.poids_par_sac is not None else None,
-                "unite": s.produit.unite,
-            }
-            for s in stocks
-            if get_quantite_equivalente_kg(s) > 0
-        ])
+
+        result = []
+        for nom in noms:
+            produit = Produit.objects.filter(
+                nom__iexact=nom,
+                entreprise_id=lieu.entreprise_id,
+            ).first()
+            if produit is None:
+                continue
+
+            produit_unite = (produit.unite or "kg").strip().lower()
+            achats_qs = AchatMPSL.objects.filter(lieu=lieu, produit_nom__iexact=produit.nom)
+
+            # Total acheté (lecture seule)
+            total_sac_in = _d(
+                achats_qs.filter(unite__in=("sac", "sacs")).aggregate(s=Sum("quantite"))["s"]
+            )
+            total_kg_in = _d(
+                achats_qs.filter(unite="kg").aggregate(s=Sum("quantite"))["s"]
+            ) + _d(
+                achats_qs.filter(unite__in=("tonne", "tonnes")).aggregate(s=Sum("quantite"))["s"]
+            ) * Decimal("1000")
+
+            # Total déjà transféré depuis ce MPSL vers boutiques ou usines (lecture seule)
+            deja_transfere = _d(
+                MouvementStock.objects.filter(
+                    produit=produit,
+                    transfert__from_lieu=lieu,
+                    transfert__to_lieu__type_lieu__in=(Lieu.TYPE_MAGASIN, Lieu.TYPE_USINE),
+                ).aggregate(s=Sum("quantite"))["s"]
+            )
+
+            # Quantite_kg (conversions sacs→kg déjà faites) : lecture seule depuis Stock
+            stock_obj = Stock.objects.filter(produit=produit, lieu=lieu).first()
+            converti_kg = _d(stock_obj.quantite_kg) if stock_obj else Decimal("0")
+
+            if produit_unite in ("sac", "sacs"):
+                restant_sac = max(Decimal("0"), total_sac_in - deja_transfere)
+                restant_kg = converti_kg  # sacs déjà convertis manuellement
+                if restant_sac <= 0 and restant_kg <= 0:
+                    continue
+            else:
+                restant_sac = Decimal("0")
+                restant_kg = max(Decimal("0"), total_kg_in - deja_transfere)
+                if restant_kg <= 0:
+                    continue
+
+            result.append({
+                "produit_id": produit.id,
+                "produit_nom": produit.nom,
+                "produit_code": produit.code or "",
+                "quantite": str(restant_sac),
+                "quantite_kg": str(restant_kg),
+                "poids_par_sac": str(produit.poids_par_sac) if produit.poids_par_sac is not None else None,
+                "unite": produit.unite,
+            })
+
+        return Response(result)
 
 
 # --- Conversion sacs → kg (MPSL) ---------------------------------------------
@@ -502,8 +558,56 @@ class MpslDashboardView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        from inventaire.services import get_quantite_equivalente_kg
-        stock_mpsl = Stock.objects.filter(lieu=lieu).select_related("produit")
+        # Réutilise la même logique de calcul que StockMPSLView (lecture seule)
+        from inventaire.models import MouvementStock
+
+        def _d(val):
+            return Decimal(str(val)) if val is not None else Decimal("0")
+
+        noms = (
+            AchatMPSL.objects.filter(lieu=lieu)
+            .values_list("produit_nom", flat=True)
+            .distinct()
+        )
+        stock_items = []
+        for nom in noms:
+            produit = Produit.objects.filter(
+                nom__iexact=nom, entreprise_id=lieu.entreprise_id
+            ).first()
+            if produit is None:
+                continue
+            produit_unite = (produit.unite or "kg").strip().lower()
+            achats_qs = AchatMPSL.objects.filter(lieu=lieu, produit_nom__iexact=produit.nom)
+            total_sac_in = _d(achats_qs.filter(unite__in=("sac", "sacs")).aggregate(s=Sum("quantite"))["s"])
+            total_kg_in = _d(achats_qs.filter(unite="kg").aggregate(s=Sum("quantite"))["s"]) + \
+                _d(achats_qs.filter(unite__in=("tonne", "tonnes")).aggregate(s=Sum("quantite"))["s"]) * Decimal("1000")
+            deja_transfere = _d(
+                MouvementStock.objects.filter(
+                    produit=produit,
+                    transfert__from_lieu=lieu,
+                    transfert__to_lieu__type_lieu__in=(Lieu.TYPE_MAGASIN, Lieu.TYPE_USINE),
+                ).aggregate(s=Sum("quantite"))["s"]
+            )
+            stock_obj = Stock.objects.filter(produit=produit, lieu=lieu).first()
+            converti_kg = _d(stock_obj.quantite_kg) if stock_obj else Decimal("0")
+            if produit_unite in ("sac", "sacs"):
+                restant_sac = max(Decimal("0"), total_sac_in - deja_transfere)
+                restant_kg = converti_kg
+                if restant_sac <= 0 and restant_kg <= 0:
+                    continue
+            else:
+                restant_sac = Decimal("0")
+                restant_kg = max(Decimal("0"), total_kg_in - deja_transfere)
+                if restant_kg <= 0:
+                    continue
+            stock_items.append({
+                "produit": produit.nom,
+                "quantite": str(restant_sac),
+                "quantite_kg": str(restant_kg),
+                "poids_par_sac": str(produit.poids_par_sac) if produit.poids_par_sac is not None else None,
+                "unite": produit.unite,
+            })
+
         last_achats = AchatMPSL.objects.filter(lieu=lieu).order_by("-date")[:5]
         last_transferts = (
             Transfert.objects.filter(from_lieu=lieu)
@@ -516,17 +620,7 @@ class MpslDashboardView(APIView):
 
         return Response({
             "lieu": lieu.nom,
-            "stock_mpsl": [
-                {
-                    "produit": s.produit.nom,
-                    "quantite": str(s.quantite),
-                    "quantite_kg": str(s.quantite_kg),
-                    "poids_par_sac": str(s.produit.poids_par_sac) if s.produit.poids_par_sac is not None else None,
-                    "unite": s.produit.unite,
-                }
-                for s in stock_mpsl
-                if get_quantite_equivalente_kg(s) > 0
-            ],
+            "stock_mpsl": stock_items,
             "total_achats_fcfa": str(total_achats),
             "total_transferts": total_transferts,
             "last_achats": [
