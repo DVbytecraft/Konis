@@ -100,7 +100,7 @@ class StockBoutiqueViewSet(ModelViewSet):
             )
             stock = Stock.objects.select_for_update().get(pk=stock.pk)
             stock.quantite += quantite
-            stock.save(update_fields=["quantite"])
+            stock.save(update_fields=["quantite", "updated_at"])
 
         audit_log(
             user=request.user,

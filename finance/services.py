@@ -901,7 +901,7 @@ def enregistrer_collecte(
             reference=f"COLLECTE-{collecte.pk}",
         )
         collecte.depot_banque = tx
-        collecte.save(update_fields=["depot_banque"])
+        collecte.save(update_fields=["depot_banque", "updated_at"])
 
     audit_log(
         user=created_by,
