@@ -97,15 +97,22 @@ export default function MpslStockPage() {
     const sacs = parseFloat(item.quantite);
     const kg = parseFloat(item.quantite_kg);
     if (hasPds) {
+      // Produit en sacs (peut avoir du kg converti)
       if (sacs > 0 && kg > 0) return `${sacs} sacs + ${kg.toFixed(3)} kg`;
       if (sacs > 0) return `${sacs} sacs`;
       if (kg > 0) return `${kg.toFixed(3)} kg`;
       return "0";
     }
-    return `${sacs} ${item.unite}`;
+    // Produit en kg : la quantité est dans quantite_kg
+    if (kg > 0) return `${kg.toFixed(2)} kg`;
+    if (sacs > 0) return `${sacs} ${item.unite}`;
+    return "0";
   };
 
-  const peutConvertir = (item: StockItem) => parseFloat(item.quantite) > 0;
+  const peutConvertir = (item: StockItem) => {
+    const hasPds = item.poids_par_sac && parseFloat(item.poids_par_sac) > 0;
+    return hasPds && parseFloat(item.quantite) > 0;
+  };
 
   const imprimer = () => window.print();
 

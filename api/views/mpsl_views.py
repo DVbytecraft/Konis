@@ -400,51 +400,57 @@ class StockMPSLView(APIView):
                 continue
 
             produit_unite = (produit.unite or "kg").strip().lower()
-            achats_qs = AchatMPSL.objects.filter(lieu=lieu, produit_nom__iexact=produit.nom)
-
-            # Total acheté (lecture seule)
-            total_sac_in = _d(
-                achats_qs.filter(unite__in=("sac", "sacs")).aggregate(s=Sum("quantite"))["s"]
-            )
-            total_kg_in = _d(
-                achats_qs.filter(unite="kg").aggregate(s=Sum("quantite"))["s"]
-            ) + _d(
-                achats_qs.filter(unite__in=("tonne", "tonnes")).aggregate(s=Sum("quantite"))["s"]
-            ) * Decimal("1000")
-
-            # Total déjà transféré depuis ce MPSL vers boutiques ou usines (lecture seule)
-            deja_transfere = _d(
-                MouvementStock.objects.filter(
-                    produit=produit,
-                    transfert__from_lieu=lieu,
-                    transfert__to_lieu__type_lieu__in=(Lieu.TYPE_MAGASIN, Lieu.TYPE_USINE),
-                ).aggregate(s=Sum("quantite"))["s"]
-            )
-
-            # Quantite_kg (conversions sacs→kg déjà faites) : lecture seule depuis Stock
             stock_obj = Stock.objects.filter(produit=produit, lieu=lieu).first()
-            converti_kg = _d(stock_obj.quantite_kg) if stock_obj else Decimal("0")
 
             if produit_unite in ("sac", "sacs"):
-                restant_sac = max(Decimal("0"), total_sac_in - deja_transfere)
-                restant_kg = converti_kg  # sacs déjà convertis manuellement
-                if restant_sac <= 0 and restant_kg <= 0:
+                # Produits en sacs : la table Stock est la source de vérité.
+                # _prelever_stock_unite gère correctement sacs, kg convertis et
+                # auto-conversions — MouvementStock.quantite peut être en sacs OU
+                # en kg selon le type de transfert, donc on ne peut pas soustraire
+                # directement les AchatMPSL sacs. La table Stock est toujours juste.
+                quantite_sac = _d(stock_obj.quantite)    if stock_obj else Decimal("0")
+                quantite_kg  = _d(stock_obj.quantite_kg) if stock_obj else Decimal("0")
+                if quantite_sac <= 0 and quantite_kg <= 0:
                     continue
+                result.append({
+                    "produit_id": produit.id,
+                    "produit_nom": produit.nom,
+                    "produit_code": produit.code or "",
+                    "quantite": str(quantite_sac),
+                    "quantite_kg": str(quantite_kg),
+                    "poids_par_sac": str(produit.poids_par_sac) if produit.poids_par_sac is not None else None,
+                    "unite": produit.unite,
+                })
             else:
-                restant_sac = Decimal("0")
+                # Produits en kg : MouvementStock.quantite est toujours en kg pour
+                # les produits kg (_valider_unite_transfert n'autorise que kg/tonnes).
+                # Stock.quantite_kg peut être désynchronisé → on calcule depuis la source.
+                achats_qs = AchatMPSL.objects.filter(lieu=lieu, produit_nom__iexact=produit.nom)
+                pps = produit.poids_par_sac or Decimal("0")
+                total_kg_in = (
+                    _d(achats_qs.filter(unite="kg").aggregate(s=Sum("quantite"))["s"])
+                    + _d(achats_qs.filter(unite__in=("tonne", "tonnes")).aggregate(s=Sum("quantite"))["s"]) * Decimal("1000")
+                    + _d(achats_qs.filter(unite__in=("sac", "sacs")).aggregate(s=Sum("quantite"))["s"]) * pps
+                )
+                deja_transfere = _d(
+                    MouvementStock.objects.filter(
+                        produit=produit,
+                        transfert__from_lieu=lieu,
+                        transfert__to_lieu__type_lieu__in=(Lieu.TYPE_MAGASIN, Lieu.TYPE_USINE),
+                    ).aggregate(s=Sum("quantite"))["s"]
+                )
                 restant_kg = max(Decimal("0"), total_kg_in - deja_transfere)
                 if restant_kg <= 0:
                     continue
-
-            result.append({
-                "produit_id": produit.id,
-                "produit_nom": produit.nom,
-                "produit_code": produit.code or "",
-                "quantite": str(restant_sac),
-                "quantite_kg": str(restant_kg),
-                "poids_par_sac": str(produit.poids_par_sac) if produit.poids_par_sac is not None else None,
-                "unite": produit.unite,
-            })
+                result.append({
+                    "produit_id": produit.id,
+                    "produit_nom": produit.nom,
+                    "produit_code": produit.code or "",
+                    "quantite": "0",
+                    "quantite_kg": str(restant_kg),
+                    "poids_par_sac": str(produit.poids_par_sac) if produit.poids_par_sac is not None else None,
+                    "unite": produit.unite,
+                })
 
         return Response(result)
 
@@ -577,33 +583,35 @@ class MpslDashboardView(APIView):
             if produit is None:
                 continue
             produit_unite = (produit.unite or "kg").strip().lower()
-            achats_qs = AchatMPSL.objects.filter(lieu=lieu, produit_nom__iexact=produit.nom)
-            total_sac_in = _d(achats_qs.filter(unite__in=("sac", "sacs")).aggregate(s=Sum("quantite"))["s"])
-            total_kg_in = _d(achats_qs.filter(unite="kg").aggregate(s=Sum("quantite"))["s"]) + \
-                _d(achats_qs.filter(unite__in=("tonne", "tonnes")).aggregate(s=Sum("quantite"))["s"]) * Decimal("1000")
-            deja_transfere = _d(
-                MouvementStock.objects.filter(
-                    produit=produit,
-                    transfert__from_lieu=lieu,
-                    transfert__to_lieu__type_lieu__in=(Lieu.TYPE_MAGASIN, Lieu.TYPE_USINE),
-                ).aggregate(s=Sum("quantite"))["s"]
-            )
             stock_obj = Stock.objects.filter(produit=produit, lieu=lieu).first()
-            converti_kg = _d(stock_obj.quantite_kg) if stock_obj else Decimal("0")
             if produit_unite in ("sac", "sacs"):
-                restant_sac = max(Decimal("0"), total_sac_in - deja_transfere)
-                restant_kg = converti_kg
-                if restant_sac <= 0 and restant_kg <= 0:
+                quantite_sac = _d(stock_obj.quantite)    if stock_obj else Decimal("0")
+                quantite_kg  = _d(stock_obj.quantite_kg) if stock_obj else Decimal("0")
+                if quantite_sac <= 0 and quantite_kg <= 0:
                     continue
             else:
-                restant_sac = Decimal("0")
-                restant_kg = max(Decimal("0"), total_kg_in - deja_transfere)
-                if restant_kg <= 0:
+                achats_qs = AchatMPSL.objects.filter(lieu=lieu, produit_nom__iexact=produit.nom)
+                pps = produit.poids_par_sac or Decimal("0")
+                total_kg_in = (
+                    _d(achats_qs.filter(unite="kg").aggregate(s=Sum("quantite"))["s"])
+                    + _d(achats_qs.filter(unite__in=("tonne", "tonnes")).aggregate(s=Sum("quantite"))["s"]) * Decimal("1000")
+                    + _d(achats_qs.filter(unite__in=("sac", "sacs")).aggregate(s=Sum("quantite"))["s"]) * pps
+                )
+                deja_transfere = _d(
+                    MouvementStock.objects.filter(
+                        produit=produit,
+                        transfert__from_lieu=lieu,
+                        transfert__to_lieu__type_lieu__in=(Lieu.TYPE_MAGASIN, Lieu.TYPE_USINE),
+                    ).aggregate(s=Sum("quantite"))["s"]
+                )
+                quantite_sac = Decimal("0")
+                quantite_kg  = max(Decimal("0"), total_kg_in - deja_transfere)
+                if quantite_kg <= 0:
                     continue
             stock_items.append({
                 "produit": produit.nom,
-                "quantite": str(restant_sac),
-                "quantite_kg": str(restant_kg),
+                "quantite": str(quantite_sac),
+                "quantite_kg": str(quantite_kg),
                 "poids_par_sac": str(produit.poids_par_sac) if produit.poids_par_sac is not None else None,
                 "unite": produit.unite,
             })

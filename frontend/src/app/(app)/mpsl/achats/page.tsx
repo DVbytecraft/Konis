@@ -40,6 +40,13 @@ interface LigneProduit {
   notes: string;
 }
 
+interface CatalogueProduit {
+  id: number;
+  nom: string;
+  code: string;
+  unite: string;
+}
+
 type ApiList<T> = T[] | { results?: T[] };
 function toList<T>(r: ApiList<T>): T[] {
   if (Array.isArray(r)) return r;
@@ -69,6 +76,11 @@ export default function MpslAchatsPage() {
   const [loading, setLoading]         = useState(false);
   const [err, setErr]                 = useState("");
 
+  // Catalogue produits pour autocomplete
+  const [catalogue, setCatalogue]     = useState<CatalogueProduit[]>([]);
+  const [acSuggestions, setAcSuggestions] = useState<Record<number, CatalogueProduit[]>>({});
+  const [acVisible, setAcVisible]     = useState<Record<number, boolean>>({});
+
   // Paiement
   const [typePaiement, setTypePaiement] = useState<TypePaiement>("cash");
   const [acompte, setAcompte]           = useState("");
@@ -92,6 +104,33 @@ export default function MpslAchatsPage() {
   }, []);
 
   useEffect(() => { load().catch(() => {}); }, [load]);
+
+  // Charger le catalogue une seule fois
+  useEffect(() => {
+    apiFetch<CatalogueProduit[]>("/mpsl/catalogue/")
+      .then((res) => setCatalogue(Array.isArray(res) ? res : []))
+      .catch(() => {});
+  }, []);
+
+  const handleProduitNomChange = (i: number, val: string) => {
+    setLigne(i, { produit_nom: val });
+    if (!val.trim()) {
+      setAcSuggestions((p) => ({ ...p, [i]: [] }));
+      setAcVisible((p) => ({ ...p, [i]: false }));
+      return;
+    }
+    const q = val.toLowerCase();
+    const matches = catalogue.filter((c) => c.nom.toLowerCase().includes(q)).slice(0, 8);
+    setAcSuggestions((p) => ({ ...p, [i]: matches }));
+    setAcVisible((p) => ({ ...p, [i]: true }));
+  };
+
+  const selectSuggestion = (i: number, produit: CatalogueProduit) => {
+    const patch: Partial<LigneProduit> = { produit_nom: produit.nom };
+    if (produit.unite) patch.unite = produit.unite === "sac" ? "sacs" : produit.unite;
+    setLigne(i, patch);
+    setAcVisible((p) => ({ ...p, [i]: false }));
+  };
 
   // Recherche fournisseur debounced
   useEffect(() => {
@@ -353,13 +392,34 @@ export default function MpslAchatsPage() {
 
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
                 {/* Nom produit */}
-                <div className="flex flex-col gap-1 sm:col-span-2 lg:col-span-1">
+                <div className="relative flex flex-col gap-1 sm:col-span-2 lg:col-span-1">
                   <label className="text-xs text-muted-foreground">Nom du produit *</label>
                   <Input
                     placeholder="Ex : Maïs jaune, Son de blé…"
                     value={l.produit_nom}
-                    onChange={(e) => setLigne(i, { produit_nom: e.target.value })}
+                    onChange={(e) => handleProduitNomChange(i, e.target.value)}
+                    onBlur={() => setTimeout(() => setAcVisible((p) => ({ ...p, [i]: false })), 150)}
+                    onFocus={() => {
+                      if ((acSuggestions[i] ?? []).length > 0)
+                        setAcVisible((p) => ({ ...p, [i]: true }));
+                    }}
+                    autoComplete="off"
                   />
+                  {acVisible[i] && (acSuggestions[i] ?? []).length > 0 && (
+                    <ul className="absolute z-50 top-full left-0 right-0 mt-0.5 border rounded-md bg-popover shadow-md max-h-48 overflow-y-auto">
+                      {(acSuggestions[i] ?? []).map((p) => (
+                        <li
+                          key={p.id}
+                          className="px-3 py-1.5 text-xs hover:bg-muted cursor-pointer"
+                          onMouseDown={(e) => { e.preventDefault(); selectSuggestion(i, p); }}
+                        >
+                          <span className="font-medium">{p.nom}</span>
+                          {p.code && <span className="text-muted-foreground ml-2">{p.code}</span>}
+                          <span className="text-muted-foreground ml-2">({p.unite})</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
 
                 {/* Quantité */}
