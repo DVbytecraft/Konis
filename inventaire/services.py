@@ -726,6 +726,100 @@ def transfert_depuis_mpsl(
                 raise ErreurStock(f"Unité non supportée : '{unite}'.")
 
     return transfert
+
+
+# ─── Transferts depuis boutique ───────────────────────────────────────────────
+
+def transfert_depuis_boutique(
+    from_boutique: Lieu,
+    to_lieu: Lieu,
+    lignes: list[tuple],
+    *,
+    updated_by=None,
+    log_request=None,
+) -> Transfert:
+    """
+    Transfère des produits depuis une boutique vers une autre boutique, une usine ou un MPSL.
+
+    Mêmes garanties que transfert_depuis_mpsl :
+      - Atomique, select_for_update, isolation cross-tenant.
+      - Débit source via _prelever_stock_unite (gère sacs/kg/conversions auto).
+      - Crédit destination dans le bon champ (quantite ou quantite_kg selon l'unité).
+      - MouvementStock créé pour l'historique/traçabilité.
+
+    lignes : liste de tuples (produit, quantite, unite)
+    """
+    if from_boutique.type_lieu != Lieu.TYPE_MAGASIN:
+        raise ErreurStock(f"Le lieu source '{from_boutique}' n'est pas une boutique.")
+    if to_lieu.type_lieu not in (Lieu.TYPE_MAGASIN, Lieu.TYPE_USINE, Lieu.TYPE_MPSL):
+        raise ErreurStock(
+            f"La destination '{to_lieu}' doit être une boutique, une usine ou un MPSL."
+        )
+    if from_boutique.entreprise_id != to_lieu.entreprise_id:
+        raise ErreurStock("Transfert inter-entreprises interdit.")
+    if from_boutique.id == to_lieu.id:
+        raise ErreurStock("Origine et destination doivent être différents.")
+
+    with transaction.atomic():
+        normalized: list[tuple] = []
+        for line in lignes:
+            produit = line[0]
+            quantite = Decimal(str(line[1]))
+            unite = line[2] if len(line) > 2 else getattr(produit, "unite", "kg")
+            if quantite <= 0:
+                raise ErreurStock(f"Quantité invalide pour '{produit}' : {quantite}.")
+            _valider_unite_transfert(produit, unite, from_boutique)
+            try:
+                stock_src = Stock.objects.select_for_update().get(
+                    produit=produit, lieu=from_boutique
+                )
+            except Stock.DoesNotExist:
+                raise ErreurStock(f"Aucun stock pour '{produit}' à '{from_boutique}'.")
+            _verifier_stock_disponible(stock_src, quantite, unite)
+            normalized.append((produit, quantite, unite))
+
+        transfert = Transfert.objects.create(from_lieu=from_boutique, to_lieu=to_lieu)
+
+        for produit, quantite, unite in normalized:
+            MouvementStock.objects.create(
+                transfert=transfert,
+                produit=produit,
+                quantite=quantite,
+                unit_price=Decimal("0"),
+            )
+
+            # Débit stock source
+            _prelever_stock_unite(
+                stock=Stock.objects.get(produit=produit, lieu=from_boutique),
+                quantite=quantite,
+                unite=unite,
+                updated_by=updated_by,
+                log_request=log_request,
+            )
+
+            # Crédit stock destination — même logique que transfert_depuis_mpsl
+            stock_dest, _ = Stock.objects.get_or_create(
+                produit=produit,
+                lieu=to_lieu,
+                defaults={"quantite": Decimal("0")},
+            )
+            stock_dest = Stock.objects.select_for_update().get(pk=stock_dest.pk)
+            u_norm = _normaliser_unite_stock(unite)
+            if u_norm == "sac":
+                stock_dest.quantite += quantite
+                stock_dest.save(update_fields=["quantite", "updated_at"])
+            elif u_norm == "kg":
+                stock_dest.quantite_kg += quantite
+                stock_dest.save(update_fields=["quantite_kg", "updated_at"])
+            elif u_norm == "tonne":
+                stock_dest.quantite_kg += _kg_depuis_unite(quantite, u_norm)
+                stock_dest.save(update_fields=["quantite_kg", "updated_at"])
+            else:
+                raise ErreurStock(f"Unité non supportée : '{unite}'.")
+
+    return transfert
+
+
 def transfert_direct_usine_vers(
     from_usine: Lieu,
     to_lieu: Lieu,

@@ -6,7 +6,7 @@ from rest_framework.routers import DefaultRouter
 
 from api.views.auth_views import LoginView, RefreshView, LogoutView, MeView
 from api.views.health_views import HealthView, HealthCheckView
-from api.views.boutique_views import StockBoutiqueViewSet, ProduitBoutiqueViewSet, VenteBoutiqueViewSet, MoutureSeuleView, MoutureStatsView, MoutureExportView, MouturePdfExportView, TicketReprintView, DashboardBoutiqueView, ClientsBoutiqueView, CreanceBoutiqueViewSet, ConvertirSacEnKgView
+from api.views.boutique_views import StockBoutiqueViewSet, ProduitBoutiqueViewSet, VenteBoutiqueViewSet, MoutureSeuleView, MoutureStatsView, MoutureExportView, MouturePdfExportView, TicketReprintView, DashboardBoutiqueView, ClientsBoutiqueView, CreanceBoutiqueViewSet, ConvertirSacEnKgView, TransfertBoutiqueView, DestinationsBoutiqueTransfertView
 from api.views.admin_views import (
     EntrepriseViewSet,
     FactoryViewSet,
@@ -163,6 +163,8 @@ urlpatterns = [
     path("boutique/dashboard/", DashboardBoutiqueView.as_view(), name="boutique-dashboard"),
     path("boutique/clients/", ClientsBoutiqueView.as_view(), name="boutique-clients"),
     path("boutique/stock/<int:produit_id>/convertir/", ConvertirSacEnKgView.as_view(), name="boutique-stock-convertir"),
+    path("boutique/transferts/destinations/", DestinationsBoutiqueTransfertView.as_view(), name="boutique-transferts-destinations"),
+    path("boutique/transferts/", TransfertBoutiqueView.as_view(), name="boutique-transferts"),
     path("boutique/", include(router_boutique.urls)),
     path("admin/clients/", ClientsAdminView.as_view(), name="admin-clients"),
     path("admin/corrections/historique/", AdminCorrectionHistoriqueView.as_view(), name="admin-correction-historique"),

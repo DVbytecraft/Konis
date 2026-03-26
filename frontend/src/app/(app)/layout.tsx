@@ -61,6 +61,7 @@ const navByRole: Record<string, { href: string; label: string; icon: React.Compo
     { href: "/boutique", label: "Tableau de bord", icon: LayoutDashboard },
     { href: "/boutique/caisse", label: "Caisse", icon: Store },
     { href: "/boutique/stock", label: "Stock", icon: Package },
+    { href: "/boutique/transferts", label: "Transferts", icon: Truck },
     { href: "/boutique/creances", label: "Créances", icon: AlertCircle },
     { href: "/boutique/clients", label: "Clients", icon: Users },
     { href: "/boutique/mouture", label: "Mouture", icon: Wheat },

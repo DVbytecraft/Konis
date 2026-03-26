@@ -1113,3 +1113,217 @@ class CreanceBoutiqueViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet)
         resp_data = JournalCreanceSerializer(journal).data
         guard.success(resp_data)
         return Response(resp_data)
+
+
+# ─── Transferts depuis boutique ───────────────────────────────────────────────
+
+class DestinationsBoutiqueTransfertView(APIView):
+    """
+    GET /api/boutique/transferts/destinations/
+    Liste les destinations disponibles pour un transfert depuis la boutique :
+      - Autres boutiques de la même entreprise
+      - Usines de la même entreprise
+      - MPSL de la même entreprise
+    La boutique source est exclue. Isolation cross-tenant garantie.
+    """
+    permission_classes = [IsAuthenticated, IsBoutiqueRole | IsAdminRole]
+
+    def get(self, request):
+        lieu = get_lieu_boutique(request)
+        if not lieu:
+            return Response(
+                {"detail": "Boutique introuvable."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        qs = Lieu.objects.filter(
+            entreprise_id=lieu.entreprise_id,
+            type_lieu__in=(Lieu.TYPE_MAGASIN, Lieu.TYPE_USINE, Lieu.TYPE_MPSL),
+        ).exclude(pk=lieu.pk).order_by("type_lieu", "nom")
+
+        return Response([
+            {
+                "id": d.pk,
+                "nom": d.nom,
+                "type_lieu": d.type_lieu,
+                "type_label": {
+                    Lieu.TYPE_MAGASIN: "boutique",
+                    Lieu.TYPE_USINE: "usine",
+                    Lieu.TYPE_MPSL: "MPSL",
+                }.get(d.type_lieu, d.type_lieu),
+            }
+            for d in qs
+        ])
+
+
+class TransfertBoutiqueView(APIView):
+    """
+    GET  /api/boutique/transferts/  — historique des transferts sortants de la boutique.
+    POST /api/boutique/transferts/  — créer un transfert depuis la boutique.
+
+    Body POST :
+      {
+        "to_lieu": <int>,
+        "lignes": [
+          {"produit_id": <int>, "quantite": "<decimal>", "unite": "sacs"|"kg"|"tonnes"},
+          ...
+        ]
+      }
+
+    Règles de sécurité :
+      - from_boutique forcé à request.user.lieu (boutique) ou ?lieu= (admin).
+      - to_lieu doit appartenir à la même entreprise.
+      - Isolation cross-tenant vérifiée dans le service.
+      - Idempotency-Key obligatoire.
+    """
+    permission_classes = [IsAuthenticated, IsBoutiqueRole | IsAdminRole]
+
+    def get(self, request):
+        from inventaire.models import Transfert
+
+        lieu = get_lieu_boutique(request)
+        if not lieu:
+            return Response(
+                {"detail": "Boutique introuvable."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        transferts = (
+            Transfert.objects.filter(from_lieu=lieu)
+            .select_related("from_lieu", "to_lieu")
+            .prefetch_related("mouvements__produit")
+            .order_by("-date")[:50]
+        )
+        return Response([
+            {
+                "id": t.pk,
+                "date": t.date.isoformat(),
+                "from_lieu": t.from_lieu.nom,
+                "to_lieu": t.to_lieu.nom,
+                "to_lieu_type": {
+                    Lieu.TYPE_MAGASIN: "boutique",
+                    Lieu.TYPE_USINE: "usine",
+                    Lieu.TYPE_MPSL: "MPSL",
+                }.get(t.to_lieu.type_lieu, t.to_lieu.type_lieu),
+                "mouvements": [
+                    {
+                        "produit": m.produit.nom,
+                        "quantite": str(m.quantite),
+                        "unite": m.produit.unite or "kg",
+                    }
+                    for m in t.mouvements.all()
+                ],
+            }
+            for t in transferts
+        ])
+
+    def post(self, request):
+        from api.idempotency import IdempotencyGuard
+        from decimal import InvalidOperation
+        from inventaire.services import transfert_depuis_boutique
+
+        guard = IdempotencyGuard(request, "transfert_boutique")
+        early = guard.check()
+        if early is not None:
+            return early
+
+        lieu = get_lieu_boutique(request)
+        if not lieu:
+            return Response(
+                {"detail": "Boutique introuvable."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        to_lieu_id = request.data.get("to_lieu")
+        lignes_raw = request.data.get("lignes", [])
+
+        if not to_lieu_id:
+            return Response(
+                {"detail": "to_lieu est obligatoire."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not lignes_raw or not isinstance(lignes_raw, list):
+            return Response(
+                {"detail": "lignes est obligatoire et doit être une liste non vide."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Résoudre destination — anti-IDOR : scope par entreprise
+        try:
+            to_lieu = Lieu.objects.get(
+                pk=to_lieu_id,
+                entreprise_id=request.user.entreprise_id,
+                type_lieu__in=(Lieu.TYPE_MAGASIN, Lieu.TYPE_USINE, Lieu.TYPE_MPSL),
+            )
+        except Lieu.DoesNotExist:
+            return Response(
+                {"detail": "Destination introuvable ou hors entreprise."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Construire les lignes service
+        lignes = []
+        for i, l in enumerate(lignes_raw):
+            produit_id = l.get("produit_id")
+            quantite_raw = l.get("quantite")
+            unite = (l.get("unite") or "kg").strip()
+
+            if not produit_id or not quantite_raw:
+                return Response(
+                    {"detail": f"Ligne {i + 1} : produit_id et quantite sont obligatoires."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            try:
+                quantite = Decimal(str(quantite_raw))
+                if quantite <= 0:
+                    raise ValueError
+            except (InvalidOperation, ValueError):
+                return Response(
+                    {"detail": f"Ligne {i + 1} : quantite invalide."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Anti-IDOR : le produit doit appartenir à l'entreprise
+            try:
+                produit = Produit.objects.get(
+                    pk=produit_id,
+                    entreprise_id=request.user.entreprise_id,
+                )
+            except Produit.DoesNotExist:
+                return Response(
+                    {"detail": f"Ligne {i + 1} : produit introuvable."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            lignes.append((produit, quantite, unite))
+
+        try:
+            transfert = transfert_depuis_boutique(
+                from_boutique=lieu,
+                to_lieu=to_lieu,
+                lignes=lignes,
+                updated_by=request.user,
+                log_request=request,
+            )
+        except ErreurStock as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        audit_log(
+            user=request.user,
+            action="transfert_depuis_boutique",
+            object_type="Transfert",
+            object_id=transfert.pk,
+            extra={
+                "from_lieu": lieu.nom,
+                "to_lieu": to_lieu.nom,
+                "nb_lignes": len(lignes),
+            },
+            request=request,
+        )
+
+        resp_data = {
+            "id": transfert.pk,
+            "date": transfert.date.isoformat(),
+            "from_lieu": lieu.nom,
+            "to_lieu": to_lieu.nom,
+            "lignes": len(lignes),
+        }
+        guard.success(resp_data)
+        return Response(resp_data, status=status.HTTP_201_CREATED)
