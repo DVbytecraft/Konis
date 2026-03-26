@@ -6,13 +6,14 @@ MODE 1 — Synchronisation du stock (défaut)
     et des MouvementStock existants. Utile pour les achats antérieurs à l'activation
     de la mise à jour stock automatique.
 
-MODE 2 — Transfert vers boutique (--transferer)
+MODE 2 — Transfert vers boutique ou usine (--transferer)
     Pour chaque produit ayant du stock restant au dépôt MPSL, crée un Transfert
-    + MouvementStock vers la boutique indiquée par --destination. Réutilise le
-    service transfert_depuis_mpsl() : atomique, contrôlé, auditable.
+    + MouvementStock vers la boutique ou l'usine indiquée par --destination.
+    Réutilise le service transfert_depuis_mpsl() : atomique, contrôlé, auditable.
 
+    Destinations autorisées : boutique (magasin) OU usine.
     Règle : on ne touche qu'aux quantités disponibles en stock MPSL.
-            Les transferts existants (vers boutiques ou usines) ne sont jamais modifiés.
+            Les transferts existants ne sont jamais modifiés ni supprimés.
 
 Usage :
     python manage.py sync_stock_mpsl                               # Mode 1 dry-run
@@ -24,12 +25,12 @@ Usage :
 """
 from decimal import Decimal
 
-from django.core.management.base import BaseCommand, CommandError
+from django.core.management.base import BaseCommand
 from django.db import transaction
-from django.db.models import Q, Sum
+from django.db.models import Sum
 
 from core.models import Lieu
-from inventaire.models import AchatMPSL, MouvementStock, Stock, Transfert
+from inventaire.models import AchatMPSL, MouvementStock, Stock
 from inventaire.services import ErreurStock, transfert_depuis_mpsl
 from produits.models import Produit
 
@@ -42,7 +43,7 @@ def _d(val) -> Decimal:
 class Command(BaseCommand):
     help = (
         "Mode 1 : synchronise le stock MPSL depuis les achats/transferts. "
-        "Mode 2 (--transferer) : crée les transferts vers boutique pour le stock restant."
+        "Mode 2 (--transferer) : crée les transferts vers boutique ou usine pour le stock restant."
     )
 
     def add_arguments(self, parser):
@@ -62,13 +63,13 @@ class Command(BaseCommand):
             "--transferer",
             action="store_true",
             default=False,
-            help="Mode 2 : crée les transferts vers boutique pour le stock restant.",
+            help="Mode 2 : crée les transferts vers boutique ou usine pour le stock restant.",
         )
         parser.add_argument(
             "--destination",
             type=int,
             default=None,
-            help="Boutique de destination (pk) — requis en mode --transferer si plusieurs boutiques.",
+            help="Boutique ou usine de destination (pk) — requis en mode --transferer si plusieurs lieux disponibles.",
         )
 
     def handle(self, *args, **options):
@@ -278,11 +279,12 @@ class Command(BaseCommand):
             if boutique is None:
                 continue
 
+            type_dest = "boutique" if boutique.type_lieu == Lieu.TYPE_MAGASIN else "usine"
             self.stdout.write(
-                f"\n── Lieu MPSL : {lieu.nom} (#{lieu.pk}) → {boutique.nom} (#{boutique.pk})"
+                f"\n── Lieu MPSL : {lieu.nom} (#{lieu.pk}) → {boutique.nom} (#{boutique.pk}, {type_dest})"
             )
             self.stdout.write(
-                f"   {'Produit':<30} {'Stock MPSL':>12} {'Déjà boutiques':>16} "
+                f"   {'Produit':<30} {'Stock MPSL':>12} {'Déjà transféré':>16} "
                 f"{'À transférer':>14}  Statut"
             )
             self.stdout.write("   " + "─" * 95)
@@ -308,13 +310,13 @@ class Command(BaseCommand):
                 qte_sac = _d(stock.quantite)
                 qte_kg  = _d(stock.quantite_kg)
 
-                # Total historique déjà envoyé vers les boutiques (magasins)
-                deja_boutiques = _d(
+                # Total historique déjà envoyé vers boutiques et usines depuis ce MPSL
+                deja_transfere = _d(
                     MouvementStock.objects
                     .filter(
                         produit=produit,
                         transfert__from_lieu=lieu,
-                        transfert__to_lieu__type_lieu=Lieu.TYPE_MAGASIN,
+                        transfert__to_lieu__type_lieu__in=(Lieu.TYPE_MAGASIN, Lieu.TYPE_USINE),
                     )
                     .aggregate(s=Sum("quantite"))["s"]
                 )
@@ -324,13 +326,13 @@ class Command(BaseCommand):
                     a_transferer = qte_sac
                     unite_transfer = "sacs"
                     stock_str    = f"{qte_sac:.0f} sacs"
-                    deja_str     = f"{deja_boutiques:.0f} sacs"
+                    deja_str     = f"{deja_transfere:.0f} sacs"
                     transfer_str = f"{a_transferer:.0f} sacs"
                 else:
                     a_transferer = qte_kg
                     unite_transfer = "kg"
                     stock_str    = f"{qte_kg:.2f} kg"
-                    deja_str     = f"{deja_boutiques:.2f} kg"
+                    deja_str     = f"{deja_transfere:.2f} kg"
                     transfer_str = f"{a_transferer:.2f} kg"
 
                 nom_tronc = (produit.nom[:28] + "..") if len(produit.nom) > 30 else produit.nom
@@ -396,37 +398,43 @@ class Command(BaseCommand):
 
     def _resoudre_destination(self, lieu_mpsl, destination_pk):
         """
-        Résout la boutique de destination pour un lieu MPSL donné.
-        - Si --destination=<pk> fourni : vérifie que c'est un magasin de la même entreprise.
-        - Sinon : auto-sélection si une seule boutique dans l'entreprise.
-        - Si plusieurs boutiques et pas de --destination : erreur explicite.
+        Résout la destination (boutique OU usine) pour un lieu MPSL donné.
+        - Si --destination=<pk> fourni : vérifie que c'est un magasin ou une usine
+          de la même entreprise.
+        - Sinon : auto-sélection si un seul lieu destination dans l'entreprise.
+        - Si plusieurs destinations et pas de --destination : erreur explicite avec liste.
         """
         ent_id = lieu_mpsl.entreprise_id
-        boutiques_qs = Lieu.objects.filter(type_lieu=Lieu.TYPE_MAGASIN, entreprise_id=ent_id)
+        destinations_qs = Lieu.objects.filter(
+            type_lieu__in=(Lieu.TYPE_MAGASIN, Lieu.TYPE_USINE),
+            entreprise_id=ent_id,
+        )
 
         if destination_pk:
-            boutique = boutiques_qs.filter(pk=destination_pk).first()
-            if boutique is None:
+            dest = destinations_qs.filter(pk=destination_pk).first()
+            if dest is None:
                 self.stdout.write(self.style.ERROR(
-                    f"   ✗ Boutique #{destination_pk} introuvable ou hors entreprise '{lieu_mpsl.entreprise}'."
+                    f"   ✗ Lieu #{destination_pk} introuvable, hors entreprise "
+                    f"'{lieu_mpsl.entreprise}', ou n'est pas une boutique/usine."
                 ))
                 return None
-            return boutique
+            return dest
 
-        count = boutiques_qs.count()
+        count = destinations_qs.count()
         if count == 1:
-            return boutiques_qs.first()
+            return destinations_qs.first()
         if count == 0:
             self.stdout.write(self.style.ERROR(
-                f"   ✗ Aucune boutique dans l'entreprise '{lieu_mpsl.entreprise}'."
+                f"   ✗ Aucune boutique ni usine dans l'entreprise '{lieu_mpsl.entreprise}'."
             ))
             return None
 
-        # Plusieurs boutiques → afficher la liste et demander --destination
+        # Plusieurs destinations → afficher la liste et demander --destination
         self.stdout.write(self.style.ERROR(
-            f"   ✗ {count} boutiques disponibles dans '{lieu_mpsl.entreprise}'. "
+            f"   ✗ {count} destinations disponibles dans '{lieu_mpsl.entreprise}'. "
             f"Précise --destination=<pk> :"
         ))
-        for b in boutiques_qs.order_by("nom"):
-            self.stdout.write(f"       #{b.pk}  {b.nom}")
+        for d in destinations_qs.order_by("type_lieu", "nom"):
+            label = "boutique" if d.type_lieu == Lieu.TYPE_MAGASIN else "usine"
+            self.stdout.write(f"       #{d.pk}  {d.nom}  ({label})")
         return None
