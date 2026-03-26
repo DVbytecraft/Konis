@@ -7,20 +7,23 @@ MODE 1 — Synchronisation du stock (défaut)
     de la mise à jour stock automatique.
 
 MODE 2 — Transfert vers boutique ou usine (--transferer)
-    Pour chaque produit ayant du stock restant au dépôt MPSL, crée un Transfert
-    + MouvementStock vers la boutique ou l'usine indiquée par --destination.
-    Réutilise le service transfert_depuis_mpsl() : atomique, contrôlé, auditable.
+    Calcule le stock restant RÉEL depuis la source primaire :
+        restant = Σ(AchatMPSL) − Σ(MouvementStock déjà transférés)
+    Affiche la liste avec comparaison vs table Stock (⚠ si désynchronisé).
+    En --commit :
+      1. Synchronise la table Stock (comme Mode 1) pour garantir la cohérence.
+      2. Crée le Transfert + MouvementStock via transfert_depuis_mpsl() (atomique).
+    Aucune donnée existante n'est supprimée ni modifiée.
 
     Destinations autorisées : boutique (magasin) OU usine.
-    Règle : on ne touche qu'aux quantités disponibles en stock MPSL.
-            Les transferts existants ne sont jamais modifiés ni supprimés.
 
 Usage :
-    python manage.py sync_stock_mpsl                               # Mode 1 dry-run
-    python manage.py sync_stock_mpsl --commit                      # Mode 1 appliquer
-    python manage.py sync_stock_mpsl --lieu=<pk>                   # Restreindre lieu MPSL
+    python manage.py sync_stock_mpsl                                # Mode 1 dry-run
+    python manage.py sync_stock_mpsl --commit                       # Mode 1 appliquer
+    python manage.py sync_stock_mpsl --lieu=<pk>                    # Restreindre lieu MPSL
 
-    python manage.py sync_stock_mpsl --transferer --destination=<pk>           # Mode 2 dry-run
+    python manage.py sync_stock_mpsl --transferer                           # Mode 2 dry-run
+    python manage.py sync_stock_mpsl --transferer --destination=<pk>        # Mode 2 dry-run ciblé
     python manage.py sync_stock_mpsl --transferer --destination=<pk> --commit  # Mode 2 appliquer
 """
 from decimal import Decimal
@@ -40,10 +43,58 @@ def _d(val) -> Decimal:
     return Decimal(str(val)) if val is not None else Decimal("0")
 
 
+def _calculer_restant(produit, lieu):
+    """
+    Calcule le stock restant RÉEL depuis la source primaire.
+
+    restant_sac = Σ(AchatMPSL en sacs) − Σ(MouvementStock depuis MPSL)
+    restant_kg  = Σ(AchatMPSL en kg/tonnes) − Σ(MouvementStock depuis MPSL)
+
+    Retourne (total_sac_in, total_kg_in, deja_transfere, restant_sac, restant_kg,
+              produit_unite).
+    """
+    produit_unite = (produit.unite or "kg").strip().lower()
+    achats_qs = AchatMPSL.objects.filter(lieu=lieu, produit_nom__iexact=produit.nom)
+
+    total_sac_in = _d(
+        achats_qs.filter(unite__in=("sac", "sacs"))
+        .aggregate(s=Sum("quantite"))["s"]
+    )
+    total_kg_in = _d(
+        achats_qs.filter(unite="kg")
+        .aggregate(s=Sum("quantite"))["s"]
+    )
+    total_kg_in += _d(
+        achats_qs.filter(unite__in=("tonne", "tonnes"))
+        .aggregate(s=Sum("quantite"))["s"]
+    ) * Decimal("1000")
+
+    # Tous les mouvements sortants depuis ce MPSL vers boutiques ou usines
+    deja_transfere = _d(
+        MouvementStock.objects
+        .filter(
+            produit=produit,
+            transfert__from_lieu=lieu,
+            transfert__to_lieu__type_lieu__in=(Lieu.TYPE_MAGASIN, Lieu.TYPE_USINE),
+        )
+        .aggregate(s=Sum("quantite"))["s"]
+    )
+
+    if produit_unite in ("sac", "sacs"):
+        restant_sac = max(Decimal("0"), total_sac_in - deja_transfere)
+        restant_kg  = Decimal("0")  # quantite_kg (conversions) préservée séparément
+    else:
+        restant_sac = Decimal("0")
+        restant_kg  = max(Decimal("0"), total_kg_in - deja_transfere)
+
+    return total_sac_in, total_kg_in, deja_transfere, restant_sac, restant_kg, produit_unite
+
+
 class Command(BaseCommand):
     help = (
         "Mode 1 : synchronise le stock MPSL depuis les achats/transferts. "
-        "Mode 2 (--transferer) : crée les transferts vers boutique ou usine pour le stock restant."
+        "Mode 2 (--transferer) : calcule le stock restant depuis la source primaire "
+        "et crée les transferts vers boutique ou usine."
     )
 
     def add_arguments(self, parser):
@@ -63,13 +114,13 @@ class Command(BaseCommand):
             "--transferer",
             action="store_true",
             default=False,
-            help="Mode 2 : crée les transferts vers boutique ou usine pour le stock restant.",
+            help="Mode 2 : transfère le stock restant vers boutique ou usine.",
         )
         parser.add_argument(
             "--destination",
             type=int,
             default=None,
-            help="Boutique ou usine de destination (pk) — requis en mode --transferer si plusieurs lieux disponibles.",
+            help="Boutique ou usine de destination (pk) — requis si plusieurs lieux disponibles.",
         )
 
     def handle(self, *args, **options):
@@ -84,7 +135,6 @@ class Command(BaseCommand):
                 "— relancer avec --commit pour appliquer ==="
             ))
 
-        # ── Sélectionner les lieux MPSL concernés ─────────────────────────────
         lieux_qs = Lieu.objects.filter(type_lieu=Lieu.TYPE_MPSL).select_related("entreprise")
         if lieu_filter:
             lieux_qs = lieux_qs.filter(pk=lieu_filter)
@@ -111,12 +161,11 @@ class Command(BaseCommand):
         for lieu in lieux_qs:
             self.stdout.write(f"\n── Lieu : {lieu.nom} (#{lieu.pk}, {lieu.entreprise})")
             self.stdout.write(
-                f"   {'Produit':<30} {'Initial':>12} {'Transféré':>12} "
-                f"{'Restant':>12} {'Actuel':>12}  Statut"
+                f"   {'Produit':<30} {'Total acheté':>14} {'Transféré':>12} "
+                f"{'Restant réel':>14} {'Table actuelle':>15}  Statut"
             )
-            self.stdout.write("   " + "─" * 90)
+            self.stdout.write("   " + "─" * 100)
 
-            # Périmètre : union achats + stock existants
             noms_achats = set(
                 AchatMPSL.objects
                 .filter(lieu=lieu)
@@ -148,61 +197,27 @@ class Command(BaseCommand):
                     total_ignores += 1
                     continue
 
-                produit_unite = (produit.unite or "kg").strip().lower()
+                total_sac_in, total_kg_in, deja_transfere, expected_sac, expected_kg, produit_unite = \
+                    _calculer_restant(produit, lieu)
 
-                # Total entrant : achats
-                achats_qs = AchatMPSL.objects.filter(lieu=lieu, produit_nom__iexact=nom)
-                total_sac_in = _d(
-                    achats_qs.filter(unite__in=("sac", "sacs"))
-                    .aggregate(s=Sum("quantite"))["s"]
-                )
-                total_kg_in = _d(
-                    achats_qs.filter(unite="kg")
-                    .aggregate(s=Sum("quantite"))["s"]
-                )
-                total_tonne_in = _d(
-                    achats_qs.filter(unite__in=("tonne", "tonnes"))
-                    .aggregate(s=Sum("quantite"))["s"]
-                )
-                total_kg_in += total_tonne_in * Decimal("1000")
-
-                # Total sortant : tous les transferts depuis ce lieu MPSL
-                total_mvt = _d(
-                    MouvementStock.objects
-                    .filter(produit=produit, transfert__from_lieu=lieu)
-                    .aggregate(s=Sum("quantite"))["s"]
-                )
-
-                if produit_unite in ("sac", "sacs"):
-                    sac_out = total_mvt
-                    kg_out  = Decimal("0")
-                else:
-                    sac_out = Decimal("0")
-                    kg_out  = total_mvt
-
-                # État actuel du stock
                 stock = Stock.objects.filter(produit=produit, lieu=lieu).first()
                 current_sac = _d(stock.quantite)    if stock else Decimal("0")
                 current_kg  = _d(stock.quantite_kg) if stock else Decimal("0")
 
-                # Stock net attendu
-                expected_sac = max(Decimal("0"), total_sac_in - sac_out)
+                # Pour les produits en sacs : préserver quantite_kg (conversions)
                 if produit_unite in ("sac", "sacs"):
-                    expected_kg = current_kg  # conversions → préservées
-                else:
-                    expected_kg = max(Decimal("0"), total_kg_in - kg_out)
+                    expected_kg = current_kg
 
-                # Rapport
                 if produit_unite in ("sac", "sacs"):
                     initial_str   = f"{total_sac_in:.0f} sacs"
-                    transfere_str = f"{sac_out:.0f} sacs"
+                    transfere_str = f"{deja_transfere:.0f} sacs"
                     restant_str   = f"{expected_sac:.0f} sacs"
                     actuel_str    = f"{current_sac:.0f} sacs"
                     if current_kg > 0:
                         actuel_str += f" +{current_kg:.0f}kg"
                 else:
                     initial_str   = f"{total_kg_in:.2f} kg"
-                    transfere_str = f"{kg_out:.2f} kg"
+                    transfere_str = f"{deja_transfere:.2f} kg"
                     restant_str   = f"{expected_kg:.2f} kg"
                     actuel_str    = f"{current_kg:.2f} kg"
 
@@ -220,8 +235,8 @@ class Command(BaseCommand):
 
                 nom_tronc = (produit.nom[:28] + "..") if len(produit.nom) > 30 else produit.nom
                 ligne = (
-                    f"   {nom_tronc:<30} {initial_str:>12} {transfere_str:>12} "
-                    f"{restant_str:>12} {actuel_str:>12}  {statut}"
+                    f"   {nom_tronc:<30} {initial_str:>14} {transfere_str:>12} "
+                    f"{restant_str:>14} {actuel_str:>15}  {statut}"
                 )
 
                 if unchanged:
@@ -244,7 +259,7 @@ class Command(BaseCommand):
                             stock.quantite_kg = expected_kg
                             stock.save(update_fields=["quantite", "quantite_kg", "updated_at"])
 
-            self.stdout.write("   " + "─" * 90)
+            self.stdout.write("   " + "─" * 100)
 
         self.stdout.write("")
         self.stdout.write("=" * 60)
@@ -265,16 +280,26 @@ class Command(BaseCommand):
                 self.stdout.write(self.style.SUCCESS(f"✓ CONFORME — {msg}"))
 
     # ══════════════════════════════════════════════════════════════════════════
-    # MODE 2 — Transfert vers boutique
+    # MODE 2 — Transfert vers boutique ou usine
     # ══════════════════════════════════════════════════════════════════════════
 
     def _run_transferer(self, lieux_qs, destination_pk, commit):
+        """
+        Calcule le stock restant depuis la source primaire (AchatMPSL − MouvementStock),
+        affiche la liste complète (dry-run ou pas), puis en --commit :
+          1. Synchronise la table Stock avec les valeurs recalculées.
+          2. Crée le transfert via transfert_depuis_mpsl() (atomique, auditable).
+
+        Garanties :
+          - Aucun transfert existant n'est modifié ni supprimé.
+          - Le calcul du restant est toujours basé sur la source de vérité (achats − historique).
+          - La table Stock est mise à jour avant le transfert pour éviter tout rejet.
+        """
         total_transferes = 0
         total_ignores = 0
         total_vides = 0
 
         for lieu in lieux_qs:
-            # ── Résoudre la boutique de destination ───────────────────────────
             boutique = self._resoudre_destination(lieu, destination_pk)
             if boutique is None:
                 continue
@@ -284,125 +309,179 @@ class Command(BaseCommand):
                 f"\n── Lieu MPSL : {lieu.nom} (#{lieu.pk}) → {boutique.nom} (#{boutique.pk}, {type_dest})"
             )
             self.stdout.write(
-                f"   {'Produit':<30} {'Stock MPSL':>12} {'Déjà transféré':>16} "
-                f"{'À transférer':>14}  Statut"
+                f"   {'Produit':<30} {'Total acheté':>14} {'Déjà transféré':>16} "
+                f"{'Restant réel':>14} {'Table Stock':>12}  Statut"
             )
-            self.stdout.write("   " + "─" * 95)
+            self.stdout.write("   " + "─" * 105)
 
-            stocks_mpsl = (
-                Stock.objects
+            # Périmètre : tous les produits ayant des achats MPSL pour ce lieu
+            noms_achats = list(
+                AchatMPSL.objects
                 .filter(lieu=lieu)
-                .select_related("produit")
-                .order_by("produit__nom")
+                .values_list("produit_nom", flat=True)
+                .distinct()
             )
 
-            if not stocks_mpsl.exists():
-                self.stdout.write("   Aucun stock en dépôt MPSL.")
+            if not noms_achats:
+                self.stdout.write("   Aucun achat MPSL enregistré pour ce dépôt.")
+                self.stdout.write("   " + "─" * 105)
                 continue
 
-            lignes_a_transferer = []
+            lignes_a_transferer = []  # [(produit, a_transferer, unite, restant_sac, restant_kg)]
 
-            for stock in stocks_mpsl:
-                produit = stock.produit
-                produit_unite = (produit.unite or "kg").strip().lower()
+            for nom in sorted(noms_achats, key=str.lower):
+                produit = Produit.objects.filter(
+                    nom__iexact=nom,
+                    entreprise_id=lieu.entreprise_id,
+                ).first()
 
-                # Quantité actuelle au MPSL
-                qte_sac = _d(stock.quantite)
-                qte_kg  = _d(stock.quantite_kg)
+                if produit is None:
+                    self.stdout.write(self.style.WARNING(
+                        f"   ⚠  '{nom}' introuvable dans le catalogue — ignoré."
+                    ))
+                    total_ignores += 1
+                    continue
 
-                # Total historique déjà envoyé vers boutiques et usines depuis ce MPSL
-                deja_transfere = _d(
-                    MouvementStock.objects
-                    .filter(
-                        produit=produit,
-                        transfert__from_lieu=lieu,
-                        transfert__to_lieu__type_lieu__in=(Lieu.TYPE_MAGASIN, Lieu.TYPE_USINE),
-                    )
-                    .aggregate(s=Sum("quantite"))["s"]
-                )
+                total_sac_in, total_kg_in, deja_transfere, restant_sac, restant_kg, produit_unite = \
+                    _calculer_restant(produit, lieu)
 
-                # Quantité et unité à transférer
+                # Valeur actuelle dans la table Stock
+                stock_obj = Stock.objects.filter(produit=produit, lieu=lieu).first()
+                table_sac = _d(stock_obj.quantite)    if stock_obj else Decimal("0")
+                table_kg  = _d(stock_obj.quantite_kg) if stock_obj else Decimal("0")
+
+                # Pour les sacs : quantite_kg (conversions) est préservée, ne compte pas ici
                 if produit_unite in ("sac", "sacs"):
-                    a_transferer = qte_sac
+                    total_str   = f"{total_sac_in:.0f} sacs"
+                    deja_str    = f"{deja_transfere:.0f} sacs"
+                    restant_str = f"{restant_sac:.0f} sacs"
+                    table_str   = f"{table_sac:.0f} sacs"
+                    a_transferer   = restant_sac
                     unite_transfer = "sacs"
-                    stock_str    = f"{qte_sac:.0f} sacs"
-                    deja_str     = f"{deja_transfere:.0f} sacs"
-                    transfer_str = f"{a_transferer:.0f} sacs"
+                    desync = (table_sac != restant_sac)
                 else:
-                    a_transferer = qte_kg
+                    total_str   = f"{total_kg_in:.2f} kg"
+                    deja_str    = f"{deja_transfere:.2f} kg"
+                    restant_str = f"{restant_kg:.2f} kg"
+                    table_str   = f"{table_kg:.2f} kg"
+                    a_transferer   = restant_kg
                     unite_transfer = "kg"
-                    stock_str    = f"{qte_kg:.2f} kg"
-                    deja_str     = f"{deja_transfere:.2f} kg"
-                    transfer_str = f"{a_transferer:.2f} kg"
+                    desync = (table_kg != restant_kg)
 
+                desync_flag = " ⚠DÉSYNC" if desync else ""
                 nom_tronc = (produit.nom[:28] + "..") if len(produit.nom) > 30 else produit.nom
 
                 if a_transferer <= 0:
-                    statut = "— stock vide"
+                    statut = "— épuisé"
                     total_vides += 1
                     self.stdout.write(
-                        f"   {nom_tronc:<30} {stock_str:>12} {deja_str:>16} "
-                        f"{transfer_str:>14}  {statut}"
+                        f"   {nom_tronc:<30} {total_str:>14} {deja_str:>16} "
+                        f"{restant_str:>14} {table_str:>12}  {statut}{desync_flag}"
                     )
                     continue
 
                 statut = "→ À TRANSFÉRER"
                 total_transferes += 1
                 ligne = (
-                    f"   {nom_tronc:<30} {stock_str:>12} {deja_str:>16} "
-                    f"{transfer_str:>14}  {statut}"
+                    f"   {nom_tronc:<30} {total_str:>14} {deja_str:>16} "
+                    f"{restant_str:>14} {table_str:>12}  {statut}{desync_flag}"
                 )
                 self.stdout.write(self.style.SUCCESS(ligne) if commit else ligne)
+                lignes_a_transferer.append(
+                    (produit, a_transferer, unite_transfer, restant_sac, restant_kg, table_kg)
+                )
 
-                lignes_a_transferer.append((produit, a_transferer, unite_transfer))
-
-            self.stdout.write("   " + "─" * 95)
+            self.stdout.write("   " + "─" * 105)
 
             if not lignes_a_transferer:
                 self.stdout.write("   Aucune quantité à transférer.")
                 continue
 
-            # ── Appliquer si --commit ──────────────────────────────────────────
-            if commit:
-                try:
-                    transfert = transfert_depuis_mpsl(
-                        from_mpsl=lieu,
-                        to_lieu=boutique,
-                        lignes=lignes_a_transferer,
-                    )
-                    self.stdout.write(self.style.SUCCESS(
-                        f"   ✓ Transfert #{transfert.pk} créé ({len(lignes_a_transferer)} produit(s))."
-                    ))
-                except ErreurStock as e:
-                    self.stdout.write(self.style.ERROR(f"   ✗ Erreur : {e}"))
-                    total_ignores += 1
-                    total_transferes -= len(lignes_a_transferer)
+            if not commit:
+                continue
+
+            # ── COMMIT : Étape 1 — Synchroniser la table Stock ────────────────
+            # Garantit que transfert_depuis_mpsl() trouve les bonnes quantités.
+            # Les quantite_kg (conversions en cours) des produits en sacs sont préservées.
+            self.stdout.write("   Étape 1/2 — Synchronisation table Stock...")
+            try:
+                with transaction.atomic():
+                    for produit, _, unite_transfer, restant_sac, restant_kg, table_kg_original in lignes_a_transferer:
+                        produit_unite = (produit.unite or "kg").strip().lower()
+                        stock_obj = Stock.objects.filter(produit=produit, lieu=lieu).first()
+
+                        if stock_obj is None:
+                            # Produit en sacs : quantite_kg = 0 (pas de conversion existante)
+                            Stock.objects.create(
+                                produit=produit,
+                                lieu=lieu,
+                                quantite=restant_sac,
+                                quantite_kg=restant_kg,
+                            )
+                        else:
+                            s = Stock.objects.select_for_update().get(pk=stock_obj.pk)
+                            s.quantite = restant_sac
+                            if produit_unite not in ("sac", "sacs"):
+                                # Produit kg : mettre à jour quantite_kg aussi
+                                s.quantite_kg = restant_kg
+                            # Pour les sacs : quantite_kg (conversions) reste inchangée
+                            s.save(update_fields=["quantite", "quantite_kg", "updated_at"])
+            except Exception as exc:
+                self.stdout.write(self.style.ERROR(f"   ✗ Synchronisation échouée : {exc}"))
+                total_ignores += len(lignes_a_transferer)
+                total_transferes -= len(lignes_a_transferer)
+                continue
+
+            # ── COMMIT : Étape 2 — Créer le transfert ─────────────────────────
+            self.stdout.write("   Étape 2/2 — Création du transfert...")
+            lignes_service = [
+                (produit, a_transferer, unite_transfer)
+                for produit, a_transferer, unite_transfer, _, __, ___ in lignes_a_transferer
+            ]
+            try:
+                transfert = transfert_depuis_mpsl(
+                    from_mpsl=lieu,
+                    to_lieu=boutique,
+                    lignes=lignes_service,
+                )
+                self.stdout.write(self.style.SUCCESS(
+                    f"   ✓ Transfert #{transfert.pk} créé ({len(lignes_service)} produit(s))."
+                ))
+            except ErreurStock as e:
+                self.stdout.write(self.style.ERROR(f"   ✗ Erreur transfert : {e}"))
+                total_ignores += len(lignes_service)
+                total_transferes -= len(lignes_service)
 
         self.stdout.write("")
         self.stdout.write("=" * 60)
         if commit:
-            self.stdout.write(self.style.SUCCESS(
-                f"Terminé : {total_transferes} produit(s) transféré(s), "
-                f"{total_vides} stock(s) vide(s), {total_ignores} erreur(s)."
-            ))
+            if total_transferes > 0:
+                self.stdout.write(self.style.SUCCESS(
+                    f"Terminé : {total_transferes} produit(s) transféré(s), "
+                    f"{total_vides} épuisé(s), {total_ignores} erreur(s)."
+                ))
+            else:
+                msg = f"Aucun transfert effectué. {total_vides} produit(s) épuisé(s)."
+                if total_ignores:
+                    msg += f" {total_ignores} erreur(s)."
+                self.stdout.write(self.style.WARNING(msg))
         else:
             if total_transferes > 0:
                 self.stdout.write(self.style.WARNING(
                     f"DRY-RUN : {total_transferes} produit(s) à transférer, "
-                    f"{total_vides} stock(s) vide(s). — Relancer avec --commit pour appliquer."
+                    f"{total_vides} épuisé(s). — Relancer avec --commit pour appliquer."
                 ))
             else:
                 self.stdout.write(self.style.SUCCESS(
-                    f"✓ Aucun stock à transférer ({total_vides} produit(s) avec stock vide)."
+                    f"✓ Aucun stock à transférer ({total_vides} produit(s) épuisé(s))."
                 ))
 
     def _resoudre_destination(self, lieu_mpsl, destination_pk):
         """
         Résout la destination (boutique OU usine) pour un lieu MPSL donné.
-        - Si --destination=<pk> fourni : vérifie que c'est un magasin ou une usine
-          de la même entreprise.
+        - Si --destination=<pk> fourni : vérifie appartenance et type.
         - Sinon : auto-sélection si un seul lieu destination dans l'entreprise.
-        - Si plusieurs destinations et pas de --destination : erreur explicite avec liste.
+        - Si plusieurs destinations et pas de --destination : liste et erreur explicite.
         """
         ent_id = lieu_mpsl.entreprise_id
         destinations_qs = Lieu.objects.filter(
@@ -429,7 +508,7 @@ class Command(BaseCommand):
             ))
             return None
 
-        # Plusieurs destinations → afficher la liste et demander --destination
+        # Plusieurs destinations disponibles → afficher la liste
         self.stdout.write(self.style.ERROR(
             f"   ✗ {count} destinations disponibles dans '{lieu_mpsl.entreprise}'. "
             f"Précise --destination=<pk> :"
