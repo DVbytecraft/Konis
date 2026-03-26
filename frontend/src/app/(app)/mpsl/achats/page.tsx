@@ -200,9 +200,7 @@ export default function MpslAchatsPage() {
           setErr(`Ligne ${i + 1} : prix unitaire doit être un entier ≥ 0.`); return;
         }
       }
-      if (l.unite === "sacs" && (!l.poids_par_sac || Number(l.poids_par_sac) <= 0)) {
-        setErr(`Ligne ${i + 1} : poids par sac requis si l'unité est en sacs.`); return;
-      }
+      // poids_par_sac est facultatif : le produit rejoint le catalogue sans poids.
     }
 
     // Validation fournisseur
@@ -231,7 +229,9 @@ export default function MpslAchatsPage() {
           produit_nom:   l.produit_nom.trim(),
           quantite:      parseInt(l.quantite),
           unite:         l.unite,
-          poids_par_sac: l.unite === "sacs" ? Number(l.poids_par_sac) : null,
+          poids_par_sac: (l.unite === "sacs" && l.poids_par_sac && Number(l.poids_par_sac) > 0)
+            ? Number(l.poids_par_sac)
+            : null,
           prix_unitaire: l.prix_unitaire ? parseInt(l.prix_unitaire) : 0,
           notes:         l.notes,
         })),
@@ -450,7 +450,7 @@ export default function MpslAchatsPage() {
                 {/* Poids par sac */}
                 {l.unite === "sacs" && (
                   <div className="flex flex-col gap-1">
-                    <label className="text-xs text-muted-foreground">Poids par sac (kg) *</label>
+                    <label className="text-xs text-muted-foreground">Poids par sac (kg) <span className="opacity-50">(optionnel)</span></label>
                     <Input
                       type="number"
                       min="0.001"

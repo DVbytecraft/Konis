@@ -318,8 +318,8 @@ def enregistrer_achat_mpsl(
         raise ErreurStock(f"type_paiement invalide : '{type_paiement}'.")
     if type_paiement == "partiel" and montant_paye_initial < Decimal("0"):
         raise ErreurStock("montant_paye_initial doit être >= 0.")
-    if _normaliser_unite_stock(unite) == "sac" and poids_par_sac is None:
-        raise ErreurStock("poids_par_sac requis si l'unit?? est en sacs.")
+    # poids_par_sac est facultatif : un produit en sacs peut être enregistré sans poids.
+    # Les conversions sac→kg seront indisponibles jusqu'à ce qu'il soit renseigné.
 
     prix_total = Decimal(str(quantite)) * Decimal(str(prix_unitaire))
     nom = produit_nom.strip()
@@ -471,8 +471,7 @@ def enregistrer_achats_mpsl_batch(
 
         if quantite <= 0:
             raise ErreurStock(f"Ligne {i + 1} ({nom}) : quantité doit être > 0.")
-        if _normaliser_unite_stock(unite) == "sac" and poids_par_sac is None:
-            raise ErreurStock(f"Ligne {i + 1} ({nom}) : poids_par_sac requis pour l'unité sacs.")
+        # poids_par_sac est facultatif ; conversions sac→kg indisponibles sans lui.
 
         prix_total_ligne = quantite * prix_unitaire
         existing = Produit.objects.filter(

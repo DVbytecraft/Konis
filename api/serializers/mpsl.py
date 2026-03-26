@@ -82,8 +82,8 @@ class AchatMPSLCreateSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 {"fournisseur_id": "Le fournisseur est requis pour un achat à crédit ou partiel."}
             )
-        if (data.get("unite") or "").lower() in ("sac", "sacs") and not data.get("poids_par_sac"):
-            raise serializers.ValidationError({"poids_par_sac": "Poids par sac requis si l'unité est en sacs."})
+        # poids_par_sac est facultatif : le produit rejoint le catalogue sans poids.
+        # Les conversions sac→kg seront indisponibles jusqu'à ce qu'il soit renseigné.
         return data
 
 
@@ -107,8 +107,7 @@ class _LigneProduitBatchSerializer(serializers.Serializer):
         return _validate_entier(value, "Le prix unitaire")
 
     def validate(self, data):
-        if (data.get("unite") or "").lower() in ("sac", "sacs") and not data.get("poids_par_sac"):
-            raise serializers.ValidationError({"poids_par_sac": "Poids par sac requis si l'unité est en sacs."})
+        # poids_par_sac est facultatif ; conversions sac→kg indisponibles sans lui.
         return data
 
 
