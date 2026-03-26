@@ -15,10 +15,13 @@ interface TransfertRow {
 }
 
 interface ProduitOption {
-  id: number;
-  nom: string;
-  code: string;
+  produit_id: number;
+  produit_nom: string;
+  produit_code: string;
   unite: string;
+  quantite: string;
+  quantite_kg: string;
+  poids_par_sac: string | null;
 }
 
 interface LieuOption {
@@ -52,13 +55,13 @@ export default function MpslTransfertsPage() {
   const [loading, setLoading] = useState(false);
 
   const load = async () => {
-    const [produitsData, usinesData, magasinsData, transfertsData] = await Promise.all([
-      apiFetch("/mpsl/catalogue/"),
+    const [stockData, usinesData, magasinsData, transfertsData] = await Promise.all([
+      apiFetch("/mpsl/stock/"),
       apiFetch("/locations/by-type/?type=factory"),
       apiFetch("/locations/by-type/?type=shop"),
       apiFetch("/mpsl/transferts/"),
     ]);
-    setProduits(toList(produitsData as ApiList<ProduitOption>));
+    setProduits(toList(stockData as ApiList<ProduitOption>));
     const usines = toList(usinesData as ApiList<LieuOption>).map((l) => ({ ...l, type_lieu: "usine" }));
     const magasins = toList(magasinsData as ApiList<LieuOption>).map((l) => ({ ...l, type_lieu: "magasin" }));
     setDestinations([...usines, ...magasins]);
@@ -174,25 +177,42 @@ export default function MpslTransfertsPage() {
 
             {produits.length === 0 && (
               <p className="text-xs text-amber-700 dark:text-amber-400">
-                Aucun produit disponible dans le catalogue.
+                Aucun produit en stock au dépôt MPSL.
               </p>
             )}
 
             <div className="space-y-2">
-              {lignes.map((ligne, i) => (
-                <div key={i} className="flex gap-2 items-center">
+              {lignes.map((ligne, i) => {
+                const stockItem = produits.find((p) => String(p.produit_id) === ligne.produit_id);
+                const hasPds = stockItem?.poids_par_sac && parseFloat(stockItem.poids_par_sac) > 0;
+                const sacs = stockItem ? parseFloat(stockItem.quantite) : 0;
+                const kg = stockItem ? parseFloat(stockItem.quantite_kg ?? "0") : 0;
+                const stockLabel = stockItem
+                  ? hasPds
+                    ? sacs > 0 && kg > 0 ? `${sacs} sacs + ${kg.toFixed(2)} kg dispo`
+                      : sacs > 0 ? `${sacs} sacs dispo`
+                      : `${kg.toFixed(2)} kg dispo`
+                  : `${sacs} ${stockItem.unite} dispo`
+                  : null;
+                return (
+                <div key={i} className="flex gap-2 items-start flex-col sm:flex-row sm:items-center">
+                  <div className="flex-1 flex flex-col gap-0.5 w-full sm:w-auto">
                   <select
-                    className="flex-1 h-10 rounded-md border border-input bg-background px-2 text-sm"
+                    className="flex-1 h-10 rounded-md border border-input bg-background px-2 text-sm w-full"
                     value={ligne.produit_id}
                     onChange={(e) => updateLigne(i, "produit_id", e.target.value)}
                   >
                     <option value="">Produit...</option>
                     {produits.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.nom}{p.code ? ` (${p.code})` : ""}
+                      <option key={p.produit_id} value={p.produit_id}>
+                        {p.produit_nom}{p.produit_code ? ` (${p.produit_code})` : ""}
                       </option>
                     ))}
                   </select>
+                  {stockLabel && (
+                    <span className="text-xs text-emerald-700 dark:text-emerald-400 px-1">{stockLabel}</span>
+                  )}
+                  </div>
                   <Input
                     type="number"
                     min="0.01"
@@ -221,7 +241,8 @@ export default function MpslTransfertsPage() {
                     </button>
                   )}
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 
