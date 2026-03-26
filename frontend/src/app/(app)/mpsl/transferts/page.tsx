@@ -15,12 +15,11 @@ interface TransfertRow {
 }
 
 interface ProduitOption {
-  produit_id: number;
+  produit_id: number | null;
   produit_nom: string;
   produit_code: string;
-  unite: string;
-  quantite: string;
-  quantite_kg: string;
+  unite: string;    // unité de cette ligne (sac, kg, tonnes…)
+  quantite: string; // quantité dans cette unité
   poids_par_sac: string | null;
 }
 
@@ -183,17 +182,27 @@ export default function MpslTransfertsPage() {
 
             <div className="space-y-2">
               {lignes.map((ligne, i) => {
-                const stockItem = produits.find((p) => String(p.produit_id) === ligne.produit_id);
-                const hasPds = stockItem?.poids_par_sac && parseFloat(stockItem.poids_par_sac) > 0;
-                const sacs = stockItem ? parseFloat(stockItem.quantite) : 0;
-                const kg = stockItem ? parseFloat(stockItem.quantite_kg ?? "0") : 0;
+                // Trouver la ligne stock qui correspond à (produit_id, unite) sélectionnés.
+                // Priorité : correspondance exacte produit+unité → sinon première ligne du produit.
+                const stockExact = produits.find(
+                  (p) => String(p.produit_id) === ligne.produit_id && p.unite === ligne.unite
+                );
+                const stockAny = produits.find((p) => String(p.produit_id) === ligne.produit_id);
+                const stockItem = stockExact ?? stockAny;
                 const stockLabel = stockItem
-                  ? hasPds
-                    ? sacs > 0 && kg > 0 ? `${sacs} sacs + ${kg.toFixed(2)} kg dispo`
-                      : sacs > 0 ? `${sacs} sacs dispo`
-                      : `${kg.toFixed(2)} kg dispo`
-                  : `${sacs} ${stockItem.unite} dispo`
+                  ? `${parseFloat(stockItem.quantite).toLocaleString("fr-FR")} ${stockItem.unite} dispo`
                   : null;
+
+                // Dédupliquer le dropdown par produit_id pour éviter les doublons.
+                // Une même produit peut avoir sac + kg → on n'affiche que son nom une fois.
+                const seen = new Set<string>();
+                const optionsProduits = produits.filter((p) => {
+                  const k = String(p.produit_id) + "|" + p.produit_nom;
+                  if (seen.has(k)) return false;
+                  seen.add(k);
+                  return true;
+                });
+
                 return (
                 <div key={i} className="flex gap-2 items-start flex-col sm:flex-row sm:items-center">
                   <div className="flex-1 flex flex-col gap-0.5 w-full sm:w-auto">
@@ -203,8 +212,8 @@ export default function MpslTransfertsPage() {
                     onChange={(e) => updateLigne(i, "produit_id", e.target.value)}
                   >
                     <option value="">Produit...</option>
-                    {produits.map((p) => (
-                      <option key={p.produit_id} value={p.produit_id}>
+                    {optionsProduits.map((p) => (
+                      <option key={`${p.produit_id}-${p.produit_nom}`} value={String(p.produit_id)}>
                         {p.produit_nom}{p.produit_code ? ` (${p.produit_code})` : ""}
                       </option>
                     ))}
