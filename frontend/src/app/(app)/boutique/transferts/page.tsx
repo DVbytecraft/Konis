@@ -128,8 +128,12 @@ export default function BoutiqueTransfertsPage() {
 
   const filteredStocks = (i: number) => {
     const q = (lignes[i]?.produit_nom || "").toLowerCase();
-    if (!q) return stocks;
-    return stocks.filter((s) => s.produit_nom.toLowerCase().includes(q));
+    // Seuls les produits avec du stock réel (sacs > 0 OU kg > 0) sont proposés.
+    const disponibles = stocks.filter(
+      (s) => parseFloat(s.quantite) > 0 || parseFloat(s.quantite_kg) > 0
+    );
+    if (!q) return disponibles;
+    return disponibles.filter((s) => s.produit_nom.toLowerCase().includes(q));
   };
 
   const reset = () => {
