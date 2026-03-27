@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { buildIdempotencyKey } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -86,6 +87,7 @@ export default function MpslTransfertsPage() {
     try {
       await apiFetch("/mpsl/transferts/", {
         method: "POST",
+        headers: { "Idempotency-Key": buildIdempotencyKey("mpsl-transfert") },
         body: JSON.stringify({
           to_lieu: Number(toLieu),
           lignes: lignesValides.map((l) => ({
