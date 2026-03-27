@@ -354,12 +354,18 @@ def enregistrer_achat_mpsl(
             existing.poids_par_sac = poids_par_sac
             existing.save(update_fields=["poids_par_sac"])
 
+        # Stocker poids_par_sac uniquement pour les achats en sacs.
+        # Pour kg/tonnes, la notion de poids par sac n'a pas de sens.
+        u_norm_pps = _normaliser_unite_stock(unite)
+        pps_a_stocker = poids_par_sac if u_norm_pps == "sac" else None
+
         achat = AchatMPSL.objects.create(
             lieu=lieu,
             fournisseur=fournisseur,
             produit_nom=nom,
             quantite=quantite,
             unite=unite,
+            poids_par_sac=pps_a_stocker,
             prix_unitaire=prix_unitaire,
             prix_total=prix_total,
             type_paiement=type_paiement,
@@ -509,12 +515,16 @@ def enregistrer_achats_mpsl_batch(
             existing.poids_par_sac = poids_par_sac
             existing.save(update_fields=["poids_par_sac"])
 
+        u_norm_pps = _normaliser_unite_stock(unite)
+        pps_a_stocker = poids_par_sac if u_norm_pps == "sac" else None
+
         achat = AchatMPSL.objects.create(
             lieu=lieu,
             fournisseur=fournisseur,
             produit_nom=nom,
             quantite=quantite,
             unite=unite,
+            poids_par_sac=pps_a_stocker,
             prix_unitaire=prix_unitaire,
             prix_total=prix_total_ligne,
             type_paiement=type_paiement,
@@ -707,6 +717,27 @@ def transfert_depuis_mpsl(
             )
             if created:
                 from django.db.models import Sum as _Sum
+                # Détecter les achats en sacs avec des poids différents.
+                # Fusionner des sacs à 25 kg et des sacs à 50 kg dans le même
+                # compteur serait une corruption silencieuse du stock.
+                # (Seuls les achats post-migration ont poids_par_sac non null.)
+                sac_pps_values = list(
+                    AchatMPSL.objects.filter(
+                        lieu=from_mpsl,
+                        produit_nom__iexact=produit.nom,
+                        unite__in=("sac", "sacs"),
+                    )
+                    .exclude(poids_par_sac__isnull=True)
+                    .values_list("poids_par_sac", flat=True)
+                    .distinct()
+                )
+                if len(sac_pps_values) > 1:
+                    raise ErreurStock(
+                        f"Impossible de reconstruire le stock de '{produit.nom}' : "
+                        f"les achats MPSL contiennent des sacs à {len(sac_pps_values)} poids différents "
+                        f"({', '.join(str(v) for v in sorted(sac_pps_values))} kg/sac). "
+                        f"Convertissez les sacs existants en kg avant de transférer."
+                    )
                 for row in (
                     AchatMPSL.objects.filter(lieu=from_mpsl, produit_nom__iexact=produit.nom)
                     .values("unite")

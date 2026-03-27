@@ -204,6 +204,13 @@ class AchatMPSL(models.Model):
     produit_nom = models.CharField(max_length=255, verbose_name="Produit acheté")
     quantite = models.DecimalField(max_digits=12, decimal_places=2)
     unite = models.CharField(max_length=10, choices=UNITE_CHOICES, default=UNITE_SACS)
+    poids_par_sac = models.DecimalField(
+        max_digits=8, decimal_places=3,
+        null=True, blank=True,
+        verbose_name="Poids par sac (kg)",
+        help_text="Poids d'un sac en kg. Renseigné si unite='sacs'. "
+                  "Garantit la traçabilité et empêche les mélanges de poids.",
+    )
     prix_unitaire = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     prix_total = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     # ── Paiement fournisseur ─────────────────────────────────────────────────
@@ -242,6 +249,10 @@ class AchatMPSL(models.Model):
             models.CheckConstraint(condition=Q(quantite__gt=0), name="achatmpsl_quantite_positive"),
             models.CheckConstraint(condition=Q(prix_unitaire__gte=0), name="achatmpsl_prix_unitaire_positif"),
             models.CheckConstraint(condition=Q(prix_total__gte=0), name="achatmpsl_prix_total_positif"),
+            models.CheckConstraint(
+                condition=Q(poids_par_sac__isnull=True) | Q(poids_par_sac__gt=0),
+                name="achatmpsl_poids_par_sac_positif",
+            ),
         ]
         indexes = [
             models.Index(fields=["lieu", "date"], name="achatmpsl_lieu_date_idx"),

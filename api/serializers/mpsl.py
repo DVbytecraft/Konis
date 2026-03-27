@@ -23,7 +23,7 @@ class AchatMPSLSerializer(serializers.ModelSerializer):
             "lieu", "lieu_nom",
             "fournisseur", "fournisseur_nom",
             "produit_nom",
-            "quantite", "unite",
+            "quantite", "unite", "poids_par_sac",
             "prix_unitaire", "prix_total",
             "type_paiement", "type_paiement_label",
             "montant_paye_initial",
