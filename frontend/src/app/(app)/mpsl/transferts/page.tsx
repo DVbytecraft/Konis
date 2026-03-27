@@ -211,7 +211,17 @@ export default function MpslTransfertsPage() {
                   <select
                     className="flex-1 h-10 rounded-md border border-input bg-background px-2 text-sm w-full"
                     value={ligne.produit_id}
-                    onChange={(e) => updateLigne(i, "produit_id", e.target.value)}
+                    onChange={(e) => {
+                      const newId = e.target.value;
+                      // Réinitialiser l'unité à la valeur par défaut du nouveau produit
+                      // pour éviter un état incohérent (ex: unite="sacs" pour un produit kg)
+                      const lignesNouv = produits.filter((p) => String(p.produit_id) === newId);
+                      const hasSac = lignesNouv.some((p) => p.unite === "sac" || p.unite === "sacs");
+                      const defaultUnite = newId ? (hasSac ? "sacs" : "kg") : "sacs";
+                      setLignes((prev) => prev.map((line, idx) =>
+                        idx === i ? { ...line, produit_id: newId, unite: defaultUnite } : line
+                      ));
+                    }}
                   >
                     <option value="">Produit...</option>
                     {optionsProduits.map((p) => (
