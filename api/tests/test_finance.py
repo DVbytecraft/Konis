@@ -757,3 +757,93 @@ class TestCaisseDisponibleEndpoint(APITestCase):
             **self._jwt(),
         )
         self.assertEqual(r.status_code, status.HTTP_404_NOT_FOUND)
+
+
+# ── N. Comptable — création de créanciers ────────────────────────────────────
+
+class TestComptableCreancier(APITestCase):
+    """
+    Le comptable peut créer des créanciers (fournisseurs/partenaires).
+    Le DAF reste en lecture seule sur CreancierViewSet.
+    Les autres ViewSets financiers restent bloqués pour le comptable.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.ent = Entreprise.objects.create(nom="Ent Comptable Creancier")
+        lieu_c = Lieu.objects.create(
+            entreprise=cls.ent, nom="Siege Comptable", code="SGC", type_lieu=Lieu.TYPE_MAGASIN
+        )
+        lieu_d = Lieu.objects.create(
+            entreprise=cls.ent, nom="Siege DAF", code="SGD", type_lieu=Lieu.TYPE_MAGASIN
+        )
+        cls.comptable = CustomUser.objects.create_user(
+            username="comptable_cr", password="x",
+            role=CustomUser.ROLE_COMPTABLE, entreprise=cls.ent, lieu=lieu_c,
+        )
+        cls.daf = CustomUser.objects.create_user(
+            username="daf_cr", password="x",
+            role=CustomUser.ROLE_DAF, entreprise=cls.ent, lieu=lieu_d,
+        )
+
+    def _jwt(self, user):
+        token = str(RefreshToken.for_user(user).access_token)
+        return {"HTTP_AUTHORIZATION": f"Bearer {token}"}
+
+    def test_comptable_peut_creer_creancier(self):
+        r = self.client.post(
+            "/api/finance/creanciers/",
+            {"nom": "Fournisseur Comptable", "type_creancier": "fournisseur"},
+            format="json",
+            **self._jwt(self.comptable),
+        )
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(r.json()["nom"], "Fournisseur Comptable")
+
+    def test_comptable_peut_lister_creanciers(self):
+        r = self.client.get("/api/finance/creanciers/", **self._jwt(self.comptable))
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+
+    def test_daf_ne_peut_pas_creer_creancier(self):
+        r = self.client.post(
+            "/api/finance/creanciers/",
+            {"nom": "Fournisseur DAF", "type_creancier": "fournisseur"},
+            format="json",
+            **self._jwt(self.daf),
+        )
+        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_daf_peut_lister_creanciers(self):
+        r = self.client.get("/api/finance/creanciers/", **self._jwt(self.daf))
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+
+    def test_comptable_ne_peut_pas_creer_journal_payable(self):
+        """Les autres ViewSets financiers restent bloqués pour le comptable."""
+        creancier = Creancier.objects.create(
+            entreprise=self.ent, nom="Four X", type_creancier="fournisseur", statut="actif"
+        )
+        r = self.client.post(
+            "/api/finance/journaux-payables/",
+            {
+                "creancier": creancier.pk,
+                "reference": "REF-001",
+                "description": "Test",
+                "montant_initial": 10000,
+            },
+            format="json",
+            **self._jwt(self.comptable),
+        )
+        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_comptable_creancier_scope_entreprise(self):
+        """Un créancier créé par le comptable appartient bien à son entreprise."""
+        r = self.client.post(
+            "/api/finance/creanciers/",
+            {"nom": "FourScope", "type_creancier": "fournisseur"},
+            format="json",
+            **self._jwt(self.comptable),
+        )
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        from finance.models import Creancier as Cr
+        cr = Cr.objects.get(pk=r.json()["id"])
+        self.assertEqual(cr.entreprise_id, self.ent.pk)

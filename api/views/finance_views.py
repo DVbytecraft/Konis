@@ -106,12 +106,15 @@ class FinanceResumeView(APIView):
 class CreancierViewSet(DafReadOnlyMixin, ListModelMixin, RetrieveModelMixin, CreateModelMixin, GenericViewSet):
     """
     GET    /api/finance/creanciers/       — liste
-    POST   /api/finance/creanciers/       — créer
+    POST   /api/finance/creanciers/       — créer  (admin, DAF, COMPTABLE)
     GET    /api/finance/creanciers/{id}/  — détail
-    PATCH  /api/finance/creanciers/{id}/  — modifier nom/contact/notes
+    PATCH  /api/finance/creanciers/{id}/  — modifier nom/contact/notes (admin, DAF uniquement)
     """
     permission_classes = [IsDafRole]
     throttle_classes = [FinanceCreateRateThrottle]
+    # Le COMPTABLE peut créer des créanciers (fournisseurs/partenaires financiers).
+    # Le DAF reste en lecture seule — modifier/destroy lui sont toujours bloqués.
+    _COMPTABLE_ALLOWED_WRITE_ACTIONS = frozenset({"create"})
 
     def get_queryset(self):
         ent_id = self.request.user.entreprise_id
