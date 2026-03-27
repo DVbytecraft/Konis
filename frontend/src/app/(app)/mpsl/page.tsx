@@ -17,6 +17,7 @@ interface LastAchat {
   produit: string;
   quantite: string;
   unite: string;
+  poids_par_sac: string | null;
   prix_total: string;
   date: string;
 }
@@ -115,6 +116,7 @@ export default function MpslDashboardPage() {
                     <th className="text-left py-1.5 px-2">Produit</th>
                     <th className="text-right py-1.5 px-2">Quantité</th>
                     <th className="text-left py-1.5 px-2">Unité</th>
+                    <th className="text-right py-1.5 px-2">Poids/sac</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -125,6 +127,9 @@ export default function MpslDashboardPage() {
                         {Number(s.quantite).toLocaleString("fr-FR", { maximumFractionDigits: 3 })}
                       </td>
                       <td className="py-1.5 px-2 text-muted-foreground">{s.unite}</td>
+                      <td className="py-1.5 px-2 text-right text-muted-foreground tabular-nums">
+                        {s.poids_par_sac ? `${s.poids_par_sac} kg` : "—"}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -146,7 +151,12 @@ export default function MpslDashboardPage() {
               <ul className="space-y-1 text-sm">
                 {data.last_achats.map((a) => (
                   <li key={a.id} className="flex justify-between border-b pb-1 last:border-0">
-                    <span className="truncate max-w-[160px]">{a.produit}</span>
+                    <span className="truncate max-w-[160px]">
+                      {a.produit}
+                      {a.unite === "sacs" && a.poids_par_sac && (
+                        <span className="ml-1 text-xs text-muted-foreground">({a.poids_par_sac} kg/sac)</span>
+                      )}
+                    </span>
                     <span className="text-orange-700 dark:text-orange-300 font-medium">
                       {Number(a.prix_total).toLocaleString("fr-FR")} F
                     </span>

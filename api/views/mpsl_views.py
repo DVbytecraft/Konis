@@ -667,6 +667,7 @@ class MpslDashboardView(APIView):
                     "produit": a.produit_nom,
                     "quantite": str(a.quantite),
                     "unite": a.unite,
+                    "poids_par_sac": str(a.poids_par_sac) if a.poids_par_sac is not None else None,
                     "prix_total": str(a.prix_total),
                     "date": a.date.isoformat(),
                 }
