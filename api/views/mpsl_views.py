@@ -520,6 +520,77 @@ class ConvertirSacEnKgMpslView(APIView):
         return Response(resp_data)
 
 
+class ConvertirKgEnSacMpslView(APIView):
+    """
+    POST /api/mpsl/stock/<produit_id>/convertir-kg-en-sac/
+    Convertit kg en sacs entiers pour le stock MPSL.
+    Body : { "nombre_sacs": <int>, "poids_par_sac": "<decimal>" }
+    poids_par_sac est OBLIGATOIRE — jamais deviné.
+    """
+    permission_classes = [IsAuthenticated, IsMPSLRole]
+
+    def post(self, request, produit_id):
+        from inventaire.services import convertir_kg_en_sac
+        from decimal import InvalidOperation
+        from api.idempotency import IdempotencyGuard
+
+        guard = IdempotencyGuard(request, "conversion_kg_en_sac")
+        early = guard.check()
+        if early is not None:
+            return early
+
+        lieu = get_lieu_mpsl(request)
+        if not lieu:
+            return Response({"detail": "Dépôt MPSL introuvable."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            stock = Stock.objects.get(produit_id=produit_id, lieu=lieu)
+        except Stock.DoesNotExist:
+            return Response({"detail": "Stock introuvable."}, status=status.HTTP_404_NOT_FOUND)
+
+        # nombre_sacs — obligatoire, entier >= 1
+        nombre_sacs = request.data.get("nombre_sacs")
+        try:
+            nombre_sacs = int(nombre_sacs)
+            if nombre_sacs <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            return Response({"detail": "nombre_sacs doit être un entier >= 1."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # poids_par_sac — OBLIGATOIRE, strictement validé
+        pps_raw = request.data.get("poids_par_sac")
+        if pps_raw is None:
+            return Response({"detail": "poids_par_sac est obligatoire."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            poids_par_sac = Decimal(str(pps_raw))
+            if poids_par_sac <= 0:
+                raise ValueError
+        except (InvalidOperation, ValueError):
+            return Response({"detail": "poids_par_sac doit être un nombre > 0."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            result = convertir_kg_en_sac(
+                stock=stock,
+                nombre_sacs=nombre_sacs,
+                poids_par_sac=poids_par_sac,
+                updated_by=request.user,
+                idempotency_key=request.headers.get("Idempotency-Key"),
+                log_request=request,
+            )
+        except ErreurStock as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        stock.refresh_from_db()
+        resp_data = {
+            "sacs_crees":    result["sacs_crees"],
+            "kg_debites":    str(result["kg_debites"]),
+            "quantite_sacs": str(stock.quantite),
+            "quantite_kg":   str(stock.quantite_kg),
+        }
+        guard.success(resp_data)
+        return Response(resp_data)
+
+
 # --- Fournisseurs (lecture seule pour les achats MPSL) ------------------------
 
 class FournisseursMpslView(APIView):

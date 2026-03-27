@@ -6,7 +6,7 @@ from rest_framework.routers import DefaultRouter
 
 from api.views.auth_views import LoginView, RefreshView, LogoutView, MeView
 from api.views.health_views import HealthView, HealthCheckView
-from api.views.boutique_views import StockBoutiqueViewSet, ProduitBoutiqueViewSet, VenteBoutiqueViewSet, MoutureSeuleView, MoutureStatsView, MoutureExportView, MouturePdfExportView, TicketReprintView, DashboardBoutiqueView, ClientsBoutiqueView, CreanceBoutiqueViewSet, ConvertirSacEnKgView, TransfertBoutiqueView, DestinationsBoutiqueTransfertView
+from api.views.boutique_views import StockBoutiqueViewSet, ProduitBoutiqueViewSet, VenteBoutiqueViewSet, MoutureSeuleView, MoutureStatsView, MoutureExportView, MouturePdfExportView, TicketReprintView, DashboardBoutiqueView, ClientsBoutiqueView, CreanceBoutiqueViewSet, ConvertirSacEnKgView, ConvertirKgEnSacBoutiqueView, TransfertBoutiqueView, DestinationsBoutiqueTransfertView
 from api.views.admin_views import (
     EntrepriseViewSet,
     FactoryViewSet,
@@ -80,6 +80,7 @@ from api.views.mpsl_views import (
     AchatMPSLViewSet,
     CatalogueProduitsMPSLView,
     ConvertirSacEnKgMpslView,
+    ConvertirKgEnSacMpslView,
     FournisseursMpslView,
     MpslDashboardView,
     StockMPSLView,
@@ -163,6 +164,7 @@ urlpatterns = [
     path("boutique/dashboard/", DashboardBoutiqueView.as_view(), name="boutique-dashboard"),
     path("boutique/clients/", ClientsBoutiqueView.as_view(), name="boutique-clients"),
     path("boutique/stock/<int:produit_id>/convertir/", ConvertirSacEnKgView.as_view(), name="boutique-stock-convertir"),
+    path("boutique/stock/<int:produit_id>/convertir-kg-en-sac/", ConvertirKgEnSacBoutiqueView.as_view(), name="boutique-stock-convertir-kg-en-sac"),
     path("boutique/transferts/destinations/", DestinationsBoutiqueTransfertView.as_view(), name="boutique-transferts-destinations"),
     path("boutique/transferts/", TransfertBoutiqueView.as_view(), name="boutique-transferts"),
     path("boutique/", include(router_boutique.urls)),
@@ -177,6 +179,7 @@ urlpatterns = [
     path("mpsl/", include(router_mpsl.urls)),
     path("mpsl/stock/", StockMPSLView.as_view(), name="mpsl-stock"),
     path("mpsl/stock/<int:produit_id>/convertir/", ConvertirSacEnKgMpslView.as_view(), name="mpsl-stock-convertir"),
+    path("mpsl/stock/<int:produit_id>/convertir-kg-en-sac/", ConvertirKgEnSacMpslView.as_view(), name="mpsl-stock-convertir-kg-en-sac"),
     path("mpsl/catalogue/", CatalogueProduitsMPSLView.as_view(), name="mpsl-catalogue"),
     path("mpsl/dashboard/", MpslDashboardView.as_view(), name="mpsl-dashboard"),
     path("mpsl/fournisseurs/", FournisseursMpslView.as_view(), name="mpsl-fournisseurs"),

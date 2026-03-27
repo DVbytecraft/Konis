@@ -30,11 +30,17 @@ export default function BoutiqueStockPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  // Modal conversion
+  // Modal sac → kg
   const [convertTarget, setConvertTarget] = useState<StockItem | null>(null);
   const [nombreSacs, setNombreSacs] = useState("");
   const [poidsSaisi, setPoidsSaisi] = useState("");
   const [converting, setConverting] = useState(false);
+
+  // Modal kg → sac
+  const [kgSacTarget, setKgSacTarget] = useState<StockItem | null>(null);
+  const [kgSacNombreSacs, setKgSacNombreSacs] = useState("");
+  const [kgSacPoids, setKgSacPoids] = useState("");
+  const [convertingKgSac, setConvertingKgSac] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -63,6 +69,56 @@ export default function BoutiqueStockPage() {
     setConvertTarget(null);
     setNombreSacs("");
     setPoidsSaisi("");
+  };
+
+  const openKgSac = (item: StockItem) => {
+    setKgSacTarget(item);
+    setKgSacNombreSacs("");
+    setKgSacPoids(item.poids_par_sac ?? "");
+    setSuccess(null);
+    setError(null);
+  };
+
+  const closeKgSac = () => {
+    setKgSacTarget(null);
+    setKgSacNombreSacs("");
+    setKgSacPoids("");
+  };
+
+  const handleKgToSac = async () => {
+    if (!kgSacTarget) return;
+    const n = parseInt(kgSacNombreSacs, 10);
+    if (isNaN(n) || n <= 0) { setError("Nombre de sacs invalide."); return; }
+    const pds = parseFloat(kgSacPoids);
+    if (!kgSacPoids || isNaN(pds) || pds <= 0) { setError("Poids par sac obligatoire."); return; }
+    const kgNecessaires = n * pds;
+    const kgDispo = parseFloat(kgSacTarget.quantite_kg);
+    if (kgNecessaires > kgDispo) {
+      setError(`Stock insuffisant : ${kgDispo.toFixed(3)} kg disponible(s), conversion requiert ${kgNecessaires.toFixed(3)} kg.`);
+      return;
+    }
+    setConvertingKgSac(true);
+    setError(null);
+    try {
+      const res = await apiFetch<{ sacs_crees: number; kg_debites: string; quantite_sacs: string; quantite_kg: string }>(
+        `/boutique/stock/${kgSacTarget.produit}/convertir-kg-en-sac/`,
+        {
+          method: "POST",
+          headers: { "Idempotency-Key": buildIdempotencyKey("conversion-kg-sac") },
+          body: JSON.stringify({ nombre_sacs: n, poids_par_sac: kgSacPoids }),
+        },
+      );
+      setSuccess(
+        `${res.sacs_crees} sac(s) créé(s) — ${res.kg_debites} kg débités. ` +
+        `Stock restant : ${res.quantite_sacs} sacs + ${res.quantite_kg} kg.`,
+      );
+      closeKgSac();
+      await load();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Erreur lors de la conversion.");
+    } finally {
+      setConvertingKgSac(false);
+    }
   };
 
   const handleConvert = async () => {
@@ -119,8 +175,10 @@ export default function BoutiqueStockPage() {
     return `0 ${item.produit_unite}`;
   };
 
-  // Peut-on convertir ? Oui si quantite (sacs) > 0
+  // sac → kg : oui si quantite (sacs) > 0
   const peutConvertir = (item: StockItem) => parseFloat(item.quantite) > 0;
+  // kg → sac : oui si quantite_kg > 0
+  const peutConvertirKgEnSac = (item: StockItem) => parseFloat(item.quantite_kg) > 0;
 
   return (
     <div className="p-4 space-y-4 max-w-4xl mx-auto">
@@ -176,17 +234,30 @@ export default function BoutiqueStockPage() {
                         {item.poids_par_sac ? `${item.poids_par_sac} kg/sac` : "—"}
                       </td>
                       <td className="px-4 py-3 text-right">
-                        {peutConvertir(item) && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => openConvert(item)}
-                            className="gap-1"
-                          >
-                            <ArrowRightLeft className="h-3 w-3" />
-                            Convertir sacs → kg
-                          </Button>
-                        )}
+                        <div className="flex gap-1 justify-end flex-wrap">
+                          {peutConvertir(item) && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => openConvert(item)}
+                              className="gap-1"
+                            >
+                              <ArrowRightLeft className="h-3 w-3" />
+                              Sacs → kg
+                            </Button>
+                          )}
+                          {peutConvertirKgEnSac(item) && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => openKgSac(item)}
+                              className="gap-1"
+                            >
+                              <ArrowRightLeft className="h-3 w-3" />
+                              kg → Sacs
+                            </Button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -198,6 +269,80 @@ export default function BoutiqueStockPage() {
       </Card>
 
       {/* ── Modal conversion ─────────────────────────────────────────────── */}
+      {/* ── Modal kg → sacs ──────────────────────────────────────────────── */}
+      {kgSacTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-sm mx-4 p-6 space-y-4">
+            <h2 className="text-lg font-semibold">Convertir kg → sacs</h2>
+            <p className="text-sm text-muted-foreground">
+              <span className="font-medium">{kgSacTarget.produit_nom}</span> —{" "}
+              {parseFloat(kgSacTarget.quantite_kg).toFixed(3)} kg disponibles
+            </p>
+
+            {/* poids_par_sac — obligatoire */}
+            <div className="space-y-1">
+              <label className="text-sm font-medium">
+                Poids par sac (kg) <span className="text-red-500">*</span>
+              </label>
+              <Input
+                type="number"
+                min={0.001}
+                step={0.001}
+                value={kgSacPoids}
+                onChange={(e) => setKgSacPoids(e.target.value)}
+                placeholder="ex : 25.000"
+                autoFocus={!kgSacTarget.poids_par_sac}
+              />
+              {kgSacTarget.poids_par_sac && parseFloat(kgSacTarget.poids_par_sac) > 0 && kgSacPoids !== kgSacTarget.poids_par_sac && (
+                <p className="text-xs text-amber-600">
+                  ⚠ Le produit est défini à {kgSacTarget.poids_par_sac} kg/sac. Toute valeur différente sera rejetée par le serveur.
+                </p>
+              )}
+            </div>
+
+            {/* nombre de sacs */}
+            <div className="space-y-1">
+              <label className="text-sm font-medium">Nombre de sacs à créer</label>
+              <Input
+                type="number"
+                min={1}
+                value={kgSacNombreSacs}
+                onChange={(e) => setKgSacNombreSacs(e.target.value)}
+                placeholder="ex : 4"
+                autoFocus={!!kgSacTarget.poids_par_sac}
+              />
+            </div>
+
+            {/* aperçu calcul */}
+            {(() => {
+              const n = parseInt(kgSacNombreSacs, 10);
+              const pds = parseFloat(kgSacPoids);
+              const kgDispo = parseFloat(kgSacTarget.quantite_kg);
+              if (n > 0 && pds > 0) {
+                const kgNec = n * pds;
+                const ok = kgNec <= kgDispo;
+                return (
+                  <p className={`text-xs rounded p-2 border ${ok ? "text-blue-700 bg-blue-50 border-blue-200" : "text-red-700 bg-red-50 border-red-200"}`}>
+                    {ok
+                      ? `→ ${kgNec.toFixed(3)} kg débités · ${(kgDispo - kgNec).toFixed(3)} kg resteront`
+                      : `✗ Insuffisant : ${kgNec.toFixed(3)} kg requis, ${kgDispo.toFixed(3)} kg disponibles`}
+                  </p>
+                );
+              }
+              return <p className="text-xs text-muted-foreground bg-muted/30 rounded p-2">Renseignez le nombre de sacs et le poids pour voir le calcul.</p>;
+            })()}
+
+            <div className="flex gap-2 justify-end pt-1">
+              <Button variant="outline" onClick={closeKgSac} disabled={convertingKgSac}>Annuler</Button>
+              <Button onClick={handleKgToSac} disabled={convertingKgSac || !kgSacNombreSacs || !kgSacPoids}>
+                {convertingKgSac ? "Conversion…" : "Confirmer"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal sacs → kg ───────────────────────────────────────────────── */}
       {convertTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="bg-white rounded-lg shadow-xl w-full max-w-sm mx-4 p-6 space-y-4">

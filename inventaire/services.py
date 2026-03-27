@@ -939,3 +939,81 @@ def convertir_sac_en_kg(
         )
 
     return kg
+
+
+# ─── Conversion kg → sacs ─────────────────────────────────────────────────────
+
+def convertir_kg_en_sac(
+    stock: Stock,
+    nombre_sacs: int,
+    poids_par_sac: Decimal,
+    updated_by,
+    *,
+    idempotency_key: str | None = None,
+    log_request=None,
+) -> dict:
+    """
+    Convertit kg en sacs entiers pour le stock.
+
+    - Débite quantite_kg de (nombre_sacs × poids_par_sac)
+    - Crédite quantite (sacs) de nombre_sacs
+    - poids_par_sac OBLIGATOIRE — jamais deviné, jamais implicite
+    - Si produit.poids_par_sac est défini, il doit correspondre EXACTEMENT :
+      interdit de créer des sacs à 50 kg pour un produit défini à 25 kg/sac
+    - Atomique : transaction.atomic() + select_for_update(pk)
+    - Retourne {"sacs_crees": int, "kg_debites": Decimal}
+    - Lève ErreurStock si validations échouent
+    """
+    from audit.services import audit_log
+
+    if not poids_par_sac or poids_par_sac <= 0:
+        raise ErreurStock("poids_par_sac est obligatoire et doit être > 0.")
+    if nombre_sacs <= 0:
+        raise ErreurStock("Le nombre de sacs à créer doit être >= 1.")
+
+    with transaction.atomic():
+        locked = Stock.objects.select_for_update().get(pk=stock.pk)
+
+        # Règle d'isolation des poids — aucun mélange toléré.
+        pps_produit = locked.produit.poids_par_sac
+        if pps_produit is not None and pps_produit != poids_par_sac:
+            raise ErreurStock(
+                f"Mélange de poids_par_sac interdit : '{locked.produit.nom}' "
+                f"est défini à {pps_produit} kg/sac, "
+                f"impossible d'utiliser {poids_par_sac} kg/sac."
+            )
+
+        # Validation stock — APRÈS le lock, sur la valeur verrouillée
+        kg_debites = Decimal(str(nombre_sacs)) * poids_par_sac
+        if locked.quantite_kg < kg_debites:
+            raise ErreurStock(
+                f"Stock kg insuffisant : {locked.quantite_kg} kg disponible(s), "
+                f"conversion requiert {kg_debites} kg "
+                f"({nombre_sacs} sac(s) × {poids_par_sac} kg/sac)."
+            )
+
+        # Écriture atomique — conservation exacte du stock (Decimal, zéro arrondi)
+        locked.quantite_kg -= kg_debites
+        locked.quantite    += Decimal(str(nombre_sacs))
+        locked.save(update_fields=["quantite", "quantite_kg", "updated_at"])
+
+        extra = {
+            "lieu":          locked.lieu.nom,
+            "produit":       locked.produit.nom,
+            "sacs_crees":    nombre_sacs,
+            "kg_debites":    str(kg_debites),
+            "poids_par_sac": str(poids_par_sac),
+        }
+        if idempotency_key:
+            extra["idempotency_key"] = idempotency_key
+
+        audit_log(
+            user=updated_by,
+            action="conversion_kg_en_sac",
+            object_type="Stock",
+            object_id=locked.pk,
+            extra=extra,
+            request=log_request,
+        )
+
+    return {"sacs_crees": nombre_sacs, "kg_debites": kg_debites}
