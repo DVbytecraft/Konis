@@ -420,19 +420,24 @@ def _compute_mpsl_stock_lines(lieu: Lieu) -> list:
                     "quantite": str(kg), "poids_par_sac": pps,
                 })
         else:
-            # Jamais transféré → tous les achats sont disponibles, par unite
+            # Jamais transféré → tous les achats sont disponibles.
+            # Grouper par (unite, poids_par_sac) pour ne pas fusionner des sacs
+            # de poids différents sous une même ligne (règle métier : sacs 25kg ≠ sacs 50kg).
             for row in (
                 AchatMPSL.objects.filter(lieu=lieu, produit_nom__iexact=nom)
-                .values("unite")
+                .values("unite", "poids_par_sac")
                 .annotate(total=Sum("quantite"))
-                .order_by("unite")
+                .order_by("unite", "poids_par_sac")
             ):
                 total = _d(row["total"])
                 if total > 0:
+                    # poids_par_sac de la ligne = pps de l'achat (peut différer du produit
+                    # si plusieurs achats à poids différents — chaque ligne reste isolée).
+                    pps_ligne = str(row["poids_par_sac"]) if row["poids_par_sac"] is not None else pps
                     result.append({
                         "produit_id": produit_id, "produit_nom": nom, "produit": nom,
                         "produit_code": produit_code, "unite": row["unite"],
-                        "quantite": str(total), "poids_par_sac": pps,
+                        "quantite": str(total), "poids_par_sac": pps_ligne,
                     })
 
     return result

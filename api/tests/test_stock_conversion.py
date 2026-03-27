@@ -287,3 +287,169 @@ class ConvertirKgEnSacAPITests(APITestCase):
         # Stock inchangé après la 2e requête idempotente
         self.assertEqual(s_after_1.quantite, s_after_2.quantite)
         self.assertEqual(s_after_1.quantite_kg, s_after_2.quantite_kg)
+
+
+# ─── Tests isolation poids_par_sac (anti-mélange) ─────────────────────────────
+
+class IsolationPoidsParSacTests(TestCase):
+    """
+    Vérifie que le système refuse tout mélange de sacs à poids différents.
+    Règle métier absolue : sacs 25kg ≠ sacs 50kg — jamais fusionnés.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        entreprise = Entreprise.objects.create(nom="KONIS ISO")
+        cls.lieu_mpsl = Lieu.objects.create(
+            entreprise=entreprise, nom="MPSL Iso", type_lieu=Lieu.TYPE_MPSL
+        )
+        cls.lieu_boutique = Lieu.objects.create(
+            entreprise=entreprise, nom="Boutique Iso", type_lieu=Lieu.TYPE_MAGASIN
+        )
+        cls.user = CustomUser.objects.create_user(
+            username="agent_iso", password="x",
+            role=CustomUser.ROLE_MPSL, entreprise=entreprise, lieu=cls.lieu_mpsl,
+        )
+        cat = Categorie.objects.create(nom="Céréales Iso", entreprise=entreprise)
+        cls.cat = cat
+        cls.entreprise = entreprise
+        cls.produit_25 = Produit.objects.create(
+            categorie=cat, nom="Maïs iso 25", code="MI25", unite="sac",
+            entreprise=entreprise, poids_par_sac=Decimal("25.000"),
+        )
+        cls.produit_50 = Produit.objects.create(
+            categorie=cat, nom="Maïs iso 50", code="MI50", unite="sac",
+            entreprise=entreprise, poids_par_sac=Decimal("50.000"),
+        )
+        cls.produit_libre = Produit.objects.create(
+            categorie=cat, nom="Grain libre iso", code="GLI01", unite="sac",
+            entreprise=entreprise, poids_par_sac=None,
+        )
+
+    # ── Scénario 1 : achat même produit à poids différent avec sacs en stock ──
+    def test_achat_mpsl_refuse_melange_pps_avec_sacs_en_stock(self):
+        from inventaire.services import enregistrer_achat_mpsl
+        # 10 sacs à 25 kg/sac
+        enregistrer_achat_mpsl(
+            self.lieu_mpsl, "Maïs test mélange achat", Decimal("10"), "sacs",
+            poids_par_sac=Decimal("25"), created_by=self.user,
+        )
+        p = Produit.objects.get(nom__iexact="Maïs test mélange achat", entreprise=self.entreprise)
+        self.assertEqual(p.poids_par_sac, Decimal("25"))
+        stock = Stock.objects.get(produit=p, lieu=self.lieu_mpsl)
+        self.assertEqual(stock.quantite, Decimal("10"))
+
+        # Tenter d'acheter à pps=50 → refusé car sacs pps=25 encore en stock
+        with self.assertRaises(ErreurStock) as cm:
+            enregistrer_achat_mpsl(
+                self.lieu_mpsl, "Maïs test mélange achat", Decimal("5"), "sacs",
+                poids_par_sac=Decimal("50"), created_by=self.user,
+            )
+        self.assertIn("Mélange", str(cm.exception))
+        stock.refresh_from_db()
+        self.assertEqual(stock.quantite, Decimal("10"))  # inchangé
+        p.refresh_from_db()
+        self.assertEqual(p.poids_par_sac, Decimal("25"))  # pps non modifié
+
+    # ── Scénario 2 : changement pps autorisé si stock de sacs = 0 ─────────────
+    def test_achat_mpsl_permet_changement_pps_si_sacs_a_zero(self):
+        from inventaire.services import enregistrer_achat_mpsl, convertir_sac_en_kg
+        enregistrer_achat_mpsl(
+            self.lieu_mpsl, "Maïs pps ok", Decimal("4"), "sacs",
+            poids_par_sac=Decimal("25"), created_by=self.user,
+        )
+        p = Produit.objects.get(nom__iexact="Maïs pps ok", entreprise=self.entreprise)
+        stock = Stock.objects.get(produit=p, lieu=self.lieu_mpsl)
+        convertir_sac_en_kg(stock, 4, updated_by=self.user, idempotency_key="iso-sac-kg-2")
+        stock.refresh_from_db()
+        self.assertEqual(stock.quantite, Decimal("0"))
+        # Maintenant autorisé — plus de sacs de l'ancien poids
+        enregistrer_achat_mpsl(
+            self.lieu_mpsl, "Maïs pps ok", Decimal("3"), "sacs",
+            poids_par_sac=Decimal("50"), created_by=self.user,
+        )
+        p.refresh_from_db()
+        self.assertEqual(p.poids_par_sac, Decimal("50"))
+
+    # ── Scénario 3 : kg→sac refuse si sacs existants à poids inconnu ──────────
+    def test_kg_en_sac_refuse_si_sacs_existants_pps_inconnu(self):
+        stock = Stock.objects.create(
+            produit=self.produit_libre, lieu=self.lieu_boutique,
+            quantite=Decimal("5"),   # 5 sacs de poids inconnu
+            quantite_kg=Decimal("200"),
+        )
+        with self.assertRaises(ErreurStock) as cm:
+            convertir_kg_en_sac(
+                stock, nombre_sacs=4, poids_par_sac=Decimal("25"), updated_by=self.user
+            )
+        self.assertIn("poids non défini", str(cm.exception))
+        stock.refresh_from_db()
+        self.assertEqual(stock.quantite_kg, Decimal("200"))  # inchangé
+
+    # ── Scénario 4 : kg→sac fixe pps sur produit si aucun sac existant ────────
+    def test_kg_en_sac_verrouille_pps_sur_produit_si_aucun_sac(self):
+        produit_neutre = Produit.objects.create(
+            categorie=self.cat, nom="Grain neutre fixpps", code="GNF02",
+            unite="sac", entreprise=self.entreprise, poids_par_sac=None,
+        )
+        stock = Stock.objects.create(
+            produit=produit_neutre, lieu=self.lieu_boutique,
+            quantite=Decimal("0"), quantite_kg=Decimal("100"),
+        )
+        convertir_kg_en_sac(stock, nombre_sacs=2, poids_par_sac=Decimal("25"), updated_by=self.user)
+        stock.refresh_from_db()
+        produit_neutre.refresh_from_db()
+        self.assertEqual(stock.quantite, Decimal("2"))
+        self.assertEqual(stock.quantite_kg, Decimal("50"))
+        # pps désormais verrouillé sur 25 → conversion suivante à 50 refusée
+        self.assertEqual(produit_neutre.poids_par_sac, Decimal("25"))
+        with self.assertRaises(ErreurStock):
+            convertir_kg_en_sac(stock, nombre_sacs=1, poids_par_sac=Decimal("50"), updated_by=self.user)
+
+    # ── Scénario 5 : deux produits distincts = deux lignes, conversions exactes ─
+    def test_deux_produits_poids_differents_conversions_exactes_et_isolees(self):
+        from inventaire.services import convertir_sac_en_kg
+        stock_25 = Stock.objects.create(
+            produit=self.produit_25, lieu=self.lieu_boutique,
+            quantite=Decimal("10"), quantite_kg=Decimal("0"),
+        )
+        stock_50 = Stock.objects.create(
+            produit=self.produit_50, lieu=self.lieu_boutique,
+            quantite=Decimal("5"), quantite_kg=Decimal("0"),
+        )
+        # 10 sacs × 25 kg = 250 kg exact
+        kg_25 = convertir_sac_en_kg(stock_25, 10, updated_by=self.user, idempotency_key="iso-25")
+        self.assertEqual(kg_25, Decimal("250"))
+        stock_25.refresh_from_db()
+        self.assertEqual(stock_25.quantite, Decimal("0"))
+        self.assertEqual(stock_25.quantite_kg, Decimal("250"))
+
+        # 5 sacs × 50 kg = 250 kg exact
+        kg_50 = convertir_sac_en_kg(stock_50, 5, updated_by=self.user, idempotency_key="iso-50")
+        self.assertEqual(kg_50, Decimal("250"))
+        stock_50.refresh_from_db()
+        self.assertEqual(stock_50.quantite, Decimal("0"))
+        self.assertEqual(stock_50.quantite_kg, Decimal("250"))
+
+        # Les deux entrées restent séparées — aucune fusion
+        self.assertNotEqual(stock_25.pk, stock_50.pk)
+
+    # ── Scénario 6 : batch refuse mélange pps ─────────────────────────────────
+    def test_batch_achat_refuse_melange_pps(self):
+        from inventaire.services import enregistrer_achats_mpsl_batch
+        p_batch = Produit.objects.create(
+            categorie=self.cat, nom="Maïs batch melange", code="MBM02",
+            unite="sac", entreprise=self.entreprise, poids_par_sac=Decimal("25"),
+        )
+        Stock.objects.create(
+            produit=p_batch, lieu=self.lieu_mpsl,
+            quantite=Decimal("8"), quantite_kg=Decimal("0"),
+        )
+        with self.assertRaises(ErreurStock) as cm:
+            enregistrer_achats_mpsl_batch(
+                self.lieu_mpsl,
+                [{"produit_nom": "Maïs batch melange", "quantite": 3,
+                  "unite": "sacs", "poids_par_sac": Decimal("50"), "prix_unitaire": 0}],
+                created_by=self.user,
+            )
+        self.assertIn("Mélange", str(cm.exception))

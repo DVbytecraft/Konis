@@ -340,6 +340,17 @@ def enregistrer_achat_mpsl(
                 create_kwargs["poids_par_sac"] = poids_par_sac
             existing = Produit.objects.create(**create_kwargs)
         elif poids_par_sac is not None and existing.poids_par_sac != poids_par_sac:
+            # Refuser si des sacs de l'ancien poids sont encore en stock à ce lieu.
+            # Changer poids_par_sac rétroactivement ferait traiter les anciens sacs
+            # comme s'ils pesaient le nouveau poids — mélange interdit.
+            stock_check = Stock.objects.filter(produit=existing, lieu=lieu).first()
+            if stock_check and stock_check.quantite > 0:
+                raise ErreurStock(
+                    f"Mélange de poids interdit : '{nom}' a déjà "
+                    f"{stock_check.quantite} sac(s) à {existing.poids_par_sac} kg/sac en stock. "
+                    f"Impossible d'ajouter des sacs à {poids_par_sac} kg/sac sur le même produit. "
+                    f"Convertissez d'abord les sacs existants en kg, ou utilisez un nom de produit différent."
+                )
             existing.poids_par_sac = poids_par_sac
             existing.save(update_fields=["poids_par_sac"])
 
@@ -486,6 +497,15 @@ def enregistrer_achats_mpsl_batch(
                 create_kwargs["poids_par_sac"] = poids_par_sac
             existing = Produit.objects.create(**create_kwargs)
         elif poids_par_sac is not None and existing.poids_par_sac != poids_par_sac:
+            # Refuser si des sacs de l'ancien poids sont encore en stock à ce lieu.
+            stock_check = Stock.objects.filter(produit=existing, lieu=lieu).first()
+            if stock_check and stock_check.quantite > 0:
+                raise ErreurStock(
+                    f"Mélange de poids interdit : '{nom}' a déjà "
+                    f"{stock_check.quantite} sac(s) à {existing.poids_par_sac} kg/sac en stock. "
+                    f"Impossible d'ajouter des sacs à {poids_par_sac} kg/sac sur le même produit. "
+                    f"Convertissez d'abord les sacs existants en kg, ou utilisez un nom de produit différent."
+                )
             existing.poids_par_sac = poids_par_sac
             existing.save(update_fields=["poids_par_sac"])
 
@@ -978,10 +998,24 @@ def convertir_kg_en_sac(
         pps_produit = locked.produit.poids_par_sac
         if pps_produit is not None and pps_produit != poids_par_sac:
             raise ErreurStock(
-                f"Mélange de poids_par_sac interdit : '{locked.produit.nom}' "
+                f"Mélange de poids interdit : '{locked.produit.nom}' "
                 f"est défini à {pps_produit} kg/sac, "
-                f"impossible d'utiliser {poids_par_sac} kg/sac."
+                f"impossible de créer des sacs à {poids_par_sac} kg/sac."
             )
+        if pps_produit is None and locked.quantite > 0:
+            # Des sacs existent déjà mais leur poids n'est pas enregistré sur le produit.
+            # Ajouter des sacs à un poids précis mélangerait des sacs de poids inconnu
+            # avec des sacs de poids connu — interdit.
+            raise ErreurStock(
+                f"'{locked.produit.nom}' contient déjà {locked.quantite} sac(s) de poids non défini. "
+                f"Impossible de créer des sacs à {poids_par_sac} kg/sac sans mélanger les poids. "
+                f"Définissez poids_par_sac sur ce produit, ou convertissez les sacs existants en kg d'abord."
+            )
+        # Si poids_par_sac non défini sur le produit et aucun sac existant :
+        # le verrouiller sur le produit pour que toutes les conversions futures soient cohérentes.
+        if pps_produit is None:
+            locked.produit.poids_par_sac = poids_par_sac
+            locked.produit.save(update_fields=["poids_par_sac"])
 
         # Validation stock — APRÈS le lock, sur la valeur verrouillée
         kg_debites = Decimal(str(nombre_sacs)) * poids_par_sac
