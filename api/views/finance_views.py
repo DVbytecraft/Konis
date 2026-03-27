@@ -474,8 +474,9 @@ class JournalCreanceViewSet(DafReadOnlyMixin, ListModelMixin, RetrieveModelMixin
 
         if retrancher_caisse:
             from core.models import CustomUser as CU
-            # DAF et COMPTABLE sont bloqués par DafReadOnlyMixin sur l'action "create"
-            # avant d'atteindre ce point → seuls SUPREME_ADMIN et ADMIN sont effectivement autorisés.
+            # DAF est bloqué par DafReadOnlyMixin sur "create" avant d'atteindre ce point.
+            # COMPTABLE passe le mixin mais est bloqué ici par ROLES_AUTORISES.
+            # → seuls SUPREME_ADMIN et ADMIN peuvent retrancher la caisse.
             ROLES_AUTORISES = {CU.ROLE_SUPREME_ADMIN, CU.ROLE_ADMIN}
             if request.user.role not in ROLES_AUTORISES:
                 return Response(
