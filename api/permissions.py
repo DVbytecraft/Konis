@@ -161,23 +161,20 @@ class IsCollecteurRole(permissions.BasePermission):
 class DafReadOnlyMixin:
     """
     Mixin à ajouter sur les ViewSets financiers.
-    Bloque les opérations d'écriture pour les rôles DAF et COMPTABLE.
+    Bloque les opérations d'écriture pour le rôle DAF uniquement.
 
     Rôles bloqués :
-      - DAF      : lecture seule (peut consulter, pas créer/modifier)
-      - COMPTABLE: lecture seule sur finance (peut écrire sur dépenses via IsComptableRole)
+      - DAF      : lecture seule (peut consulter, pas créer/modifier/supprimer)
 
-    Actions bloquées :
+    COMPTABLE : accès complet en lecture ET écriture sur le module finance,
+      identique à l'admin. Le COMPTABLE n'est PAS dans _READ_ONLY_ROLES.
+
+    Actions bloquées (pour DAF) :
       - CRUD standard : create, update, partial_update, destroy
       - Actions custom des ViewSets finance : modifier, paiement, solder,
         remboursement, depense, depot, changer_statut
-
-    Exception par ViewSet — surcharger _COMPTABLE_ALLOWED_WRITE_ACTIONS :
-      Certains ViewSets peuvent autoriser le COMPTABLE sur des actions d'écriture
-      spécifiques sans toucher aux autres ViewSets ni au DAF.
-      Exemple : CreancierViewSet autorise le COMPTABLE à créer des créanciers.
     """
-    _READ_ONLY_ROLES = frozenset({CustomUser.ROLE_DAF, CustomUser.ROLE_COMPTABLE})
+    _READ_ONLY_ROLES = frozenset({CustomUser.ROLE_DAF})
     _WRITE_ACTIONS = frozenset({
         # Actions CRUD standard DRF
         "create", "update", "partial_update", "destroy",
@@ -185,19 +182,15 @@ class DafReadOnlyMixin:
         "modifier", "paiement", "solder", "remboursement",
         "depense", "depot", "changer_statut",
     })
-    # Actions d'écriture autorisées pour le COMPTABLE sur ce ViewSet précis.
-    # Le DAF reste toujours en lecture seule. Par défaut : aucune.
-    _COMPTABLE_ALLOWED_WRITE_ACTIONS = frozenset()
 
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
-        user_role = getattr(request.user, "role", None) if request.user and request.user.is_authenticated else None
-        action = getattr(self, "action", None)
-        if user_role in self._READ_ONLY_ROLES and action in self._WRITE_ACTIONS:
-            # Exception : le COMPTABLE peut effectuer certaines actions d'écriture
-            # si ce ViewSet les autorise explicitement via _COMPTABLE_ALLOWED_WRITE_ACTIONS.
-            if user_role == CustomUser.ROLE_COMPTABLE and action in self._COMPTABLE_ALLOWED_WRITE_ACTIONS:
-                return
+        if (
+            request.user
+            and request.user.is_authenticated
+            and getattr(request.user, "role", None) in self._READ_ONLY_ROLES
+            and getattr(self, "action", None) in self._WRITE_ACTIONS
+        ):
             from rest_framework.exceptions import PermissionDenied
             raise PermissionDenied("Accès en lecture seule pour ce rôle.")
 

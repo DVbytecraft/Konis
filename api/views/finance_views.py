@@ -112,9 +112,6 @@ class CreancierViewSet(DafReadOnlyMixin, ListModelMixin, RetrieveModelMixin, Cre
     """
     permission_classes = [IsDafRole]
     throttle_classes = [FinanceCreateRateThrottle]
-    # Le COMPTABLE peut créer des créanciers (fournisseurs/partenaires financiers).
-    # Le DAF reste en lecture seule — modifier/destroy lui sont toujours bloqués.
-    _COMPTABLE_ALLOWED_WRITE_ACTIONS = frozenset({"create"})
 
     def get_queryset(self):
         ent_id = self.request.user.entreprise_id
@@ -237,9 +234,6 @@ class JournalPayableViewSet(DafReadOnlyMixin, ListModelMixin, RetrieveModelMixin
     """
     permission_classes = [IsDafRole]
     throttle_classes = [FinanceCreateRateThrottle]
-    # Le COMPTABLE peut créer des journaux payables (enregistrer une dette fournisseur).
-    # paiement et solder restent réservés à admin/DAF.
-    _COMPTABLE_ALLOWED_WRITE_ACTIONS = frozenset({"create"})
 
     def get_queryset(self):
         ent_id = self.request.user.entreprise_id

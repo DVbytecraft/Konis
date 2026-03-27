@@ -188,15 +188,10 @@ class TestRolesRetracherCaisse(APITestCase):
 
     Architecture :
       JournalCreanceViewSet utilise DafReadOnlyMixin + IsDafRole.
-      → DafReadOnlyMixin bloque DAF et COMPTABLE en écriture (403 "Accès en lecture seule").
+      → DafReadOnlyMixin bloque DAF en écriture (403 "Accès en lecture seule").
+      → COMPTABLE passe DafReadOnlyMixin mais est bloqué par le check ROLES_AUTORISES
+        de retrancher_caisse (réservé à SUPREME_ADMIN et ADMIN uniquement).
       → IsDafRole bloque boutique/usine/collecteur (403 "Réservé au DAF ou aux administrateurs").
-      → Le check retrancher_caisse (ROLES_AUTORISES) n'est atteint que par supreme_admin et admin.
-
-    Incohérence identifiée (P4 audit) :
-      ROLES_AUTORISES inclut DAF et COMPTABLE mais ils sont bloqués par DafReadOnlyMixin
-      avant d'atteindre ce check → le code est dead code pour DAF/COMPTABLE sur cette vue.
-      Le service finance.services.solder_journal_payable() a la même liste ROLES_AUTORISES
-      mais peut être appelé depuis des voies admin où DAF n'est pas bloqué.
     """
 
     @classmethod
@@ -275,11 +270,13 @@ class TestRolesRetracherCaisse(APITestCase):
         self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN, r.json())
         self.assertIn("lecture seule", r.json().get("detail", "").lower())
 
-    def test_comptable_bloque_par_read_only_mixin(self):
-        """COMPTABLE : même comportement que DAF — DafReadOnlyMixin bloque avant ROLES_AUTORISES."""
+    def test_comptable_bloque_sur_retrancher_caisse(self):
+        """
+        COMPTABLE : passe DafReadOnlyMixin (accès complet finance), mais retrancher_caisse=True
+        est réservé à SUPREME_ADMIN et ADMIN — COMPTABLE obtient 403 au check ROLES_AUTORISES.
+        """
         r = self._post(self.comptable, key_suffix="001")
         self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN, r.json())
-        self.assertIn("lecture seule", r.json().get("detail", "").lower())
 
     # ── Rôles non autorisés (bloqués par IsDafRole) ──
 

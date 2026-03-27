@@ -170,13 +170,14 @@ class TestFinanceRBACExhaustif(APITestCase):
 
     Principe :
       - IsDafRole (supreme_admin, admin, DAF, comptable) : accès en lecture (GET) ✓
-      - DafReadOnlyMixin : bloque DAF et COMPTABLE sur les actions write
-      - Actions non listées dans _WRITE_ACTIONS (ex: activate, desactivate) : DAF/COMPTABLE peuvent y accéder
+      - DafReadOnlyMixin : bloque DAF uniquement sur les actions write
+      - COMPTABLE : accès complet en lecture ET écriture, identique à l'admin
+      - Actions non listées dans _WRITE_ACTIONS (ex: activate, desactivate) : DAF peut y accéder
 
     Structure des tests :
       1. GET (lecture) → tous les rôles IsDafRole passent
-      2. POST (écriture) → DAF/COMPTABLE bloqués (403 "lecture seule"), admin passe
-      3. Actions custom non bloquées (activate/desactivate) → DAF/COMPTABLE atteignent le ROLES_AUTORISES check
+      2. POST (écriture) → DAF bloqué (403 "lecture seule"), admin et COMPTABLE passent
+      3. Actions custom non bloquées (activate/desactivate) → DAF atteint le ROLES_AUTORISES check
     """
 
     @classmethod

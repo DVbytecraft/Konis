@@ -839,8 +839,8 @@ class TestComptableCreancier(APITestCase):
         jp = JournalPayable.objects.get(pk=r.json()["id"])
         self.assertEqual(jp.creancier.entreprise_id, self.ent.pk)
 
-    def test_comptable_ne_peut_pas_enregistrer_paiement_payable(self):
-        """paiement et solder restent réservés à admin/DAF."""
+    def test_comptable_peut_enregistrer_paiement_payable(self):
+        """Le comptable a accès complet au module finance — il peut enregistrer des paiements."""
         creancier = Creancier.objects.create(
             entreprise=self.ent, nom="Four Y", type_creancier="fournisseur", statut="actif"
         )
@@ -852,13 +852,15 @@ class TestComptableCreancier(APITestCase):
             montant_initial=Decimal("20000"),
             created_by=self.comptable,
         )
+        import datetime
         r = self.client.post(
             f"/api/finance/journaux-payables/{jp.pk}/paiement/",
-            {"montant": 5000},
+            {"montant": 5000, "date": str(datetime.date.today())},
             format="json",
+            HTTP_IDEMPOTENCY_KEY="test-comptable-paiement-001",
             **self._jwt(self.comptable),
         )
-        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertIn(r.status_code, (200, 201))
 
     def test_comptable_creancier_scope_entreprise(self):
         """Un créancier créé par le comptable appartient bien à son entreprise."""
