@@ -817,19 +817,44 @@ class TestComptableCreancier(APITestCase):
         r = self.client.get("/api/finance/creanciers/", **self._jwt(self.daf))
         self.assertEqual(r.status_code, status.HTTP_200_OK)
 
-    def test_comptable_ne_peut_pas_creer_journal_payable(self):
-        """Les autres ViewSets financiers restent bloqués pour le comptable."""
+    def test_comptable_peut_creer_journal_payable(self):
+        """Le comptable peut enregistrer une dette fournisseur."""
         creancier = Creancier.objects.create(
             entreprise=self.ent, nom="Four X", type_creancier="fournisseur", statut="actif"
         )
         r = self.client.post(
             "/api/finance/journaux-payables/",
             {
-                "creancier": creancier.pk,
-                "reference": "REF-001",
-                "description": "Test",
-                "montant_initial": 10000,
+                "creancier_id": creancier.pk,
+                "reference": "REF-COMPTABLE-001",
+                "description": "Dette fournisseur saisie par comptable",
+                "montant_initial": 50000,
             },
+            format="json",
+            HTTP_IDEMPOTENCY_KEY="test-comptable-payable-001",
+            **self._jwt(self.comptable),
+        )
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        from finance.models import JournalPayable
+        jp = JournalPayable.objects.get(pk=r.json()["id"])
+        self.assertEqual(jp.creancier.entreprise_id, self.ent.pk)
+
+    def test_comptable_ne_peut_pas_enregistrer_paiement_payable(self):
+        """paiement et solder restent réservés à admin/DAF."""
+        creancier = Creancier.objects.create(
+            entreprise=self.ent, nom="Four Y", type_creancier="fournisseur", statut="actif"
+        )
+        from finance.models import JournalPayable as JP
+        jp = JP.objects.create(
+            creancier=creancier,
+            reference="REF-002",
+            description="Dette test",
+            montant_initial=Decimal("20000"),
+            created_by=self.comptable,
+        )
+        r = self.client.post(
+            f"/api/finance/journaux-payables/{jp.pk}/paiement/",
+            {"montant": 5000},
             format="json",
             **self._jwt(self.comptable),
         )

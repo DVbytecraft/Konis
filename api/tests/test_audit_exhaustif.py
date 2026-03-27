@@ -240,17 +240,21 @@ class TestFinanceRBACExhaustif(APITestCase):
         self.assertEqual(r.status_code, 403)
         self.assertIn("lecture seule", r.json().get("detail", "").lower())
 
-    def test_post_journal_payable_comptable_bloque_par_mixin(self):
-        """POST /api/finance/journaux-payables/ : COMPTABLE bloqué par DafReadOnlyMixin."""
+    def test_post_journal_payable_comptable_autorise(self):
+        """POST /api/finance/journaux-payables/ : COMPTABLE autorisé à créer (règle métier)."""
         r = self.client.post(
             "/api/finance/journaux-payables/",
-            {"creancier": self.creancier.pk, "description": "Test", "montant_initial": "5000"},
+            {
+                "creancier_id": self.creancier.pk,
+                "reference": "REF-CPT-RBAC",
+                "description": "Test comptable",
+                "montant_initial": "5000",
+            },
             format="json",
             HTTP_IDEMPOTENCY_KEY="rbacex-jp-cpt-001",
             **self._jwt(self.comptable),
         )
-        self.assertEqual(r.status_code, 403)
-        self.assertIn("lecture seule", r.json().get("detail", "").lower())
+        self.assertIn(r.status_code, (200, 201))
 
     def test_post_journal_payable_admin_passe(self):
         """POST /api/finance/journaux-payables/ : admin passe (DafReadOnlyMixin ne bloque pas admin)."""

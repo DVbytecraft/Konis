@@ -230,13 +230,16 @@ class CreancierViewSet(DafReadOnlyMixin, ListModelMixin, RetrieveModelMixin, Cre
 class JournalPayableViewSet(DafReadOnlyMixin, ListModelMixin, RetrieveModelMixin, CreateModelMixin, GenericViewSet):
     """
     GET  /api/finance/journaux-payables/             — liste
-    POST /api/finance/journaux-payables/             — créer journal
+    POST /api/finance/journaux-payables/             — créer journal (admin, DAF, COMPTABLE)
     GET  /api/finance/journaux-payables/{id}/        — détail + paiements
-    POST /api/finance/journaux-payables/{id}/paiement/ — enregistrer paiement
-    POST /api/finance/journaux-payables/{id}/solder/   — solder manuellement
+    POST /api/finance/journaux-payables/{id}/paiement/ — enregistrer paiement (admin, DAF)
+    POST /api/finance/journaux-payables/{id}/solder/   — solder manuellement (admin, DAF)
     """
     permission_classes = [IsDafRole]
     throttle_classes = [FinanceCreateRateThrottle]
+    # Le COMPTABLE peut créer des journaux payables (enregistrer une dette fournisseur).
+    # paiement et solder restent réservés à admin/DAF.
+    _COMPTABLE_ALLOWED_WRITE_ACTIONS = frozenset({"create"})
 
     def get_queryset(self):
         ent_id = self.request.user.entreprise_id
