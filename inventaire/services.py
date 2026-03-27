@@ -588,13 +588,14 @@ def _noyau_transfert(
             stock_from.quantite -= quantite
             stock_from.save(update_fields=["quantite", "updated_at"])
 
-            # Crédit stock destination (créer si absent)
-            stock_to = Stock.objects.select_for_update().filter(produit=produit, lieu=to_lieu).first()
-            if stock_to is None:
-                Stock.objects.create(produit=produit, lieu=to_lieu, quantite=quantite)
-            else:
-                stock_to.quantite += quantite
-                stock_to.save(update_fields=["quantite", "updated_at"])
+            # Crédit stock destination — get_or_create puis lock sur pk (safe contre race condition)
+            stock_to, _ = Stock.objects.get_or_create(
+                produit=produit, lieu=to_lieu,
+                defaults={"quantite": Decimal("0")},
+            )
+            stock_to = Stock.objects.select_for_update().get(pk=stock_to.pk)
+            stock_to.quantite += quantite
+            stock_to.save(update_fields=["quantite", "updated_at"])
 
     return transfert
 

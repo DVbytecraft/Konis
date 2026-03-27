@@ -233,15 +233,34 @@ export default function MpslTransfertsPage() {
                     value={ligne.quantite}
                     onChange={(e) => updateLigne(i, "quantite", e.target.value)}
                   />
-                  <select
-                    className="h-10 rounded-md border border-input bg-background px-2 text-sm"
-                    value={ligne.unite}
-                    onChange={(e) => updateLigne(i, "unite", e.target.value)}
-                  >
-                    <option value="sacs">sacs</option>
-                    <option value="kg">kg</option>
-                    <option value="tonnes">tonnes</option>
-                  </select>
+                  {(() => {
+                    // Unités disponibles pour ce produit selon le stock réel MPSL
+                    // (miroir de _valider_unite_transfert côté backend)
+                    const lignesProduit = ligne.produit_id
+                      ? produits.filter((p) => String(p.produit_id) === ligne.produit_id)
+                      : [];
+                    const hasSac = lignesProduit.some((p) => p.unite === "sac" || p.unite === "sacs");
+                    const hasKg  = lignesProduit.some((p) => p.unite === "kg");
+                    const opts: [string, string][] =
+                      lignesProduit.length === 0
+                        ? [["sacs", "sacs"], ["kg", "kg"], ["tonnes", "tonnes"]]
+                        : hasSac && hasKg
+                          ? [["sacs", "sacs"], ["kg", "kg"]]
+                          : hasSac
+                            ? [["sacs", "sacs"]]
+                            : [["kg", "kg"], ["tonnes", "tonnes"]];
+                    return (
+                      <select
+                        className="h-10 rounded-md border border-input bg-background px-2 text-sm"
+                        value={ligne.unite}
+                        onChange={(e) => updateLigne(i, "unite", e.target.value)}
+                      >
+                        {opts.map(([val, label]) => (
+                          <option key={val} value={val}>{label}</option>
+                        ))}
+                      </select>
+                    );
+                  })()}
                   {lignes.length > 1 && (
                     <button
                       type="button"
