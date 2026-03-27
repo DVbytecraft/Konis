@@ -678,9 +678,31 @@ def transfert_depuis_mpsl(
                 raise ErreurStock(f"Quantité invalide pour {produit} : {quantite}.")
             # ── Validation unité native du produit ────────────────────────────
             _valider_unite_transfert(produit, unite, from_mpsl)
-            try:
-                stock_src = Stock.objects.select_for_update().get(produit=produit, lieu=from_mpsl)
-            except Stock.DoesNotExist:
+            # Lazy-init du Stock depuis AchatMPSL si absent (achats antérieurs à la
+            # gestion Stock). Pattern safe : get_or_create + select_for_update(pk).
+            stock_src, created = Stock.objects.get_or_create(
+                produit=produit,
+                lieu=from_mpsl,
+                defaults={"quantite": Decimal("0")},
+            )
+            if created:
+                from django.db.models import Sum as _Sum
+                for row in (
+                    AchatMPSL.objects.filter(lieu=from_mpsl, produit_nom__iexact=produit.nom)
+                    .values("unite")
+                    .annotate(total=_Sum("quantite"))
+                ):
+                    u_norm = _normaliser_unite_stock(row["unite"])
+                    qty = Decimal(str(row["total"]))
+                    if u_norm == "sac":
+                        stock_src.quantite += qty
+                    elif u_norm == "kg":
+                        stock_src.quantite_kg += qty
+                    elif u_norm == "tonne":
+                        stock_src.quantite_kg += _kg_depuis_unite(qty, u_norm)
+                stock_src.save(update_fields=["quantite", "quantite_kg", "updated_at"])
+            stock_src = Stock.objects.select_for_update().get(pk=stock_src.pk)
+            if stock_src.quantite == Decimal("0") and stock_src.quantite_kg == Decimal("0"):
                 raise ErreurStock(f"Aucun stock pour '{produit}' à '{from_mpsl}'.")
             _verifier_stock_disponible(stock_src, quantite, unite)
             normalized.append((produit, quantite, unite))
