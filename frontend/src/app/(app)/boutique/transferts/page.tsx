@@ -303,18 +303,32 @@ export default function BoutiqueTransfertsPage() {
                   />
                 </div>
 
-                {/* Unité */}
+                {/* Unité — restreinte à l'unité native du produit (miroir de _valider_unite_transfert) */}
                 <div className="flex flex-col gap-1">
                   <label className="text-xs text-muted-foreground">Unité</label>
-                  <select
-                    className="h-10 rounded-md border border-input bg-background px-2 text-sm"
-                    value={l.unite}
-                    onChange={(e) => setLigne(i, { unite: e.target.value })}
-                  >
-                    <option value="sacs">sacs</option>
-                    <option value="kg">kg</option>
-                    <option value="tonnes">tonnes</option>
-                  </select>
+                  {(() => {
+                    const si = l.produit_id ? stocks.find((s) => s.produit === l.produit_id) : null;
+                    const pu = si ? (si.produit_unite || "kg").toLowerCase() : null;
+                    const hasKgConverti = si ? parseFloat(si.quantite_kg) > 0 : false;
+                    // Unités compatibles selon la règle métier backend
+                    const opts: [string, string][] =
+                      !pu
+                        ? [["sacs", "sacs"], ["kg", "kg"], ["tonnes", "tonnes"]]
+                        : pu === "sac" || pu === "sacs"
+                          ? hasKgConverti ? [["sacs", "sacs"], ["kg", "kg"]] : [["sacs", "sacs"]]
+                          : [["kg", "kg"], ["tonnes", "tonnes"]];
+                    return (
+                      <select
+                        className="h-10 rounded-md border border-input bg-background px-2 text-sm"
+                        value={l.unite}
+                        onChange={(e) => setLigne(i, { unite: e.target.value })}
+                      >
+                        {opts.map(([val, label]) => (
+                          <option key={val} value={val}>{label}</option>
+                        ))}
+                      </select>
+                    );
+                  })()}
                 </div>
               </div>
             </div>
