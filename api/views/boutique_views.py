@@ -65,6 +65,7 @@ class StockBoutiqueViewSet(ModelViewSet):
     serializer_class = StockSerializer
     permission_classes = [IsAuthenticated, IsBoutiqueRole | IsAdminRole]
     http_method_names = ["get", "post", "head", "options"]
+    pagination_class = None  # retourne tout le stock (liste finie, utilisée pour autocomplete)
 
     def get_queryset(self):
         lieu = get_lieu_boutique(self.request)

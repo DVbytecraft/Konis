@@ -237,7 +237,8 @@ class TestIsolationMultiTenant(APITestCase):
         """Le stock de lieu_a n'est pas visible par user_b."""
         r = self.client.get("/api/boutique/stock/", **_jwt(self.user_b))
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        results = r.json().get("results", r.json())
+        data = r.json()
+        results = data.get("results", data) if isinstance(data, dict) else data
         produit_ids = [item["produit"] for item in results]
         self.assertNotIn(self.produit_a.pk, produit_ids)
 

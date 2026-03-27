@@ -87,7 +87,7 @@ export default function BoutiqueTransfertsPage() {
         apiFetch<Destination[]>("/boutique/transferts/destinations/"),
         apiFetch<HistoriqueTransfert[]>("/boutique/transferts/"),
       ]);
-      setStocks(Array.isArray(st) ? st : []);
+      setStocks(Array.isArray(st) ? st : ((st as { results?: StockItem[] }).results ?? []));
       setDests(Array.isArray(dests) ? dests : []);
       setHistorique(Array.isArray(hist) ? hist : []);
     } catch {
@@ -106,9 +106,9 @@ export default function BoutiqueTransfertsPage() {
   const removeLigne = (i: number) => setLignes((prev) => prev.filter((_, idx) => idx !== i));
 
   const selectProduit = (i: number, s: StockItem) => {
-    // Déterminer l'unité par défaut selon le stock
-    const hasPds = s.poids_par_sac && parseFloat(s.poids_par_sac) > 0;
-    const unite = hasPds ? "sacs" : "kg";
+    // Déterminer l'unité par défaut selon l'unité native du produit (cohérent avec le select unité)
+    const pu = (s.produit_unite || "kg").toLowerCase();
+    const unite = (pu === "sac" || pu === "sacs") ? "sacs" : "kg";
     setLigne(i, {
       produit_id: s.produit,
       produit_nom: s.produit_nom,
