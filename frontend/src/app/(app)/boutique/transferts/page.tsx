@@ -9,12 +9,12 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 interface StockItem {
-  produit_id: number;
+  produit: number;        // PK du Produit (champ "produit" dans StockSerializer)
   produit_nom: string;
   quantite: string;       // sacs
   quantite_kg: string;    // kg
   poids_par_sac: string | null;
-  unite: string;
+  produit_unite: string;  // champ "produit_unite" dans StockSerializer
 }
 
 interface Destination {
@@ -59,7 +59,7 @@ function afficherDispo(s: StockItem): string {
     return "0";
   }
   if (kg > 0) return `${kg.toFixed(2)} kg`;
-  if (sacs > 0) return `${sacs} ${s.unite}`;
+  if (sacs > 0) return `${sacs} ${s.produit_unite}`;
   return "0";
 }
 
@@ -110,7 +110,7 @@ export default function BoutiqueTransfertsPage() {
     const hasPds = s.poids_par_sac && parseFloat(s.poids_par_sac) > 0;
     const unite = hasPds ? "sacs" : "kg";
     setLigne(i, {
-      produit_id: s.produit_id,
+      produit_id: s.produit,
       produit_nom: s.produit_nom,
       unite,
       disponible: afficherDispo(s),
@@ -270,7 +270,7 @@ export default function BoutiqueTransfertsPage() {
                       ) : (
                         filteredStocks(i).map((s) => (
                           <li
-                            key={s.produit_id}
+                            key={s.produit}
                             className="px-3 py-1.5 text-xs hover:bg-muted cursor-pointer flex justify-between"
                             onMouseDown={(e) => { e.preventDefault(); selectProduit(i, s); }}
                           >
