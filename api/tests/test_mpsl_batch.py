@@ -458,3 +458,91 @@ class TestBatchValidation(APITestCase):
             **_jwt(self.user),
         )
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# Transfert MPSL — produit catalogué en kg acheté en sacs
+# Régression : _valider_unite_transfert rejetait "sacs" si Produit.unite="kg"
+# même quand stock.quantite > 0 (sacs réels disponibles).
+# ════════════════════════════════════════════════════════════════════════════
+
+TRANSFERT_URL = "/api/mpsl/transferts/"
+
+
+class TestTransfertProduitKgAchetéEnSacs(APITestCase):
+    """
+    Un produit dont l'unité catalogue est 'kg' (ex: Soja torrifié) peut être
+    acheté en sacs au MPSL. Le transfert ultérieur en sacs doit être autorisé.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.ent = _ent("EntTransfert")
+        cls.lieu_mpsl = _lieu_mpsl(cls.ent, "MPSL Central", "MPSLC")
+        cls.lieu_usine = Lieu.objects.create(
+            entreprise=cls.ent, nom="Usine Dest", code="UD", type_lieu=Lieu.TYPE_USINE
+        )
+        cls.user = _user_mpsl(cls.ent, cls.lieu_mpsl, "mpsl_transfert")
+        # Produit catalogué en kg
+        cls.produit = Produit.objects.create(
+            nom="Soja torrifié test", code="SJT", unite="kg",
+            prix_achat=500, prix_vente=600, entreprise=cls.ent, poids_par_sac=50,
+        )
+        # Stock MPSL avec des sacs (achat en sacs malgré unite catalogue = kg)
+        cls.stock = Stock.objects.create(
+            produit=cls.produit, lieu=cls.lieu_mpsl,
+            quantite=40, quantite_kg=0,
+        )
+
+    def _auth(self):
+        return _jwt(self.user)
+
+    def test_transfert_sacs_autorise_quand_stock_sacs_dispo(self):
+        """Transfert en sacs OK si stock.quantite > 0, même si Produit.unite='kg'."""
+        r = self.client.post(
+            TRANSFERT_URL,
+            {
+                "to_lieu": self.lieu_usine.id,
+                "lignes": [
+                    {"produit_id": self.produit.id, "quantite": "10", "unite": "sacs"},
+                ],
+            },
+            format="json",
+            HTTP_IDEMPOTENCY_KEY="test-transf-sac-kg-001",
+            **self._auth(),
+        )
+        self.assertIn(r.status_code, (200, 201), r.json())
+        self.stock.refresh_from_db()
+        self.assertEqual(self.stock.quantite, 30)  # 40 - 10
+
+    def test_transfert_sacs_refuse_si_aucun_sac_en_stock(self):
+        """Transfert en sacs refusé si le stock ne contient aucun sac."""
+        stock_vide = Stock.objects.create(
+            produit=self.produit, lieu=self.lieu_usine,
+            quantite=0, quantite_kg=0,
+        )
+        lieu_autre_mpsl = Lieu.objects.create(
+            entreprise=self.ent, nom="MPSL Vide", code="MPSV", type_lieu=Lieu.TYPE_MPSL
+        )
+        user2 = _user_mpsl(self.ent, lieu_autre_mpsl, "mpsl_transfert2")
+        Stock.objects.create(
+            produit=self.produit, lieu=lieu_autre_mpsl,
+            quantite=0, quantite_kg=100,
+        )
+        lieu_usine2 = Lieu.objects.create(
+            entreprise=self.ent, nom="Usine2", code="U2", type_lieu=Lieu.TYPE_USINE
+        )
+        r = self.client.post(
+            TRANSFERT_URL,
+            {
+                "to_lieu": lieu_usine2.id,
+                "lignes": [
+                    {"produit_id": self.produit.id, "quantite": "5", "unite": "sacs"},
+                ],
+            },
+            format="json",
+            HTTP_IDEMPOTENCY_KEY="test-transf-sac-kg-002",
+            **_jwt(user2),
+        )
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        stock_vide.delete()

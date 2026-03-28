@@ -98,13 +98,17 @@ def _verifier_stock_disponible(stock: Stock, quantite: Decimal, unite: str) -> N
 
 def _valider_unite_transfert(produit, unite: str, lieu) -> None:
     """
-    Valide que l'unité de transfert est compatible avec l'unité native du produit.
+    Valide que l'unité de transfert est compatible avec l'unité native du produit
+    ET avec l'état réel du stock au lieu donné.
 
     Règle métier :
       - Produit enregistré en 'sac' → transfert en sacs uniquement.
         Exception : si le produit a du stock kg converti (quantite_kg > 0), les
         transferts en kg sont autorisés dans la limite de ce stock converti.
-      - Produit enregistré en 'kg'  → transfert en kg ou tonnes uniquement.
+      - Produit enregistré en 'kg'  → transfert en kg ou tonnes par défaut.
+        Exception : si le dépôt dispose de sacs réels (quantite > 0), le transfert
+        en sacs est autorisé — cas typique MPSL où l'achat se fait en sacs même
+        si l'unité catalogue du produit est le kg.
 
     Lève ErreurStock si l'unité demandée est incompatible.
     """
@@ -127,6 +131,20 @@ def _valider_unite_transfert(produit, unite: str, lieu) -> None:
         raise ErreurStock(
             f"'{produit.nom}' est enregistré en sacs. "
             "Convertissez des sacs en kg (via l'interface de conversion) avant de transférer en kg."
+        )
+
+    if produit_unite_native == "kg" and unite_demandee == "sac":
+        # Produit catalogué en kg mais peut être stocké en sacs au dépôt
+        # (achat MPSL en sacs indépendant de l'unité catalogue).
+        # Autorisé uniquement si des sacs sont réellement présents en stock.
+        try:
+            stock = Stock.objects.get(produit=produit, lieu=lieu)
+            if stock.quantite > 0:
+                return
+        except Stock.DoesNotExist:
+            pass
+        raise ErreurStock(
+            f"'{produit.nom}' n'a pas de stock en sacs à ce dépôt."
         )
 
     raise ErreurStock(
