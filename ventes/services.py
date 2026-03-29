@@ -466,6 +466,8 @@ def vente_mouture_seule(
                         quantite_apportee_client=apportee_kg,
                         cout_mouture=cout,
                         montant_total=cout,
+                        montant_cash=cout,      # mouture = toujours cash
+                        montant_credit=Decimal("0"),
                         nombre_sacs=nombre_sacs,
                         poids_par_sac=poids_par_sac,
                         type_mouture=type_mouture,

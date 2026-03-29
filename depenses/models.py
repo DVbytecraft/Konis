@@ -77,7 +77,7 @@ class Depense(models.Model):
         verbose_name_plural = "Dépenses"
         ordering = ["-date"]
         constraints = [
-            CheckConstraint(condition=Q(montant__gte=0), name="depense_montant_positive"),
+            CheckConstraint(condition=Q(montant__gt=0), name="depense_montant_strictement_positif"),
             UniqueConstraint(
                 fields=["entreprise", "idempotency_key"],
                 condition=Q(idempotency_key__isnull=False),

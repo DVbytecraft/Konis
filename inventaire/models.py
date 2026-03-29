@@ -253,6 +253,11 @@ class AchatMPSL(models.Model):
                 condition=Q(poids_par_sac__isnull=True) | Q(poids_par_sac__gt=0),
                 name="achatmpsl_poids_par_sac_positif",
             ),
+            # Règle métier : si achat en sacs, poids_par_sac est obligatoire
+            models.CheckConstraint(
+                condition=~Q(unite="sacs") | Q(poids_par_sac__isnull=False),
+                name="achatmpsl_poids_requis_si_sacs",
+            ),
         ]
         indexes = [
             models.Index(fields=["lieu", "date"], name="achatmpsl_lieu_date_idx"),
