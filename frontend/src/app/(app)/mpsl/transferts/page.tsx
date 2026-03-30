@@ -80,7 +80,9 @@ export default function MpslTransfertsPage() {
     e.preventDefault();
     setErr("");
     if (!toLieu) { setErr("Sélectionne la destination."); return; }
-    const lignesValides = lignes.filter((l) => l.produit_id && Number(l.quantite) > 0);
+    const lignesValides = lignes.filter((l) =>
+      l.produit_id && l.produit_id !== "null" && Number(l.produit_id) > 0 && Number(l.quantite) > 0
+    );
     if (lignesValides.length === 0) { setErr("Au moins une ligne de produit requise."); return; }
 
     setLoading(true);
@@ -196,9 +198,10 @@ export default function MpslTransfertsPage() {
                   : null;
 
                 // Dédupliquer le dropdown par produit_id pour éviter les doublons.
-                // Une même produit peut avoir sac + kg → on n'affiche que son nom une fois.
+                // Exclure les produits sans produit_id (pas encore dans le catalogue)
+                // car ils ne peuvent pas être transférés (pas de Produit FK en base).
                 const seen = new Set<string>();
-                const optionsProduits = produits.filter((p) => {
+                const optionsProduits = produits.filter((p) => p.produit_id !== null).filter((p) => {
                   const k = String(p.produit_id) + "|" + p.produit_nom;
                   if (seen.has(k)) return false;
                   seen.add(k);
