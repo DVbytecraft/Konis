@@ -58,7 +58,7 @@ class TransfertCession(models.Model):
     )
     prix_par_sac = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name="Prix de vente par sac")
     transfert = models.ForeignKey(
-        Transfert, on_delete=models.SET_NULL, null=True, blank=True, related_name="cessions"
+        Transfert, on_delete=models.PROTECT, null=True, blank=True, related_name="cessions"
     )
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -102,7 +102,7 @@ class TransfertInterUsine(models.Model):
         "core.CustomUser", on_delete=models.SET_NULL, null=True, blank=True, related_name="transferts_inter_usine_crees"
     )
     transfert = models.ForeignKey(
-        Transfert, on_delete=models.SET_NULL, null=True, blank=True, related_name="inter_usine_cessions"
+        Transfert, on_delete=models.PROTECT, null=True, blank=True, related_name="inter_usine_cessions"
     )
     created_at = models.DateTimeField(auto_now_add=True)
 

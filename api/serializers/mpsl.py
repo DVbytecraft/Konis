@@ -12,6 +12,16 @@ class AchatMPSLSerializer(serializers.ModelSerializer):
     created_by_username  = serializers.CharField(source="created_by.username",   read_only=True)
     type_paiement_label  = serializers.SerializerMethodField()
     journal_payable_id   = serializers.IntegerField(source="journal_payable.id", read_only=True, default=None)
+    # Acompte réellement enregistré sur le JournalPayable lié.
+    # Pour les achats uniques  : == montant_paye_initial (identiques).
+    # Pour les achats batch    : montant_paye_initial vaut 0 sur chaque ligne
+    #   (fix S5 — évite la duplication × N), mais le vrai acompte versé est ici.
+    # Le frontend doit lire ce champ en priorité sur montant_paye_initial.
+    journal_montant_paye = serializers.DecimalField(
+        source="journal_payable.montant_paye",
+        read_only=True, default=None,
+        max_digits=14, decimal_places=2,
+    )
 
     def get_type_paiement_label(self, obj):
         return obj.get_type_paiement_display()
@@ -28,11 +38,15 @@ class AchatMPSLSerializer(serializers.ModelSerializer):
             "type_paiement", "type_paiement_label",
             "montant_paye_initial",
             "journal_payable_id",
+            "journal_montant_paye",
             "notes",
             "created_by", "created_by_username",
             "date",
         )
-        read_only_fields = ("prix_total", "created_by", "date", "journal_payable_id", "type_paiement_label")
+        read_only_fields = (
+            "prix_total", "created_by", "date",
+            "journal_payable_id", "journal_montant_paye", "type_paiement_label",
+        )
 
 
 def _validate_entier(value, nom_champ):

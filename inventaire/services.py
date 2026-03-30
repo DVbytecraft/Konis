@@ -5,10 +5,11 @@ Transactions atomiques. Historique via Transfert/MouvementStock.
 import logging
 from decimal import Decimal, ROUND_CEILING
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 
 _alert = logging.getLogger("konis.alerts")
 
+from audit.services import audit_log
 from core.models import Lieu
 from inventaire.models import AchatMPSL, AchatUsine, MouvementStock, Stock, Transfert
 from produits.models import Produit
@@ -89,11 +90,7 @@ def _verifier_stock_disponible(stock: Stock, quantite: Decimal, unite: str) -> N
                 f"Stock insuffisant : {kg_total} kg disponible(s), demande {quantite}."
             )
         return
-    if stock.quantite < quantite:
-        raise ErreurStock(
-            f"Stock insuffisant : {stock.quantite} disponible(s), demande {quantite}."
-        )
-    return
+    raise ErreurStock(f"Unité non supportée : '{unite}'.")
 
 
 def _valider_unite_transfert(produit, unite: str, lieu) -> None:
@@ -168,8 +165,6 @@ def _prelever_stock_unite(
     - unite='kg'  : débite les kg ; auto-convertit des sacs si nécessaire
     Retourne un dict avec les détails (kg_pris, sacs_convertis, kg_convertis).
     """
-    from audit.services import audit_log
-
     u = _normaliser_unite_stock(unite)
     qty = Decimal(str(quantite))
     if u == "tonne":
@@ -356,7 +351,21 @@ def enregistrer_achat_mpsl(
             create_kwargs = dict(nom=nom, entreprise_id=lieu.entreprise_id, unite=unite_produit)
             if poids_par_sac is not None:
                 create_kwargs["poids_par_sac"] = poids_par_sac
-            existing = Produit.objects.create(**create_kwargs)
+            try:
+                # SAVEPOINT : si deux requêtes concurrentes passent simultanément
+                # le filter().first() ci-dessus à None et tentent toutes deux un
+                # INSERT, la seconde lèvera IntegrityError (contrainte unique produit).
+                # Le SAVEPOINT isole l'erreur — la transaction parente reste valide.
+                with transaction.atomic():
+                    existing = Produit.objects.create(**create_kwargs)
+            except IntegrityError:
+                # Race condition résolue : récupérer le produit créé par le processus concurrent.
+                existing = Produit.objects.filter(
+                    nom__iexact=nom,
+                    entreprise_id=lieu.entreprise_id,
+                ).first()
+                if existing is None:
+                    raise  # IntegrityError non liée au doublon produit — propager
         elif poids_par_sac is not None and existing.poids_par_sac != poids_par_sac:
             # Refuser si des sacs de l'ancien poids sont encore en stock à ce lieu.
             # Changer poids_par_sac rétroactivement ferait traiter les anciens sacs
@@ -519,7 +528,19 @@ def enregistrer_achats_mpsl_batch(
             create_kwargs = dict(nom=nom, entreprise_id=lieu.entreprise_id, unite=unite_produit)
             if poids_par_sac is not None:
                 create_kwargs["poids_par_sac"] = poids_par_sac
-            existing = Produit.objects.create(**create_kwargs)
+            try:
+                # SAVEPOINT — même protection que enregistrer_achat_mpsl :
+                # isole l'IntegrityError d'un INSERT concurrent sans invalider
+                # la transaction @atomic parente.
+                with transaction.atomic():
+                    existing = Produit.objects.create(**create_kwargs)
+            except IntegrityError:
+                existing = Produit.objects.filter(
+                    nom__iexact=nom,
+                    entreprise_id=lieu.entreprise_id,
+                ).first()
+                if existing is None:
+                    raise
         elif poids_par_sac is not None and existing.poids_par_sac != poids_par_sac:
             # Refuser si des sacs de l'ancien poids sont encore en stock à ce lieu.
             stock_check = Stock.objects.filter(produit=existing, lieu=lieu).first()
@@ -546,9 +567,10 @@ def enregistrer_achats_mpsl_batch(
             prix_unitaire=prix_unitaire,
             prix_total=prix_total_ligne,
             type_paiement=type_paiement,
-            # L'acompte global est enregistré sur CHAQUE ligne pour traçabilité
-            # (le JournalPayable unique en est la source de vérité).
-            montant_paye_initial=acompte if type_paiement == "partiel" else Decimal("0"),
+            # S5 — l'acompte appartient exclusivement au JournalPayable unique
+            # (source de vérité comptable). Stocker `acompte` sur chaque ligne
+            # produirait un total × N_lignes à l'agrégation — bug comptable silencieux.
+            montant_paye_initial=Decimal("0"),
             journal_payable=journal_shared,
             notes=notes,
             created_by=created_by,
@@ -593,9 +615,14 @@ def _noyau_transfert(
       (produit, quantite)
       (produit, quantite, unit_price)
       (produit, quantite, unit_price, production_order)
+
+    Stratégie anti-deadlock :
+      Les lignes sont triées par produit.pk avant l'acquisition des verrous.
+      Toutes les transactions concurrentes acquièrent donc les lignes Stock dans
+      le même ordre → impossibilité de cycle d'attente circulaire.
     """
     with transaction.atomic():
-        # Validation + verrouillage préalable de toutes les lignes
+        # ── Étape 1 : normalisation + validation légère (sans I/O DB) ──────────
         normalized: list[tuple] = []
         for line in lignes:
             produit = line[0]
@@ -608,22 +635,34 @@ def _noyau_transfert(
             if unit_price < 0:
                 raise ErreurStock(f"Prix unitaire invalide pour {produit} : {unit_price}.")
 
-            try:
-                stock = Stock.objects.select_for_update().get(produit=produit, lieu=from_lieu)
-            except Stock.DoesNotExist:
-                raise ErreurStock(f"Aucun stock pour '{produit}' à '{from_lieu}'.")
-
-            if stock.quantite < quantite:
-                raise ErreurStock(
-                    f"Stock insuffisant pour '{produit}' à '{from_lieu}' : "
-                    f"disponible {stock.quantite}, demandé {quantite}."
-                )
             normalized.append((produit, quantite, unit_price, production_order))
 
-        # Création du transfert et application des mouvements
+        # ── Étape 2 : tri par PK produit — ordre de verrouillage déterministe ──
+        # Sans ce tri, deux transactions sur (A, B) et (B, A) s'attendent mutuellement.
+        normalized.sort(key=lambda x: x[0].pk)
+
+        # ── Étape 3 : création du Transfert + boucle unique lock/validate/débit ─
         transfert = Transfert.objects.create(from_lieu=from_lieu, to_lieu=to_lieu)
 
         for produit, quantite, unit_price, production_order in normalized:
+            # SELECT FOR UPDATE une seule fois par ligne :
+            # le verrou est acquis, la quantité validée, et le débit appliqué
+            # dans le même passage — aucun re-SELECT qui doublerait les locks.
+            try:
+                stock_from = Stock.objects.select_for_update().get(produit=produit, lieu=from_lieu)
+            except Stock.DoesNotExist:
+                raise ErreurStock(f"Aucun stock pour '{produit}' à '{from_lieu}'.")
+
+            if stock_from.quantite < quantite:
+                raise ErreurStock(
+                    f"Stock insuffisant pour '{produit}' à '{from_lieu}' : "
+                    f"disponible {stock_from.quantite}, demandé {quantite}."
+                )
+
+            # Débit immédiat sur la ligne verrouillée
+            stock_from.quantite -= quantite
+            stock_from.save(update_fields=["quantite", "updated_at"])
+
             MouvementStock.objects.create(
                 transfert=transfert,
                 produit=produit,
@@ -631,12 +670,8 @@ def _noyau_transfert(
                 unit_price=unit_price,
                 production_order=production_order,
             )
-            # Débit stock source
-            stock_from = Stock.objects.select_for_update().get(produit=produit, lieu=from_lieu)
-            stock_from.quantite -= quantite
-            stock_from.save(update_fields=["quantite", "updated_at"])
 
-            # Crédit stock destination — get_or_create puis lock sur pk (safe contre race condition)
+            # Crédit destination — get_or_create sans verrou, puis lock sur pk connu
             stock_to, _ = Stock.objects.get_or_create(
                 produit=produit, lieu=to_lieu,
                 defaults={"quantite": Decimal("0")},
@@ -648,7 +683,7 @@ def _noyau_transfert(
     return transfert
 
 
-# ─── Transferts usine (existants) ─────────────────────────────────────────────
+# ─── Transferts usine ─────────────────────────────────────────────────────────
 
 def _executer_transfert(
     from_lieu: Lieu,
@@ -657,8 +692,9 @@ def _executer_transfert(
     type_destination: str,
 ) -> Transfert:
     """
-    Noyau commun des transferts de stock (usine→boutique et usine→usine).
-    Conservé pour compatibilité avec usine/services.py.
+    Couche de validation métier pour les transferts depuis une usine.
+    Vérifie les types de lieux, l'isolation tenant, et délègue à _noyau_transfert.
+    Appelé par transfert_usine_vers_boutique() et transfert_entre_usines().
     """
     if from_lieu.type_lieu != Lieu.TYPE_USINE:
         raise ErreurStock(f"Le lieu d'origine '{from_lieu}' n'est pas une usine.")

@@ -23,6 +23,7 @@ interface AchatRow {
   montant_paye_initial: string;
   fournisseur_nom?: string | null;
   journal_payable_id?: number | null;
+  journal_montant_paye?: string | null;
 }
 
 interface Fournisseur {
@@ -601,9 +602,9 @@ export default function MpslAchatsPage() {
                       <span className={cn("inline-block rounded-full px-2 py-0.5 text-xs font-semibold", BADGE[tp])}>
                         {r.type_paiement_label || tp}
                       </span>
-                      {tp === "partiel" && Number(r.montant_paye_initial) > 0 && (
+                      {tp === "partiel" && Number(r.journal_montant_paye ?? r.montant_paye_initial) > 0 && (
                         <span className="text-xs text-muted-foreground ml-1">
-                          (versé : {fmt(Number(r.montant_paye_initial))} F)
+                          (versé : {fmt(Number(r.journal_montant_paye ?? r.montant_paye_initial))} F)
                         </span>
                       )}
                       {r.journal_payable_id && (

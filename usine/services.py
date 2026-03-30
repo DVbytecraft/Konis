@@ -46,18 +46,22 @@ def creer_lot_production(
             unite_poids=unite_poids,
             created_by=created_by,
         )
-        # Crediter le stock produit fini a l'usine.
-        # get_or_create d'abord (sans lock), puis SELECT FOR UPDATE sur pk existant.
-        # select_for_update().get_or_create() est unsafe : le INSERT interne
-        # ignore le lock et provoque des deadlocks sous charge.
-        stock_fini, _ = Stock.objects.get_or_create(
+        # Créditer le stock produit fini à l'usine.
+        # Étape 1 — get_or_create SANS verrou : crée la ligne si absente.
+        #   select_for_update().get_or_create() est unsafe car le INSERT interne
+        #   ignore le verrou et provoque des deadlocks sous charge.
+        # Étape 2 — SELECT FOR UPDATE sur le PK connu : relit la valeur depuis
+        #   la DB avec un verrou exclusif. L'objet retourné par get_or_create
+        #   n'est PAS utilisé pour la mise à jour (valeur potentiellement stale).
+        #   Seul stock_locked porte la valeur fraîche et atomiquement sécurisée.
+        stock_row, _ = Stock.objects.get_or_create(
             produit=produit_fini,
             lieu=lieu_usine,
             defaults={"quantite": Decimal("0")},
         )
-        stock_fini = Stock.objects.select_for_update().get(pk=stock_fini.pk)
-        stock_fini.quantite += quantite_sacs
-        stock_fini.save(update_fields=["quantite", "updated_at"])
+        stock_locked = Stock.objects.select_for_update().get(pk=stock_row.pk)
+        stock_locked.quantite += quantite_sacs
+        stock_locked.save(update_fields=["quantite", "updated_at"])
 
     return lot
 

@@ -263,30 +263,30 @@ def vente_boutique(
 ) -> tuple[Ticket, bool]:
     """
     Enregistre une vente en boutique (ticket + lignes + mouture optionnelle).
-    Transaction atomique. Num??ro de ticket g??n??r?? automatiquement.
-    L??ve ErreurStock si stock insuffisant.
+    Transaction atomique. Numéro de ticket généré automatiquement.
+    Lève ErreurStock si stock insuffisant.
 
     Retourne (ticket, created) :
-      created=False si un ticket existant avec la m??me cl?? idempotency a ??t?? renvoy??.
+      created=False si un ticket existant avec la même clé idempotency a été renvoyé.
 
     lignes          : liste de (produit, quantite, prix_unitaire, unite?)
     mouture         : True si le client demande la mouture
-    prix_mouture_kg : prix FCFA/kg (toutes unit??s normalis??es en kg avant calcul)
-    quantite_apportee_client_kg : grain suppl??mentaire apport?? par le client (d??j?? en kg)
-    idempotency_key : cl?? de d??duplication (header Idempotency-Key du client)
+    prix_mouture_kg : prix FCFA/kg (toutes unités normalisées en kg avant calcul)
+    quantite_apportee_client_kg : grain supplémentaire apporté par le client (déjà en kg)
+    idempotency_key : clé de déduplication (header Idempotency-Key du client)
     type_vente      : 'cash' | 'credit' | 'partiel'
     montant_cash    : acompte si type_vente='partiel' (None = montant total si cash)
     client          : ClientFinance requis si credit ou partiel
     created_by      : CustomUser pour l'audit JournalCreance
     """
-    # ?????? Validation type_vente ????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+    # ── Validation type_vente ────────────────────────────────────────────────
     if type_vente not in (Ticket.TYPE_CASH, Ticket.TYPE_CREDIT, Ticket.TYPE_PARTIEL):
         raise ErreurStock(f"type_vente invalide : '{type_vente}'.")
     if type_vente in (Ticket.TYPE_CREDIT, Ticket.TYPE_PARTIEL) and client is None:
-        raise ErreurStock("Un client est requis pour une vente ?? cr??dit ou partielle.")
+        raise ErreurStock("Un client est requis pour une vente à crédit ou partielle.")
     if type_vente == Ticket.TYPE_PARTIEL:
         if montant_cash is None or montant_cash < Decimal("0"):
-            raise ErreurStock("montant_cash (acompte) est requis et doit ??tre >= 0 pour une vente partielle.")
+            raise ErreurStock("montant_cash (acompte) est requis et doit être >= 0 pour une vente partielle.")
 
     key = (idempotency_key or "").strip() or None
     if lieu.type_lieu != Lieu.TYPE_MAGASIN:
@@ -305,18 +305,18 @@ def vente_boutique(
             if existing is not None:
                 return existing, False
 
-        # Verrouiller et v??rifier les stocks
+        # Verrouiller et vérifier les stocks
         for line in lignes:
             produit, quantite = line[0], line[1]
             unite_ligne = line[3] if len(line) > 3 and line[3] else (produit.unite or "kg")
             if quantite <= 0:
-                raise ErreurStock(f"Quantit?? invalide pour {produit}: {quantite}")
+                raise ErreurStock(f"Quantité invalide pour {produit}: {quantite}")
             try:
                 stock = Stock.objects.select_for_update().get(
                     produit=produit, lieu=lieu
                 )
             except Stock.DoesNotExist:
-                raise ErreurStock(f"Pas de stock pour {produit} ?? {lieu}.")
+                raise ErreurStock(f"Pas de stock pour {produit} à {lieu}.")
             _verifier_stock_disponible(stock, quantite, unite_ligne)
 
         montant_produits, cout_mouture, montant_total = _compute_boutique_totals(
@@ -326,7 +326,7 @@ def vente_boutique(
             quantite_apportee_client_kg=quantite_apportee_client_kg,
         )
 
-        # ?????? Calculer r??partition cash / cr??dit ??????????????????????????????????????????????????????????????????????????????????????????
+        # ── Calculer répartition cash / crédit ──────────────────────────────
         if type_vente == Ticket.TYPE_CASH:
             m_cash   = montant_total
             m_credit = Decimal("0")
@@ -338,7 +338,7 @@ def vente_boutique(
             m_credit = montant_total - m_cash
             if m_credit < Decimal("0"):
                 raise ErreurStock(
-                    f"L'acompte ({m_cash}) d??passe le montant total ({montant_total})."
+                    f"L'acompte ({m_cash}) dépasse le montant total ({montant_total})."
                 )
 
         ticket = None
@@ -396,7 +396,7 @@ def vente_boutique(
                 updated_by=created_by,
             )
 
-        # ?????? Auto-cr??er JournalCreance si cr??dit ou partiel ??????????????????????????????????????????????????????
+        # ── Auto-créer JournalCreance si crédit ou partiel ──────────────────
         if type_vente in (Ticket.TYPE_CREDIT, Ticket.TYPE_PARTIEL) and m_credit > Decimal("0"):
             _creer_journal_creance_pour_ticket(ticket, m_credit, created_by)
 

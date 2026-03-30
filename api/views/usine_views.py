@@ -4,6 +4,7 @@ Isolation stricte par lieu usine.
 """
 from decimal import Decimal
 
+from django.db import IntegrityError, transaction
 from django.db.models import Count, DecimalField, ExpressionWrapper, F, Sum
 from rest_framework import status
 from rest_framework.pagination import PageNumberPagination
@@ -185,7 +186,7 @@ class TransfertCessionUsineViewSet(ModelViewSet):
             return early
 
         data = request.data
-        ser = TransfertCessionCreateSerializer(data=data)
+        ser = TransfertCessionCreateSerializer(data=data, context={"request": request})
         ser.is_valid(raise_exception=True)
         d = ser.validated_data
         lot = d["lot"]
@@ -194,9 +195,11 @@ class TransfertCessionUsineViewSet(ModelViewSet):
         if request.user.role == CustomUser.ROLE_USINE and request.user.lieu_id != lot.lieu_usine_id:
             return Response({"detail": "Acces limite a votre usine."}, status=status.HTTP_403_FORBIDDEN)
         if lot.lieu_usine.entreprise_id != d["boutique"].entreprise_id:
+            # 403 et non 400 : c'est une violation d'autorisation (tentative
+            # d'accès cross-tenant), pas une erreur de format de requête.
             return Response(
                 {"detail": "Transfert inter-entreprises interdit."},
-                status=status.HTTP_400_BAD_REQUEST,
+                status=status.HTTP_403_FORBIDDEN,
             )
         try:
             cession = transferer_lot_vers_boutique(
@@ -247,7 +250,7 @@ class TransfertInterUsineViewSet(ModelViewSet):
             return early
 
         data = request.data
-        ser = TransfertInterUsineCreateSerializer(data=data)
+        ser = TransfertInterUsineCreateSerializer(data=data, context={"request": request})
         ser.is_valid(raise_exception=True)
         d = ser.validated_data
         lot = d["lot"]
@@ -256,9 +259,10 @@ class TransfertInterUsineViewSet(ModelViewSet):
         if request.user.role == CustomUser.ROLE_USINE and request.user.lieu_id != lot.lieu_usine_id:
             return Response({"detail": "Acces limite a votre usine."}, status=status.HTTP_403_FORBIDDEN)
         if lot.lieu_usine.entreprise_id != d["usine_destination"].entreprise_id:
+            # 403 et non 400 : violation d'autorisation cross-tenant.
             return Response(
                 {"detail": "Transfert inter-entreprises interdit."},
-                status=status.HTTP_400_BAD_REQUEST,
+                status=status.HTTP_403_FORBIDDEN,
             )
         try:
             inter = transferer_lot_vers_usine(
@@ -327,14 +331,30 @@ class FactoryFinishedProductsCatalogView(APIView):
             return Response({"detail": "Le nom est requis."}, status=status.HTTP_400_BAD_REQUEST)
         if code and Produit.objects.filter(entreprise=entreprise, code=code).exists():
             return Response({"detail": "Ce code existe deja."}, status=status.HTTP_400_BAD_REQUEST)
-        cat, _ = Categorie.objects.get_or_create(
-            nom="Produits finis",
-            entreprise=entreprise,
-        )
-        p = Produit.objects.create(
-            entreprise=entreprise, nom=name, code=code, unite=unit,
-            categorie=cat, category=Produit.CATEGORY_FINISHED
-        )
+        with transaction.atomic():
+            cat, _ = Categorie.objects.get_or_create(
+                nom="Produits finis",
+                entreprise=entreprise,
+            )
+            try:
+                with transaction.atomic():  # SAVEPOINT — isole l'IntegrityError
+                    p = Produit.objects.create(
+                        entreprise=entreprise, nom=name, code=code, unite=unit,
+                        categorie=cat, category=Produit.CATEGORY_FINISHED
+                    )
+            except IntegrityError:
+                return Response(
+                    {"detail": "Ce code existe déjà (concurrence)."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            audit_log(
+                user=request.user,
+                action="creation_produit_catalogue",
+                object_type="Produit",
+                object_id=p.id,
+                extra={"nom": name, "entreprise": entreprise.nom, "category": Produit.CATEGORY_FINISHED},
+                request=request,
+            )
         return Response(
             {"id": p.id, "name": p.nom, "code": p.code or "", "unit": p.unite},
             status=status.HTTP_201_CREATED,
@@ -410,39 +430,53 @@ class FactoryDashboardView(APIView):
 
 # --- Rapports comptables --------------------------------------------------
 
+def _profit_by_lot_data(request) -> list:
+    """
+    Logique commune du rapport bénéfices par lot de production.
+    Isolée ici pour être appelée par ProfitByLotReportView ET
+    RapportBeneficesUsineView sans que l'une instancie l'autre
+    (anti-pattern : instancier une APIView sans contexte DRF complet
+    contourne le throttling, la négociation de rendu et la gestion
+    des exceptions de la vue appelée).
+    """
+    _montant_expr = ExpressionWrapper(
+        F("cessions__quantite_sacs") * F("cessions__prix_par_sac"),
+        output_field=DecimalField(max_digits=14, decimal_places=2),
+    )
+    qs = (
+        LotProduction.objects
+        .select_related("lieu_usine", "produit_fini")
+        .annotate(
+            total_cessions_sacs=Sum("cessions__quantite_sacs"),
+            total_montant_cessions=Sum(_montant_expr),
+        )
+    )
+    # Isolation systématique : tout utilisateur lié à une entreprise
+    # ne voit que les lots de son entreprise.
+    # Seul un SUPREME_ADMIN sans entreprise_id peut voir l'ensemble.
+    if request.user.entreprise_id:
+        qs = qs.filter(lieu_usine__entreprise_id=request.user.entreprise_id)
+    return [
+        {
+            "lot_id": lot.id,
+            "nom_lot": lot.nom_lot,
+            "produit_fini": lot.produit_fini.nom,
+            "lieu_usine": lot.lieu_usine.nom,
+            "quantite_sacs": str(lot.quantite_sacs),
+            "sacs_transferes": str(lot.total_cessions_sacs or Decimal("0")),
+            "montant_cessions": str(lot.total_montant_cessions or Decimal("0")),
+            "created_at": lot.created_at.isoformat(),
+        }
+        for lot in qs
+    ]
+
+
 class ProfitByLotReportView(APIView):
     """GET /api/reports/profit-by-lot/"""
     permission_classes = [IsAuthenticated, IsComptableRole]
 
     def get(self, request):
-        _montant_expr = ExpressionWrapper(
-            F("cessions__quantite_sacs") * F("cessions__prix_par_sac"),
-            output_field=DecimalField(max_digits=14, decimal_places=2),
-        )
-        qs = (
-            LotProduction.objects
-            .select_related("lieu_usine", "produit_fini")
-            .annotate(
-                total_cessions_sacs=Sum("cessions__quantite_sacs"),
-                total_montant_cessions=Sum(_montant_expr),
-            )
-        )
-        if request.user.role == CustomUser.ROLE_COMPTABLE and request.user.entreprise_id:
-            qs = qs.filter(lieu_usine__entreprise_id=request.user.entreprise_id)
-        data = [
-            {
-                "lot_id": lot.id,
-                "nom_lot": lot.nom_lot,
-                "produit_fini": lot.produit_fini.nom,
-                "lieu_usine": lot.lieu_usine.nom,
-                "quantite_sacs": str(lot.quantite_sacs),
-                "sacs_transferes": str(lot.total_cessions_sacs or Decimal("0")),
-                "montant_cessions": str(lot.total_montant_cessions or Decimal("0")),
-                "created_at": lot.created_at.isoformat(),
-            }
-            for lot in qs
-        ]
-        return Response(data)
+        return Response(_profit_by_lot_data(request))
 
 
 class ProfitByPeriodReportView(APIView):
@@ -461,7 +495,10 @@ class ProfitByPeriodReportView(APIView):
             )
             .order_by("lieu", "produit")
         )
-        if request.user.role == CustomUser.ROLE_COMPTABLE and request.user.entreprise_id:
+        # Isolation systématique : double filtre sur usine source ET boutique
+        # destination pour empêcher toute fuite cross-tenant.
+        # Seul un SUPREME_ADMIN sans entreprise_id peut voir l'ensemble.
+        if request.user.entreprise_id:
             qs = qs.filter(
                 lot__lieu_usine__entreprise_id=request.user.entreprise_id,
                 boutique__entreprise_id=request.user.entreprise_id,
@@ -474,7 +511,9 @@ class RapportBeneficesUsineView(APIView):
     permission_classes = [IsAuthenticated, IsComptableRole]
 
     def get(self, request):
-        return ProfitByLotReportView().get(request)
+        # Contexte DRF complet propre à cette vue (throttling, renderers,
+        # gestion des exceptions). La logique est dans _profit_by_lot_data().
+        return Response(_profit_by_lot_data(request))
 
 
 # --- Stock usine ----------------------------------------------------------
@@ -594,14 +633,30 @@ class FactoryRawMaterialsCatalogView(APIView):
             return Response({"detail": "Le nom est requis."}, status=status.HTTP_400_BAD_REQUEST)
         if code and Produit.objects.filter(entreprise=entreprise, code=code).exists():
             return Response({"detail": "Ce code existe deja."}, status=status.HTTP_400_BAD_REQUEST)
-        cat, _ = Categorie.objects.get_or_create(
-            nom="Matières premières",
-            entreprise=entreprise,
-        )
-        p = Produit.objects.create(
-            entreprise=entreprise, nom=name, code=code, unite=unit,
-            categorie=cat, category=Produit.CATEGORY_RAW_MATERIAL
-        )
+        with transaction.atomic():
+            cat, _ = Categorie.objects.get_or_create(
+                nom="Matières premières",
+                entreprise=entreprise,
+            )
+            try:
+                with transaction.atomic():  # SAVEPOINT — isole l'IntegrityError
+                    p = Produit.objects.create(
+                        entreprise=entreprise, nom=name, code=code, unite=unit,
+                        categorie=cat, category=Produit.CATEGORY_RAW_MATERIAL
+                    )
+            except IntegrityError:
+                return Response(
+                    {"detail": "Ce code existe déjà (concurrence)."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            audit_log(
+                user=request.user,
+                action="creation_produit_catalogue",
+                object_type="Produit",
+                object_id=p.id,
+                extra={"nom": name, "entreprise": entreprise.nom, "category": Produit.CATEGORY_RAW_MATERIAL},
+                request=request,
+            )
         return Response(
             {"id": p.id, "name": p.nom, "code": p.code or "", "unit": p.unite},
             status=status.HTTP_201_CREATED,
@@ -625,18 +680,71 @@ class FactoryMovementsJournalView(APIView):
                 })
             return Response({"detail": "Lieu usine introuvable."}, status=status.HTTP_404_NOT_FOUND)
 
-        # Recuperer les mouvements de stock pour l'usine
-        from inventaire.models import MouvementStock, Transfert
-
-        start_date = request.query_params.get("start_date")
-        end_date = request.query_params.get("end_date")
         product_id = request.query_params.get("product_id")
 
-        # Entrees: achats et productions
+        # Résoudre le produit en amont, une seule requête, scopée à l'entreprise
+        # du lieu pour garantir l'isolation cross-tenant.
+        # Si le product_id est fourni mais introuvable/hors-entreprise → réponse vide
+        # (pas de fuite d'information par message d'erreur explicite).
+        produit_filtre = None
+        if product_id:
+            try:
+                produit_filtre = Produit.objects.get(pk=product_id, entreprise=lieu.entreprise)
+            except Produit.DoesNotExist:
+                return Response({
+                    "entries": [],
+                    "exits": [],
+                    "totals": {"entries_value": "0", "exits_value": "0", "net_value": "0"},
+                })
+
+        # --- Entrées : achats matières premières ---
+        # Filtre date appliqué au niveau queryset (field="date" est le champ du modèle AchatUsine).
+        achats_qs = AchatUsine.objects.filter(lieu=lieu).select_related("created_by")
+        achats_qs = filter_by_date(achats_qs, request, field="date")
+        if produit_filtre:
+            # AchatUsine stocke le nom libre ; on filtre sur le nom normalisé du produit résolu.
+            achats_qs = achats_qs.filter(produit_nom__iexact=produit_filtre.nom)
+
+        # --- Entrées : lots de production ---
+        # Filtre date appliqué sur created_at (DateTimeField).
+        lots_qs = (
+            LotProduction.objects
+            .filter(lieu_usine=lieu)
+            .select_related("produit_fini", "created_by")
+        )
+        lots_qs = filter_by_date(lots_qs, request, field="created_at")
+        if produit_filtre:
+            lots_qs = lots_qs.filter(produit_fini=produit_filtre)
+
+        # --- Sorties : cessions vers boutiques ---
+        cessions_qs = (
+            TransfertCession.objects
+            .filter(lot__lieu_usine=lieu)
+            .select_related("lot__produit_fini", "boutique")
+        )
+        cessions_qs = filter_by_date(cessions_qs, request, field="created_at")
+        if produit_filtre:
+            cessions_qs = cessions_qs.filter(lot__produit_fini=produit_filtre)
+
+        # --- Totaux via agrégation DB (avant limitation de la liste d'affichage) ---
+        # Les totaux portent sur l'intégralité des entrées/sorties filtrées,
+        # indépendamment du nombre de lignes retournées dans entries/exits.
+        achats_total = achats_qs.aggregate(t=Sum("prix_total"))["t"] or Decimal("0")
+        _cession_montant = ExpressionWrapper(
+            F("quantite_sacs") * F("prix_par_sac"),
+            output_field=DecimalField(max_digits=14, decimal_places=2),
+        )
+        cessions_total = cessions_qs.aggregate(t=Sum(_cession_montant))["t"] or Decimal("0")
+
+        # --- Limite d'affichage (protection payload illimité) ---
+        _MAX = 500
+        achats_qs  = achats_qs.order_by("-date")[:_MAX]
+        lots_qs    = lots_qs.order_by("-created_at")[:_MAX]
+        cessions_qs = cessions_qs.order_by("-created_at")[:_MAX]
+
+        # Sérialisation après application complète des filtres DB
         entries = []
-        # Achats
-        achats = AchatUsine.objects.filter(lieu=lieu).select_related("created_by")
-        for a in achats:
+        for a in achats_qs:
             entries.append({
                 "id": f"achat-{a.id}",
                 "date": a.date.isoformat(),
@@ -648,10 +756,7 @@ class FactoryMovementsJournalView(APIView):
                 "amount": str(a.prix_total),
                 "reference": f"Achat #{a.id}",
             })
-
-        # Productions (stock credite)
-        lots = LotProduction.objects.filter(lieu_usine=lieu).select_related("produit_fini", "created_by")
-        for lot in lots:
+        for lot in lots_qs:
             entries.append({
                 "id": f"production-{lot.id}",
                 "date": lot.created_at.isoformat(),
@@ -664,10 +769,8 @@ class FactoryMovementsJournalView(APIView):
                 "reference": lot.nom_lot,
             })
 
-        # Sorties: transferts vers boutiques
         exits = []
-        cessions = TransfertCession.objects.filter(lot__lieu_usine=lieu).select_related("lot__produit_fini", "boutique")
-        for c in cessions:
+        for c in cessions_qs:
             exits.append({
                 "id": f"cession-{c.id}",
                 "date": c.created_at.isoformat(),
@@ -680,34 +783,13 @@ class FactoryMovementsJournalView(APIView):
                 "reference": f"{c.lot.nom_lot} → {c.boutique.nom}",
             })
 
-        # Filtrer par date si specifie
-        if start_date:
-            entries = [e for e in entries if e["date"] >= start_date]
-            exits = [e for e in exits if e["date"] >= start_date]
-        if end_date:
-            entries = [e for e in entries if e["date"] <= end_date]
-            exits = [e for e in exits if e["date"] <= end_date]
-
-        # Filtrer par produit si specifie (scoped à l'entreprise du lieu)
-        if product_id:
-            try:
-                produit = Produit.objects.get(pk=product_id, entreprise=lieu.entreprise)
-                entries = [e for e in entries if e["product_name"] == produit.nom]
-                exits = [e for e in exits if e["product_name"] == produit.nom]
-            except Produit.DoesNotExist:
-                pass
-
-        # Calculer les totaux
-        entries_value = sum(Decimal(e["amount"]) for e in entries)
-        exits_value = sum(Decimal(e["amount"]) for e in exits)
-
         return Response({
             "entries": entries,
             "exits": exits,
             "totals": {
-                "entries_value": str(entries_value),
-                "exits_value": str(exits_value),
-                "net_value": str(entries_value - exits_value),
+                "entries_value": str(achats_total),
+                "exits_value": str(cessions_total),
+                "net_value": str(achats_total - cessions_total),
             },
         })
 
