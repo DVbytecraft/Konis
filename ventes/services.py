@@ -80,11 +80,13 @@ def _compute_boutique_totals(
     """
     Source unique de vérité pour les totaux d'une vente boutique.
 
-    Formule unifiée (mouture=True) :
-        qty_produits_kg  = Σ normaliser_quantite_en_kg(ligne.quantite, produit.unite, produit)
-        total_mouture_kg = qty_produits_kg + quantite_apportee_client_kg
-        cout_mouture     = calculer_cout_mouture(total_mouture_kg, prix_mouture_kg)
-        montant_total    = montant_produits + cout_mouture
+    Formule mouture (mouture=True) :
+        Si quantite_apportee_client_kg > 0 (poids total saisi manuellement) :
+            total_mouture_kg = quantite_apportee_client_kg   ← prime sur tout
+        Sinon (calcul automatique depuis les lignes) :
+            total_mouture_kg = Σ normaliser_quantite_en_kg(ligne)
+        cout_mouture = calculer_cout_mouture(total_mouture_kg, prix_mouture_kg)
+        montant_total = montant_produits + cout_mouture
 
     Retourne (montant_produits, cout_mouture, montant_total).
     """
@@ -102,16 +104,19 @@ def _compute_boutique_totals(
             "Toutes les unités sont normalisées en kg avant calcul."
         )
 
-    # Normaliser toutes les lignes produits en kg
-    qty_produits_kg = Decimal("0")
-    for line in lignes:
-        produit, quantite, _ = line[0], line[1], line[2]
-        unite_ligne = line[3] if len(line) > 3 and line[3] else (produit.unite or "kg")
-        qty_produits_kg += normaliser_quantite_en_kg(
-            quantite, unite_ligne, produit
-        )
+    if quantite_apportee_client_kg > Decimal("0"):
+        # Poids total saisi manuellement — il est le seul pris en compte.
+        total_mouture_kg = quantite_apportee_client_kg
+    else:
+        # Calcul automatique : normaliser chaque ligne produit en kg.
+        total_mouture_kg = Decimal("0")
+        for line in lignes:
+            produit, quantite, _ = line[0], line[1], line[2]
+            unite_ligne = line[3] if len(line) > 3 and line[3] else (produit.unite or "kg")
+            total_mouture_kg += normaliser_quantite_en_kg(
+                quantite, unite_ligne, produit
+            )
 
-    total_mouture_kg = qty_produits_kg + quantite_apportee_client_kg
     cout_mouture = calculer_cout_mouture(total_mouture_kg, prix_mouture_kg)
 
     return montant_produits, cout_mouture, montant_produits + cout_mouture
