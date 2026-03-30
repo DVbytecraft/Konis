@@ -156,16 +156,6 @@ class Ticket(models.Model):
                 condition=Q(poids_par_sac__isnull=True) | Q(poids_par_sac__gt=0),
                 name="ticket_poids_par_sac_positif",
             ),
-            # Règle métier : si mouture=True, le type doit être renseigné
-            CheckConstraint(
-                condition=Q(mouture=False) | Q(type_mouture__isnull=False),
-                name="ticket_type_mouture_requis_si_mouture",
-            ),
-            # Règle métier : cash + credit = total (enforced aussi par service)
-            CheckConstraint(
-                condition=Q(montant_total=models.F("montant_cash") + models.F("montant_credit")),
-                name="ticket_cash_plus_credit_egal_total",
-            ),
         ]
         indexes = [
             models.Index(fields=["lieu", "date"]),
